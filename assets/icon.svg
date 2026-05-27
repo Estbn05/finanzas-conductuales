@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Finanzas Conductuales">
+  <rect width="128" height="128" rx="20" fill="#156f69"/>
+  <path d="M25 82c10-25 24-38 42-38 17 0 29 10 36 31" fill="none" stroke="#f8d16a" stroke-width="10" stroke-linecap="round"/>
+  <path d="M37 77h53" stroke="#f5f1e8" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="42" cy="47" r="10" fill="#f07167"/>
+  <circle cx="87" cy="47" r="10" fill="#f5f1e8"/>
+  <path d="M64 27v74" stroke="#f5f1e8" stroke-width="7" stroke-linecap="round" opacity=".78"/>
+</svg>

@@ -1,0 +1,22 @@
+{
+  "name": "finanzas-conductuales",
+  "version": "0.1.0",
+  "description": "Aplicacion personal de finanzas basada en principios de economia conductual.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check app.js && node --check finance-core.js && node --check server.mjs && node --check tests/finance-core.test.mjs && node --check tests/pwa.test.mjs",
+    "test": "node --test",
+    "verify": "npm run check && npm test"
+  },
+  "keywords": [
+    "personal-finance",
+    "behavioral-economics",
+    "budgeting",
+    "portfolio",
+    "pwa"
+  ],
+  "author": "",
+  "license": "MIT"
+}
