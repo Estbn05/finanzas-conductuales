@@ -17,7 +17,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
 test("service worker caches the app shell needed for offline launch", async () => {
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
-  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v2"/);
+  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v3"/);
   assert.ok(worker.includes('"./index.html"'));
   assert.ok(worker.includes('"./app.js"'));
   assert.ok(worker.includes('"./finance-core.js"'));

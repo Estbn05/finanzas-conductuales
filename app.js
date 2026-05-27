@@ -15,12 +15,12 @@ const STORAGE_KEY = "finanzas-conductuales:v1";
 const TODAY = todayKey();
 
 const NAV_ITEMS = [
-  { id: "today", label: "Hoy", icon: "01" },
-  { id: "budget", label: "Presupuesto", icon: "02" },
+  { id: "today", label: "Inicio", icon: "01" },
+  { id: "budget", label: "Plan", icon: "02" },
   { id: "debt", label: "Deudas", icon: "03" },
   { id: "savings", label: "Ahorro", icon: "04" },
-  { id: "spending", label: "Gastos", icon: "05" },
-  { id: "profile", label: "Perfil", icon: "06" }
+  { id: "spending", label: "Registrar", icon: "05" },
+  { id: "profile", label: "Datos", icon: "06" }
 ];
 
 const app = document.querySelector("#app");
@@ -42,7 +42,7 @@ function createDefaultState() {
   return {
     activeView: "today",
     showDiagnosis: false,
-    lastAlert: "Tienes 3 movimientos esperando etiqueta. El ritual diario toma menos de 5 minutos.",
+    lastAlert: "Estas viendo datos de ejemplo. Usa Mis datos para poner tus numeros reales.",
     profile: {
       completed: false,
       name: "Tu plan",
@@ -180,7 +180,7 @@ function render() {
         <span class="brand-mark">FC</span>
         <span>
           <strong>Finanzas Conductuales</strong>
-          <small>Ritual, ahorro y deuda</small>
+          <small>Tu dinero en 5 minutos</small>
         </span>
       </a>
       <nav class="nav-list" aria-label="Secciones principales">
@@ -222,19 +222,19 @@ function renderHeader(plan) {
   return `
     <header class="topbar">
       <div>
-        <p class="eyebrow">${state.profile.completed ? "Plan personal activo" : "Modo demo listo para personalizar"}</p>
+        <p class="eyebrow">${state.profile.completed ? "Datos reales activos" : "Datos de ejemplo"}</p>
         <h1>${headerTitle()}</h1>
       </div>
       <div class="topbar-actions">
         <span class="status-pill">
           <strong>${streak}</strong>
-          dias de ritual
+          revisiones
         </span>
         <span class="status-pill">
           <strong>${formatMoney(remaining)}</strong>
-          disponible
+          para gastar
         </span>
-        <button class="btn primary" type="button" data-action="open-diagnosis">Diagnostico</button>
+        <button class="btn primary" type="button" data-action="open-diagnosis">Mis datos</button>
       </div>
     </header>
   `;
@@ -254,14 +254,82 @@ function renderView(plan) {
 
 function headerTitle() {
   const titles = {
-    today: "Ritual diario",
-    budget: "Presupuesto 1/3",
-    debt: "Snowball de deudas",
-    savings: "Ahorro automatico",
-    spending: "Conciencia de gasto",
-    profile: "Diagnostico conductual"
+    today: "Inicio",
+    budget: "Plan mensual",
+    debt: "Salir de deudas",
+    savings: "Fondo de emergencia",
+    spending: "Registrar gasto",
+    profile: "Mis datos"
   };
   return titles[state.activeView] || "Finanzas Conductuales";
+}
+
+function getPrimaryAction(plan, unlabeled, checkinDone) {
+  if (!state.profile.completed) {
+    return {
+      title: "Pon tus datos reales",
+      copy: "La app esta usando un ejemplo. Con tus ingresos, deudas y ahorro cambia todo el plan.",
+      badge: "Primer paso",
+      button: "Empezar",
+      action: "open-diagnosis"
+    };
+  }
+
+  if (unlabeled.length) {
+    return {
+      title: `Clasifica ${unlabeled.length} gastos pendientes`,
+      copy: "Cuando cada gasto tiene categoria, el dinero disponible se vuelve claro.",
+      badge: "Hoy",
+      button: "Clasificar",
+      view: "today"
+    };
+  }
+
+  if (!checkinDone) {
+    return {
+      title: "Cierra tu revision de hoy",
+      copy: "Ya no hay gastos pendientes. Guarda la revision para mantener tu racha.",
+      badge: "Listo",
+      button: "Terminar revision",
+      action: "complete-checkin"
+    };
+  }
+
+  if (plan.emergencyGap > 0) {
+    return {
+      title: "Sube tu fondo inicial",
+      copy: `Faltan ${formatMoney(plan.emergencyGap)} para completar la primera meta de emergencia.`,
+      badge: "Ahorro",
+      button: "Ver ahorro",
+      view: "savings"
+    };
+  }
+
+  const debt = sortedDebts()[0];
+  if (debt) {
+    return {
+      title: `Paga ${debt.name}`,
+      copy: `La cuenta mas pequena va primero. Pago minimo: ${formatMoney(debt.minimum)}.`,
+      badge: "Deuda",
+      button: "Ver deudas",
+      view: "debt"
+    };
+  }
+
+  return {
+    title: "Mantente al dia",
+    copy: "Registra el proximo gasto cuando ocurra y conserva tus limites visibles.",
+    badge: "Sin pendientes",
+    button: "Registrar gasto",
+    view: "spending"
+  };
+}
+
+function renderPrimaryActionButton(action) {
+  if (action.view) {
+    return `<button class="btn primary" type="button" data-view="${escapeAttr(action.view)}">${escapeHtml(action.button)}</button>`;
+  }
+  return `<button class="btn primary" type="button" data-action="${escapeAttr(action.action)}">${escapeHtml(action.button)}</button>`;
 }
 
 function renderToday(plan) {
@@ -269,14 +337,27 @@ function renderToday(plan) {
   const unlabeledToday = state.transactions.filter((transaction) => transaction.date === TODAY && !transaction.labeled);
   const checkinDone = state.checkins.includes(TODAY);
   const script = dominantMoneyScript();
+  const primaryAction = getPrimaryAction(plan, unlabeled, checkinDone);
 
   return `
     <section class="content-grid today-grid">
+      <article class="card focus-card wide-card">
+        <div class="focus-copy">
+          <p class="eyebrow">Ahora</p>
+          <h2>${primaryAction.title}</h2>
+          <p>${primaryAction.copy}</p>
+        </div>
+        <div class="focus-side">
+          <span class="metric-badge">${primaryAction.badge}</span>
+          ${renderPrimaryActionButton(primaryAction)}
+        </div>
+      </article>
+
       <article class="card ritual-card">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">Self-regulatory drill</p>
-            <h2>Etiqueta ${unlabeled.length} movimientos</h2>
+            <p class="eyebrow">Revision rapida</p>
+            <h2>Clasifica ${unlabeled.length} gastos</h2>
           </div>
           <span class="metric-badge">${checkinDone ? "Hecho hoy" : "Pendiente"}</span>
         </div>
@@ -292,14 +373,14 @@ function renderToday(plan) {
         </div>
         <div class="card-actions">
           <button class="btn primary" type="button" data-action="complete-checkin" ${checkinDone ? "disabled" : ""}>
-            Marcar ritual
+            Terminar revision
           </button>
           <button class="btn ghost" type="button" data-view="spending">Registrar gasto</button>
         </div>
         ${
           unlabeledToday.length
-            ? `<p class="helper-text">Para cerrar el ritual de hoy, primero asigna una categoria a los movimientos del dia.</p>`
-            : `<p class="helper-text">El seguimiento diario restaura friccion consciente sin convertir tus finanzas en una carga.</p>`
+            ? `<p class="helper-text">Quedan gastos de hoy sin categoria.</p>`
+            : `<p class="helper-text">Todo lo de hoy ya tiene categoria.</p>`
         }
       </article>
 
@@ -309,9 +390,9 @@ function renderToday(plan) {
             <span></span><span></span><span></span><span></span><span></span>
           </div>
           <div>
-            <p class="eyebrow">Pain of paying sintetico</p>
+            <p class="eyebrow">Gasto del mes</p>
             <h2>${formatMoney(monthlyLabeledSpend())}</h2>
-            <p>gastados este mes dentro de trabajos etiquetados</p>
+            <p>registrados en categorias del plan</p>
           </div>
         </div>
       </article>
@@ -319,36 +400,36 @@ function renderToday(plan) {
       <article class="card">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">Buffer de emergencia</p>
+            <p class="eyebrow">Fondo inicial</p>
             <h2>${formatMoney(state.profile.emergencySavings)} guardados</h2>
           </div>
           <span class="metric-badge">${formatMoney(plan.emergencyGap)} faltan</span>
         </div>
-        ${renderProgress(plan.emergencyProgress, "Progreso al equivalente de US$2.000")}
+        ${renderProgress(plan.emergencyProgress, "Meta inicial de emergencia")}
         <p class="helper-text">
-          Barrido sugerido dia ${state.profile.payday + 4}: ${formatMoney(plan.dayFiveSweep)} antes del gasto flexible.
+          Reserva sugerida dia ${state.profile.payday + 4}: ${formatMoney(plan.dayFiveSweep)}.
         </p>
       </article>
 
       <article class="card">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">Siguiente accion pequena</p>
+            <p class="eyebrow">Pago recomendado</p>
             <h2>${nextDebtAction().title}</h2>
           </div>
-          <span class="metric-badge">Snowball</span>
+          <span class="metric-badge">Paso pequeno</span>
         </div>
         <p>${nextDebtAction().copy}</p>
         <div class="card-actions">
-          <button class="btn secondary" type="button" data-view="debt">Ver deudas</button>
+          <button class="btn secondary" type="button" data-view="debt">Abrir deudas</button>
         </div>
       </article>
 
       <article class="card wide-card">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">Categorias activas</p>
-            <h2>Senales de agotamiento</h2>
+            <p class="eyebrow">Gastos por categoria</p>
+            <h2>Limites visibles</h2>
           </div>
           <button class="icon-btn" type="button" data-action="simulate-alert" aria-label="Simular alerta visual">!</button>
         </div>
@@ -356,11 +437,11 @@ function renderToday(plan) {
       </article>
 
       <article class="card">
-        <p class="eyebrow">Script dominante</p>
+        <p class="eyebrow">Patron dominante</p>
         <h2>${script.name}</h2>
         <p>${script.guidance}</p>
         <div class="micro-task">
-          <strong>Tarea de 5 minutos</strong>
+          <strong>Siguiente accion de 5 minutos</strong>
           <span>${graduatedPresenceTask()}</span>
         </div>
       </article>
@@ -415,7 +496,7 @@ function renderBudget(plan) {
       <article class="card">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">Zero-based dentro de gastos</p>
+            <p class="eyebrow">Gastos del mes</p>
             <h2>${formatMoney(assigned)} asignados</h2>
           </div>
           <span class="metric-badge ${status}">${Math.round(assignmentRatio)}%</span>
@@ -440,7 +521,7 @@ function renderBudget(plan) {
             <p class="eyebrow">Trabajos del dinero</p>
             <h2>Gasto consciente</h2>
           </div>
-          <span class="metric-badge">${state.budgetJobs.length}/10 categorias</span>
+          <span class="metric-badge">${state.budgetJobs.length}/10 maximo</span>
         </div>
         <div class="job-table">
           ${state.budgetJobs.map((job) => renderBudgetJob(job)).join("")}
@@ -489,15 +570,15 @@ function renderDebt(plan) {
       <article class="card wide-card">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">Mountain to Molehill</p>
+            <p class="eyebrow">Orden de pago</p>
             <h2>${visibleDebts.length === 1 && sorted.length > 1 ? "Solo el siguiente paso" : "Cuentas por cerrar"}</h2>
           </div>
           <span class="metric-badge">${sorted.length} cuentas</span>
         </div>
         ${
           exposureMode && !state.settings.revealDebtTotal
-            ? `<p class="helper-text">Modo exposicion gradual activo: mostramos la deuda mas pequena para evitar sobrecarga y convertir ansiedad en accion.</p>`
-            : `<p class="helper-text">Total visible: ${formatMoney(totalDebt)}. El orden prioriza victorias pequenas sobre interes perfecto.</p>`
+            ? `<p class="helper-text">Mostramos primero la cuenta mas facil de cerrar.</p>`
+            : `<p class="helper-text">Total visible: ${formatMoney(totalDebt)}. La cuenta mas pequena va primero.</p>`
         }
         <div class="molehill-track">
           ${sorted.map((debt, index) => `<span class="${index === 0 ? "next" : ""}">${index + 1}</span>`).join("")}
@@ -517,7 +598,7 @@ function renderDebt(plan) {
       <article class="card">
         <p class="eyebrow">Pago sugerido</p>
         <h2>${formatMoney(Math.max(plan.debt, minimumDebtPayments()))}</h2>
-        <p>Primero cubre minimos. Cualquier excedente va a la cuenta mas pequena hasta cerrarla.</p>
+        <p>Primero cubre minimos. Lo extra va a la cuenta mas pequena hasta cerrarla.</p>
         <div class="micro-task">
           <strong>Victoria pequena</strong>
           <span>${nextDebtAction().copy}</span>
@@ -584,7 +665,7 @@ function renderSavings(plan) {
       <article class="card wide-card">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">${phase} · Pay yourself first</p>
+            <p class="eyebrow">${phase} · Pagarte primero</p>
             <h2>Buffer que protege ancho de banda</h2>
           </div>
           <span class="metric-badge">${Math.round(monthsCovered * 10) / 10} meses</span>
@@ -614,7 +695,7 @@ function renderSavings(plan) {
       <article class="card">
         <p class="eyebrow">Save More Tomorrow</p>
         <h2>${formatMoney(escalatedSavings)} extra</h2>
-        <p>Si tus ingresos suben ${state.settings.monthlyRaisePct}%, el ${state.settings.escalationPct}% del aumento se redirige al ahorro antes de sentirse como gasto disponible.</p>
+        <p>Si tus ingresos suben ${state.settings.monthlyRaisePct}%, el ${state.settings.escalationPct}% del aumento se mueve al ahorro antes de volverse gasto.</p>
         <form class="stacked-form" id="smart-form">
           <label>
             Aumento futuro %
@@ -631,7 +712,7 @@ function renderSavings(plan) {
       <article class="card">
         <p class="eyebrow">Interes como libertad</p>
         <h2>${futureFreedom(plan)}</h2>
-        <p>Mostrar el rendimiento como tiempo futuro hace que la recompensa sea mas concreta que un porcentaje aislado.</p>
+        <p>El ahorro se entiende mejor cuando se traduce en tiempo y margen de decision.</p>
       </article>
     </section>
   `;
@@ -646,10 +727,10 @@ function renderSpending(plan) {
       <article class="card wide-card">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">Alertas de agotamiento</p>
-            <h2>Barras que cambian con tu gasto</h2>
+            <p class="eyebrow">Gasto por categoria</p>
+            <h2>Lo que va usado</h2>
           </div>
-          <span class="metric-badge">Umbral grande: ${formatMoney(threshold)}</span>
+          <span class="metric-badge">Compra grande: ${formatMoney(threshold)}</span>
         </div>
         ${renderCategoryBars(plan, state.budgetJobs.length)}
       </article>
@@ -657,8 +738,8 @@ function renderSpending(plan) {
       <article class="card">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">Cooling-off</p>
-            <h2>Registrar compra</h2>
+            <p class="eyebrow">Nuevo movimiento</p>
+            <h2>Registrar gasto</h2>
           </div>
         </div>
         <form class="stacked-form" id="transaction-form">
@@ -678,20 +759,20 @@ function renderSpending(plan) {
           </label>
           <label class="check-row">
             <input name="budgeted" type="checkbox" checked>
-            Tiene trabajo asignado en el presupuesto
+            Ya estaba previsto en el plan
           </label>
-          <button class="btn primary" type="submit">Registrar</button>
+          <button class="btn primary" type="submit">Guardar gasto</button>
         </form>
       </article>
 
       <article class="card">
-        <p class="eyebrow">Compras en espera</p>
-        <h2>${state.cooldowns.length} bloqueadas</h2>
+        <p class="eyebrow">Pausa de 24 horas</p>
+        <h2>${state.cooldowns.length} compras pausadas</h2>
         <div class="cooldown-list">
           ${
             state.cooldowns.length
               ? state.cooldowns.map((cooldown) => renderCooldown(cooldown)).join("")
-              : `<div class="empty-state">No hay compras impulsivas esperando desbloqueo.</div>`
+              : `<div class="empty-state">Sin compras en pausa.</div>`
           }
         </div>
       </article>
@@ -699,16 +780,16 @@ function renderSpending(plan) {
       <article class="card wide-card">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">Respuesta a recaidas</p>
-            <h2>Reestructuracion cognitiva</h2>
+            <p class="eyebrow">Cuando te sales del plan</p>
+            <h2>Ajuste sin culpa</h2>
           </div>
           <span class="metric-badge">${overBudget.length} categorias excedidas</span>
         </div>
         <p class="reframe">
-          Una decision no define tu capacidad. ${overBudget.length ? "Reasigna los trabajos restantes y protege el siguiente paso." : "Mantienes margen para decidir con calma."}
+          Una decision no define tu capacidad. ${overBudget.length ? "Reasigna lo que queda y protege el siguiente pago." : "Mantienes margen para decidir con calma."}
         </p>
         <div class="card-actions">
-          <button class="btn secondary" type="button" data-action="add-process-win">Registrar victoria de proceso</button>
+          <button class="btn secondary" type="button" data-action="add-process-win">Guardar avance</button>
         </div>
       </article>
     </section>
@@ -733,14 +814,14 @@ function renderCooldown(cooldown) {
 
 function renderProfile(plan) {
   const script = dominantMoneyScript();
-  const anxietyTone = state.profile.financialAnxiety >= 7 ? "Presencia financiera graduada" : "Revision estandar";
+  const anxietyTone = state.profile.financialAnxiety >= 7 ? "Revision suave" : "Revision estandar";
 
   return `
     <section class="content-grid profile-grid">
       <article class="card">
-        <p class="eyebrow">Diagnostico</p>
+        <p class="eyebrow">Tus datos</p>
         <h2>${escapeHtml(state.profile.name)}</h2>
-        <p>${anxietyTone}. Script dominante: ${script.name.toLowerCase()}.</p>
+        <p>${anxietyTone}. Patron dominante: ${script.name.toLowerCase()}.</p>
         <div class="score-grid">
           <div>
             <strong>${state.profile.selfEfficacy}/10</strong>
@@ -751,13 +832,13 @@ function renderProfile(plan) {
             <span>Ansiedad</span>
           </div>
         </div>
-        <button class="btn primary" type="button" data-action="open-diagnosis">Editar diagnostico</button>
+        <button class="btn primary" type="button" data-action="open-diagnosis">Editar datos</button>
       </article>
 
       <article class="card wide-card">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">Money scripts</p>
+            <p class="eyebrow">Patrones de dinero</p>
             <h2>Patrones que guian decisiones</h2>
           </div>
         </div>
@@ -769,7 +850,7 @@ function renderProfile(plan) {
       </article>
 
       <article class="card">
-        <p class="eyebrow">Plan calculado</p>
+        <p class="eyebrow">Resumen mensual</p>
         <h2>${formatMoney(state.profile.monthlyIncome)} / mes</h2>
         ${renderAllocation("Deuda", plan.debt, "debt")}
         ${renderAllocation("Ahorro", plan.savings, "savings")}
@@ -777,9 +858,9 @@ function renderProfile(plan) {
       </article>
 
       <article class="card">
-        <p class="eyebrow">Datos locales</p>
-        <h2>Portabilidad</h2>
-        <p>La app guarda informacion en este navegador. Puedes exportarla como JSON para respaldos o demo.</p>
+        <p class="eyebrow">Respaldo</p>
+        <h2>Tus datos locales</h2>
+        <p>La informacion queda guardada en este navegador. Puedes exportarla como JSON.</p>
         <div class="card-actions">
           <button class="btn secondary" type="button" data-action="export-data">Exportar</button>
           <label class="btn ghost file-btn">
@@ -793,8 +874,8 @@ function renderProfile(plan) {
       <article class="card wide-card">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">Victorias de proceso</p>
-            <h2>Identidad en construccion</h2>
+            <p class="eyebrow">Avances</p>
+            <h2>Lo que ya hiciste</h2>
           </div>
           <span class="metric-badge">${state.wins.length}</span>
         </div>
@@ -813,10 +894,10 @@ function renderProfile(plan) {
 
 function renderScriptBar(key, value) {
   const labels = {
-    worship: "Money Worship",
-    avoidance: "Money Avoidance",
-    status: "Money Status",
-    vigilance: "Money Vigilance"
+    worship: "Buscar mas dinero",
+    avoidance: "Evitar mirar dinero",
+    status: "Dinero como estatus",
+    vigilance: "Control y seguridad"
   };
   const ratio = (Number(value) / 5) * 100;
   return `
@@ -840,14 +921,14 @@ function renderDiagnosisModal() {
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="diagnosis-title">
         <div class="modal-heading">
           <div>
-            <p class="eyebrow">Onboarding psicologico y financiero</p>
-            <h2 id="diagnosis-title">Diagnostico conductual</h2>
+            <p class="eyebrow">Personalizar plan</p>
+            <h2 id="diagnosis-title">Mis datos</h2>
           </div>
           <button class="icon-btn" type="button" data-action="close-diagnosis" aria-label="Cerrar">x</button>
         </div>
         <form id="diagnosis-form" class="diagnosis-form">
           <fieldset>
-            <legend>Datos minimos</legend>
+            <legend>Datos principales</legend>
             <label>
               Nombre del plan
               <input name="name" type="text" maxlength="32" value="${escapeAttr(profile.name)}" required>
@@ -861,7 +942,7 @@ function renderDiagnosisModal() {
               <input name="committedExpenses" type="number" min="0" step="1000" value="${profile.committedExpenses}" required>
             </label>
             <label>
-              Ahorro liquido actual
+              Ahorro disponible
               <input name="emergencySavings" type="number" min="0" step="1000" value="${profile.emergencySavings}" required>
             </label>
             <label>
@@ -892,7 +973,7 @@ function renderDiagnosisModal() {
               </select>
             </label>
             <label>
-              Autoeficacia financiera: ${profile.selfEfficacy}/10
+              Confianza financiera: ${profile.selfEfficacy}/10
               <input name="selfEfficacy" type="range" min="1" max="10" value="${profile.selfEfficacy}">
             </label>
             <label>
@@ -902,7 +983,7 @@ function renderDiagnosisModal() {
           </fieldset>
 
           <fieldset>
-            <legend>Money scripts resumidos</legend>
+            <legend>Patrones de dinero</legend>
             ${renderScriptQuestion("worship", "Siento que las cosas mejorarian mucho si tuviera mas dinero.")}
             ${renderScriptQuestion("avoidance", "A veces siento que no merezco dinero cuando otras personas tienen menos.")}
             ${renderScriptQuestion("status", "Mi valor personal se refleja en mis logros financieros.")}
@@ -911,7 +992,7 @@ function renderDiagnosisModal() {
 
           <div class="modal-actions">
             <button class="btn ghost" type="button" data-action="close-diagnosis">Cancelar</button>
-            <button class="btn primary" type="submit">Guardar diagnostico</button>
+            <button class="btn primary" type="submit">Guardar y usar mi plan</button>
           </div>
         </form>
       </section>
@@ -1114,14 +1195,14 @@ function handleDiagnosisSubmit(event) {
       {
         id: uid("win"),
         date: TODAY,
-        text: "Completaste el diagnostico inicial y convertiste datos sueltos en un plan."
+        text: "Guardaste tus datos reales y convertiste numeros sueltos en un plan."
       }
     ];
   }
 
   state.showDiagnosis = false;
   state.activeView = "today";
-  state.lastAlert = "Diagnostico guardado. Empieza con un ritual de 5 minutos para mantener presencia financiera.";
+  state.lastAlert = "Datos guardados. Tu inicio ya muestra el siguiente paso.";
   saveState();
   render();
 }
@@ -1130,7 +1211,7 @@ function handleBudgetSubmit(event) {
   event.preventDefault();
   const data = new FormData(event.currentTarget);
   if (state.budgetJobs.length >= 10) {
-    state.lastAlert = "Mantengamos maximo 10 categorias para evitar decision paralysis.";
+    state.lastAlert = "Mantengamos maximo 10 categorias para que el plan siga claro.";
     saveState();
     render();
     return;
@@ -1157,7 +1238,7 @@ function handleDebtSubmit(event) {
     apr: numberFrom(data.get("apr")),
     minimum: numberFrom(data.get("minimum"))
   });
-  state.lastAlert = "Nueva deuda agregada al snowball. La cuenta mas pequena queda primero.";
+  state.lastAlert = "Nueva deuda agregada. La cuenta mas pequena queda primero.";
   saveState();
   render();
 }
@@ -1181,7 +1262,7 @@ function handleTransactionSubmit(event) {
       createdAt: new Date().toISOString(),
       unlockAt: hoursFromNow(24).toISOString()
     });
-    state.lastAlert = `${merchant} entro en espera 24 horas. La friccion protege el presupuesto.`;
+    state.lastAlert = `${merchant} quedo en pausa 24 horas antes de decidir.`;
   } else {
     addTransaction({ merchant, amount, category, budgeted });
     state.lastAlert = createSpendAlert(category);
@@ -1196,7 +1277,7 @@ function handleSmartSubmit(event) {
   const data = new FormData(event.currentTarget);
   state.settings.monthlyRaisePct = clamp(numberFrom(data.get("monthlyRaisePct")), 0, 100);
   state.settings.escalationPct = clamp(numberFrom(data.get("escalationPct")), 0, 100);
-  state.lastAlert = "Escalador Save More Tomorrow actualizado.";
+  state.lastAlert = "Aumento futuro actualizado.";
   saveState();
   render();
 }
@@ -1225,7 +1306,7 @@ function handleImport(event) {
 function completeCheckin() {
   const unlabeledToday = state.transactions.filter((transaction) => transaction.date === TODAY && !transaction.labeled);
   if (unlabeledToday.length) {
-    state.lastAlert = `Quedan ${unlabeledToday.length} movimientos de hoy sin categoria. Ese es el ejercicio.`;
+    state.lastAlert = `Quedan ${unlabeledToday.length} gastos de hoy sin categoria.`;
     return;
   }
 
@@ -1234,10 +1315,10 @@ function completeCheckin() {
     state.wins.push({
       id: uid("win"),
       date: TODAY,
-      text: "Completaste el ritual diario de monitoreo."
+      text: "Completaste la revision de hoy."
     });
   }
-  state.lastAlert = "Ritual cerrado. Pequenas repeticiones construyen autocontrol financiero.";
+  state.lastAlert = "Revision cerrada. Hoy ya quedo al dia.";
 }
 
 function simulateSpendingAlert() {
@@ -1268,7 +1349,7 @@ function registerDebtPayment(id) {
       date: TODAY,
       text: `Cerraste ${debt.name}. Una cuenta menos pesa mas que un numero perfecto.`
     });
-    state.lastAlert = `${debt.name} cerrada. Esa victoria aumenta autoeficacia.`;
+    state.lastAlert = `${debt.name} cerrada. Una cuenta menos.`;
   } else {
     state.lastAlert = `Pago de ${formatMoney(payment)} registrado en ${debt.name}.`;
   }
@@ -1286,7 +1367,7 @@ function removeBudgetJob(id) {
       transaction.labeled = false;
     }
   });
-  state.lastAlert = "Categoria eliminada. Los movimientos asociados vuelven a revision.";
+  state.lastAlert = "Categoria eliminada. Sus gastos vuelven a revision.";
 }
 
 function cancelCooldown(id) {
@@ -1294,9 +1375,9 @@ function cancelCooldown(id) {
   state.wins.push({
     id: uid("win"),
     date: TODAY,
-    text: "Cancelaste una compra impulsiva despues del periodo de friccion."
+    text: "Cancelaste una compra despues de pausarla."
   });
-  state.lastAlert = "Compra cancelada. Ese es un ahorro real, no solo una intencion.";
+  state.lastAlert = "Compra cancelada. Ese ahorro ya cuenta.";
 }
 
 function unlockCooldown(id) {
@@ -1329,7 +1410,7 @@ function exportData() {
 function resetDemo() {
   localStorage.removeItem(STORAGE_KEY);
   state = createDefaultState();
-  state.lastAlert = "Demo reiniciada. Puedes abrir el diagnostico para personalizarla.";
+  state.lastAlert = "Demo reiniciada. Usa Mis datos para personalizarla.";
 }
 
 function addTransaction({ merchant, amount, category, budgeted }) {
@@ -1382,27 +1463,27 @@ function nextDebtAction() {
   }
   return {
     title: debt.name,
-    copy: `Paga al menos ${formatMoney(debt.minimum)} y envia excedentes a esta cuenta hasta cerrarla.`
+    copy: `Paga al menos ${formatMoney(debt.minimum)}. Lo extra va aqui hasta cerrar esta cuenta.`
   };
 }
 
 function dominantMoneyScript() {
   const labels = {
     worship: {
-      name: "Money Worship",
-      guidance: "Convierte deseos grandes en metas con espera y costo visible."
+      name: "Buscar mas dinero",
+      guidance: "Convierte deseos grandes en metas concretas antes de gastar."
     },
     avoidance: {
-      name: "Money Avoidance",
-      guidance: "Usa pasos pequenos y evita mirar todo el peso financiero de una sola vez."
+      name: "Evitar mirar dinero",
+      guidance: "Mira solo el siguiente paso y evita cargar todo el peso de una vez."
     },
     status: {
-      name: "Money Status",
-      guidance: "Separa valor personal de compras visibles y logros comparativos."
+      name: "Dinero como estatus",
+      guidance: "Separa tu valor personal de compras visibles y comparaciones."
     },
     vigilance: {
-      name: "Money Vigilance",
-      guidance: "Automatiza seguridad y permite gasto flexible con limites claros."
+      name: "Control y seguridad",
+      guidance: "Automatiza seguridad y deja un margen claro para gastar sin culpa."
     }
   };
   const key = Object.entries(state.profile.moneyScripts).sort((a, b) => b[1] - a[1])[0][0];
@@ -1415,12 +1496,12 @@ function shouldUseDebtExposureMode() {
 
 function graduatedPresenceTask() {
   if (state.profile.financialAnxiety >= 7) {
-    return "Abre solo una categoria, etiqueta un movimiento y cierra la app.";
+    return "Clasifica un gasto y cierra la revision.";
   }
   if (state.profile.selfEfficacy <= 4) {
-    return "Registra una victoria de proceso antes de revisar saldos.";
+    return "Guarda un avance antes de mirar saldos.";
   }
-  return "Etiqueta pendientes y revisa la barra mas cercana al limite.";
+  return "Clasifica pendientes y revisa la categoria mas cercana al limite.";
 }
 
 function futureFreedom(plan) {

@@ -13,14 +13,14 @@ Aplicacion personal de finanzas basada en economia conductual. El objetivo no es
 
 ## Funcionalidades principales
 
-- **Diagnostico inicial:** ingreso, gastos comprometidos, ahorro liquido, deuda, ansiedad financiera, autoeficacia y money scripts resumidos.
-- **Ritual diario:** etiquetado breve de transacciones para construir monitoreo activo.
+- **Mis datos:** ingreso, gastos comprometidos, ahorro disponible, deuda, ansiedad financiera, confianza y patrones de dinero.
+- **Inicio accionable:** muestra siempre el siguiente paso: poner datos reales, clasificar gastos, cerrar la revision, ahorrar o pagar deuda.
 - **Presupuesto 1/3:** divide ingreso en deuda, ahorro y gastos; ajusta ahorro precautorio si el ingreso es variable.
 - **Zero-based budgeting:** cada categoria de gasto recibe un trabajo especifico.
 - **Buffer de emergencia:** meta base equivalente a US$2.000, con barrido automatico sugerido el dia 5.
-- **Debt snowball:** ordena deudas por saldo para priorizar cierres y aumentar autoeficacia.
+- **Deudas por pasos pequenos:** ordena deudas por saldo para priorizar cierres y aumentar autoeficacia.
 - **Exposicion gradual:** si la ansiedad o evitacion financiera es alta, oculta el total de deuda y muestra solo el siguiente paso.
-- **Cooling-off de 24 horas:** bloquea compras grandes no presupuestadas.
+- **Pausa de 24 horas:** detiene compras grandes no presupuestadas antes de registrarlas.
 - **Alertas de agotamiento:** barras por categoria cambian de verde a amarillo y rojo.
 - **Victorias de proceso:** celebra consistencia, no solo montos.
 

@@ -314,6 +314,32 @@ a {
   box-shadow: var(--shadow);
 }
 
+.focus-card {
+  grid-column: span 12;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, auto);
+  align-items: center;
+  min-height: 132px;
+  border-color: rgba(21, 111, 105, 0.32);
+  background:
+    linear-gradient(90deg, rgba(213, 235, 229, 0.92), rgba(255, 253, 248, 0.96)),
+    var(--panel);
+}
+
+.focus-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.focus-copy h2 {
+  font-size: 1.8rem;
+}
+
+.focus-side {
+  display: grid;
+  justify-items: end;
+  gap: 12px;
+}
+
 .today-grid .card,
 .budget-grid .card,
 .debt-grid .card,
@@ -327,6 +353,10 @@ a {
 .split-card,
 .today-grid .ritual-card {
   grid-column: span 8;
+}
+
+.today-grid .focus-card {
+  grid-column: span 12;
 }
 
 .hero-visual {
@@ -953,11 +983,13 @@ label {
   .profile-grid .card,
   .wide-card,
   .split-card,
+  .today-grid .focus-card,
   .today-grid .ritual-card {
     grid-column: 1;
   }
 
   .split-card,
+  .focus-card,
   .paying-visual,
   .transaction-row,
   .job-row,
@@ -972,6 +1004,11 @@ label {
     grid-template-columns: 1fr;
   }
 
+  .focus-side {
+    justify-items: start;
+    width: 100%;
+  }
+
   .budget-ring {
     width: 180px;
     height: 180px;
@@ -984,6 +1021,17 @@ label {
 }
 
 @media (max-width: 480px) {
+  .nav-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+
+  .nav-item {
+    flex: initial;
+    min-width: 0;
+  }
+
   .card-heading {
     align-items: flex-start;
     flex-direction: column;
