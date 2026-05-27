@@ -69,17 +69,17 @@ Configuracion:
 1. Crea un proyecto en Supabase.
 2. En el SQL editor, ejecuta [docs/supabase-schema.sql](docs/supabase-schema.sql).
 3. En Authentication, habilita Email/Password.
-4. Copia `Project URL` y `anon public key`.
+4. Copia `Project URL` y la `anon public key` o `publishable key`.
 5. Edita `sync-config.js`:
 
 ```js
 window.FINANZAS_SYNC_CONFIG = {
   supabaseUrl: "https://TU_PROYECTO.supabase.co",
-  supabaseAnonKey: "TU_ANON_KEY"
+  supabaseAnonKey: "TU_ANON_O_PUBLISHABLE_KEY"
 };
 ```
 
-La anon key de Supabase es publica por diseno; la seguridad la controlan las politicas RLS del archivo SQL.
+La anon key o publishable key de Supabase es publica por diseno; la seguridad la controlan las politicas RLS del archivo SQL.
 
 ## Publicacion en GitHub Pages
 
