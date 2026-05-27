@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "check": "node --check app.js && node --check finance-core.js && node --check server.mjs && node --check tests/finance-core.test.mjs && node --check tests/pwa.test.mjs",
+    "check": "node --check app.js && node --check finance-core.js && node --check sync-client.js && node --check server.mjs && node --check tests/finance-core.test.mjs && node --check tests/pwa.test.mjs",
     "test": "node --test",
     "verify": "npm run check && npm test"
   },

@@ -10,6 +10,17 @@ import {
   spendByCategory as getSpendByCategory,
   totalDebt as getTotalDebt
 } from "./finance-core.js";
+import {
+  getCloudSession,
+  isCloudConfigured,
+  isCloudLibraryLoaded,
+  loadCloudState,
+  onCloudAuthChange,
+  saveCloudState,
+  signInToCloud,
+  signOutFromCloud,
+  signUpToCloud
+} from "./sync-client.js";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const TODAY = todayKey();
@@ -25,8 +36,20 @@ const NAV_ITEMS = [
 
 const app = document.querySelector("#app");
 let state = loadState();
+let applyingCloudState = false;
+let cloudSaveTimer;
+let authUnsubscribe = () => {};
+let cloudState = {
+  configured: isCloudConfigured(),
+  email: "",
+  error: "",
+  libraryLoaded: isCloudLibraryLoaded(),
+  signedIn: false,
+  status: isCloudConfigured() ? "checking" : "local"
+};
 
 render();
+initializeCloudSync();
 
 if ("serviceWorker" in navigator && window.location.protocol !== "file:") {
   navigator.serviceWorker.register("./service-worker.js").catch(() => {});
@@ -43,6 +66,11 @@ function createDefaultState() {
     activeView: "today",
     showDiagnosis: false,
     lastAlert: "Estas viendo datos de ejemplo. Usa Mis datos para poner tus numeros reales.",
+    meta: {
+      updatedAt: new Date().toISOString(),
+      cloudUpdatedAt: "",
+      cloudUserEmail: ""
+    },
     profile: {
       completed: false,
       name: "Tu plan",
@@ -162,14 +190,196 @@ function loadState() {
     if (!saved) {
       return createDefaultState();
     }
-    return { ...createDefaultState(), ...JSON.parse(saved) };
+    return migrateState(JSON.parse(saved));
   } catch {
     return createDefaultState();
   }
 }
 
-function saveState() {
+function migrateState(savedState) {
+  const defaults = createDefaultState();
+  return {
+    ...defaults,
+    ...savedState,
+    meta: { ...defaults.meta, ...(savedState.meta || {}) },
+    profile: { ...defaults.profile, ...(savedState.profile || {}) },
+    settings: { ...defaults.settings, ...(savedState.settings || {}) },
+    budgetJobs: savedState.budgetJobs || defaults.budgetJobs,
+    debts: savedState.debts || defaults.debts,
+    transactions: savedState.transactions || defaults.transactions,
+    cooldowns: savedState.cooldowns || defaults.cooldowns,
+    checkins: savedState.checkins || defaults.checkins,
+    wins: savedState.wins || defaults.wins
+  };
+}
+
+function saveState(options = {}) {
+  const { sync = true } = options;
+  state.meta = {
+    ...(state.meta || {}),
+    updatedAt: new Date().toISOString(),
+    cloudUserEmail: cloudState.email || state.meta?.cloudUserEmail || ""
+  };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (sync && !applyingCloudState) {
+    scheduleCloudSave();
+  }
+}
+
+async function initializeCloudSync() {
+  if (!cloudState.configured) {
+    cloudState.status = "local";
+    cloudState.error = "Configura Supabase para activar sincronizacion.";
+    render();
+    return;
+  }
+
+  if (!cloudState.libraryLoaded) {
+    cloudState.status = "local";
+    cloudState.error = "No se pudo cargar la libreria de nube. La app sigue en modo local.";
+    render();
+    return;
+  }
+
+  try {
+    const session = await getCloudSession();
+    applyCloudSession(session);
+    authUnsubscribe = onCloudAuthChange((nextSession) => {
+      applyCloudSession(nextSession);
+      if (nextSession) {
+        pullCloudAfterLogin();
+      } else {
+        cloudState.status = "signed-out";
+        render();
+      }
+    });
+
+    if (session) {
+      await pullCloudAfterLogin();
+    } else {
+      cloudState.status = "signed-out";
+      render();
+    }
+  } catch (error) {
+    cloudState.status = "error";
+    cloudState.error = friendlyCloudError(error);
+    render();
+  }
+}
+
+function applyCloudSession(session) {
+  cloudState.signedIn = Boolean(session);
+  cloudState.email = session?.user?.email || "";
+  cloudState.error = "";
+  if (session) {
+    state.meta = {
+      ...(state.meta || {}),
+      cloudUserEmail: cloudState.email
+    };
+  }
+}
+
+async function pullCloudAfterLogin() {
+  if (!cloudState.signedIn) {
+    return;
+  }
+
+  cloudState.status = "syncing";
+  cloudState.error = "";
+  render();
+
+  try {
+    const remote = await loadCloudState();
+    if (remote?.app_state) {
+      applyingCloudState = true;
+      state = migrateState(remote.app_state);
+      state.showDiagnosis = false;
+      state.activeView = "today";
+      state.lastAlert = "Nube sincronizada automaticamente.";
+      state.meta = {
+        ...(state.meta || {}),
+        cloudUpdatedAt: remote.updated_at,
+        cloudUserEmail: cloudState.email
+      };
+      saveState({ sync: false });
+      applyingCloudState = false;
+      cloudState.status = "synced";
+      render();
+      return;
+    }
+
+    const saved = await saveCloudState(getCloudPayload());
+    state.meta = {
+      ...(state.meta || {}),
+      cloudUpdatedAt: saved?.updated_at || new Date().toISOString(),
+      cloudUserEmail: cloudState.email
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    cloudState.status = "synced";
+    state.lastAlert = "Primera copia subida a la nube.";
+    render();
+  } catch (error) {
+    applyingCloudState = false;
+    cloudState.status = "error";
+    cloudState.error = friendlyCloudError(error);
+    render();
+  }
+}
+
+function scheduleCloudSave() {
+  if (!cloudState.signedIn || cloudState.status === "syncing") {
+    return;
+  }
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = setTimeout(pushCloudState, 800);
+}
+
+async function pushCloudState() {
+  if (!cloudState.signedIn) {
+    return;
+  }
+
+  cloudState.status = "syncing";
+  render();
+
+  try {
+    const saved = await saveCloudState(getCloudPayload());
+    state.meta = {
+      ...(state.meta || {}),
+      cloudUpdatedAt: saved?.updated_at || new Date().toISOString(),
+      cloudUserEmail: cloudState.email
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    cloudState.status = "synced";
+    cloudState.error = "";
+    render();
+  } catch (error) {
+    cloudState.status = "error";
+    cloudState.error = friendlyCloudError(error);
+    render();
+  }
+}
+
+function getCloudPayload() {
+  return {
+    ...state,
+    showDiagnosis: false,
+    meta: {
+      ...(state.meta || {}),
+      cloudUserEmail: cloudState.email
+    }
+  };
+}
+
+function friendlyCloudError(error) {
+  const message = error?.message || String(error);
+  if (message.toLowerCase().includes("invalid login")) {
+    return "Correo o contrasena incorrectos.";
+  }
+  if (message.toLowerCase().includes("fetch")) {
+    return "No pude conectar con la nube. Revisa internet.";
+  }
+  return message;
 }
 
 function render() {
@@ -234,10 +444,30 @@ function renderHeader(plan) {
           <strong>${formatMoney(remaining)}</strong>
           para gastar
         </span>
+        ${renderCloudStatus()}
         <button class="btn primary" type="button" data-action="open-diagnosis">Mis datos</button>
       </div>
     </header>
   `;
+}
+
+function renderCloudStatus() {
+  if (!cloudState.configured) {
+    return `<span class="status-pill cloud-status"><strong>Local</strong> sin nube</span>`;
+  }
+  if (cloudState.status === "checking") {
+    return `<span class="status-pill cloud-status"><strong>Nube</strong> revisando</span>`;
+  }
+  if (!cloudState.signedIn) {
+    return `<span class="status-pill cloud-status"><strong>Nube</strong> sin sesion</span>`;
+  }
+  if (cloudState.status === "syncing") {
+    return `<span class="status-pill cloud-status"><strong>Nube</strong> sincronizando</span>`;
+  }
+  if (cloudState.status === "error") {
+    return `<span class="status-pill cloud-status danger"><strong>Nube</strong> error</span>`;
+  }
+  return `<span class="status-pill cloud-status"><strong>Nube</strong> al dia</span>`;
 }
 
 function renderView(plan) {
@@ -272,6 +502,16 @@ function getPrimaryAction(plan, unlabeled, checkinDone) {
       badge: "Primer paso",
       button: "Empezar",
       action: "open-diagnosis"
+    };
+  }
+
+  if (cloudState.configured && !cloudState.signedIn) {
+    return {
+      title: "Inicia sesion para sincronizar",
+      copy: "Asi tus datos se bajan automaticamente en el celular despues de iniciar sesion.",
+      badge: "Nube",
+      button: "Ir a Datos",
+      view: "profile"
     };
   }
 
@@ -818,6 +1058,8 @@ function renderProfile(plan) {
 
   return `
     <section class="content-grid profile-grid">
+      ${renderCloudPanel()}
+
       <article class="card">
         <p class="eyebrow">Tus datos</p>
         <h2>${escapeHtml(state.profile.name)}</h2>
@@ -889,6 +1131,72 @@ function renderProfile(plan) {
         </div>
       </article>
     </section>
+  `;
+}
+
+function renderCloudPanel() {
+  if (!cloudState.configured) {
+    return `
+      <article class="card wide-card cloud-card">
+        <div class="card-heading">
+          <div>
+            <p class="eyebrow">Sincronizacion</p>
+            <h2>Modo local por ahora</h2>
+          </div>
+          <span class="metric-badge">Falta Supabase</span>
+        </div>
+        <p>Para que computador y celular compartan datos, configura Supabase en <strong>sync-config.js</strong>. Cuando este activo, iniciar sesion bajara la nube automaticamente.</p>
+      </article>
+    `;
+  }
+
+  if (cloudState.signedIn) {
+    return `
+      <article class="card wide-card cloud-card">
+        <div class="card-heading">
+          <div>
+            <p class="eyebrow">Cuenta y nube</p>
+            <h2>${escapeHtml(cloudState.email)}</h2>
+          </div>
+          <span class="metric-badge">${cloudState.status === "syncing" ? "Sincronizando" : "Al dia"}</span>
+        </div>
+        <p>Cuando guardas cambios, se suben solos. En otro dispositivo solo inicia sesion y la app baja la nube automaticamente.</p>
+        ${cloudState.error ? `<p class="form-error">${escapeHtml(cloudState.error)}</p>` : ""}
+        <div class="card-actions">
+          <button class="btn secondary" type="button" data-action="push-cloud-now">Subir ahora</button>
+          <button class="btn ghost" type="button" data-action="pull-cloud-now">Bajar nube</button>
+          <button class="btn danger" type="button" data-action="cloud-sign-out">Cerrar sesion</button>
+        </div>
+      </article>
+    `;
+  }
+
+  return `
+    <article class="card wide-card cloud-card">
+      <div class="card-heading">
+        <div>
+          <p class="eyebrow">Cuenta y nube</p>
+          <h2>Inicia sesion</h2>
+        </div>
+        <span class="metric-badge">Auto-sync</span>
+      </div>
+      <p>Despues de iniciar sesion, la app descarga tu nube automaticamente. Si es tu primer dispositivo, sube tu plan actual.</p>
+      ${cloudState.error ? `<p class="form-error">${escapeHtml(cloudState.error)}</p>` : ""}
+      <form class="inline-form cloud-form" id="cloud-login-form">
+        <label>
+          Correo
+          <input name="email" type="email" autocomplete="email" placeholder="tu@email.com" required>
+        </label>
+        <label>
+          Contrasena
+          <input name="password" type="password" autocomplete="current-password" minlength="6" placeholder="Minimo 6 caracteres" required>
+        </label>
+        <div class="cloud-form-actions">
+          <button class="btn primary" type="submit" data-cloud-mode="signin">Iniciar sesion</button>
+          <button class="btn ghost" type="submit" data-cloud-mode="signup">Crear cuenta</button>
+        </div>
+      </form>
+    </article>
   `;
 }
 
@@ -1109,6 +1417,11 @@ function bindEvents() {
     smartForm.addEventListener("submit", handleSmartSubmit);
   }
 
+  const cloudLoginForm = document.querySelector("#cloud-login-form");
+  if (cloudLoginForm) {
+    cloudLoginForm.addEventListener("submit", handleCloudLoginSubmit);
+  }
+
   const importFile = document.querySelector("#import-file");
   if (importFile) {
     importFile.addEventListener("change", handleImport);
@@ -1147,14 +1460,19 @@ function handleAction(event) {
     "remove-job": () => removeBudgetJob(id),
     "cancel-cooldown": () => cancelCooldown(id),
     "unlock-cooldown": () => unlockCooldown(id),
+    "push-cloud-now": () => pushCloudState(),
+    "pull-cloud-now": () => pullCloudAfterLogin(),
+    "cloud-sign-out": () => handleCloudSignOut(),
     "export-data": exportData,
     "reset-demo": resetDemo
   };
 
   if (actions[action]) {
     actions[action]();
-    saveState();
-    render();
+    if (!["push-cloud-now", "pull-cloud-now", "cloud-sign-out"].includes(action)) {
+      saveState();
+      render();
+    }
   }
 }
 
@@ -1279,6 +1597,51 @@ function handleSmartSubmit(event) {
   state.settings.escalationPct = clamp(numberFrom(data.get("escalationPct")), 0, 100);
   state.lastAlert = "Aumento futuro actualizado.";
   saveState();
+  render();
+}
+
+async function handleCloudLoginSubmit(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  const email = cleanText(data.get("email"), "");
+  const password = String(data.get("password") || "");
+  const mode = event.submitter?.dataset.cloudMode || "signin";
+
+  cloudState.status = "syncing";
+  cloudState.error = "";
+  render();
+
+  try {
+    const session = mode === "signup" ? await signUpToCloud(email, password) : await signInToCloud(email, password);
+    if (!session) {
+      cloudState.status = "signed-out";
+      cloudState.error = "Cuenta creada. Revisa tu correo si Supabase pide confirmacion.";
+      render();
+      return;
+    }
+    applyCloudSession(session);
+    state.lastAlert = mode === "signup" ? "Cuenta creada. Sincronizando nube..." : "Sesion iniciada. Bajando nube...";
+    await pullCloudAfterLogin();
+  } catch (error) {
+    cloudState.status = "signed-out";
+    cloudState.error = friendlyCloudError(error);
+    render();
+  }
+}
+
+async function handleCloudSignOut() {
+  cloudState.status = "syncing";
+  render();
+  try {
+    await signOutFromCloud();
+    cloudState.signedIn = false;
+    cloudState.email = "";
+    cloudState.status = "signed-out";
+    state.lastAlert = "Sesion cerrada. Este dispositivo queda en modo local.";
+  } catch (error) {
+    cloudState.status = "error";
+    cloudState.error = friendlyCloudError(error);
+  }
   render();
 }
 

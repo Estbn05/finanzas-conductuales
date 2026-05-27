@@ -56,6 +56,31 @@ En Android/Chrome: abre la demo publicada y elige "Instalar app" o "Agregar a pa
 
 En iPhone/Safari: abre la demo, toca compartir y luego "Agregar a pantalla de inicio".
 
+## Sincronizacion entre dispositivos
+
+La app funciona offline primero con `localStorage`. Para compartir datos entre computador y celular, incluye una capa opcional de Supabase:
+
+- Primer inicio de sesion en un dispositivo: si no hay nube, sube el plan local automaticamente.
+- Inicio de sesion en otro dispositivo: si ya hay nube, la descarga automaticamente.
+- Cada cambio posterior se sube solo, sin presionar "descargar nube".
+
+Configuracion:
+
+1. Crea un proyecto en Supabase.
+2. En el SQL editor, ejecuta [docs/supabase-schema.sql](docs/supabase-schema.sql).
+3. En Authentication, habilita Email/Password.
+4. Copia `Project URL` y `anon public key`.
+5. Edita `sync-config.js`:
+
+```js
+window.FINANZAS_SYNC_CONFIG = {
+  supabaseUrl: "https://TU_PROYECTO.supabase.co",
+  supabaseAnonKey: "TU_ANON_KEY"
+};
+```
+
+La anon key de Supabase es publica por diseno; la seguridad la controlan las politicas RLS del archivo SQL.
+
 ## Publicacion en GitHub Pages
 
 Este repositorio incluye `.github/workflows/pages.yml`. Cuando el proyecto se suba a GitHub y Pages este configurado con **GitHub Actions** como fuente, cada push a `main` o `master` ejecutara tests y publicara la demo.

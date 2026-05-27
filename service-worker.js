@@ -1,10 +1,12 @@
-const CACHE_NAME = "finanzas-conductuales-v3";
+const CACHE_NAME = "finanzas-conductuales-v4";
 const CORE_ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
   "./finance-core.js",
+  "./sync-client.js",
+  "./sync-config.js",
   "./manifest.webmanifest",
   "./assets/icon.svg",
   "./assets/icon-192.png",

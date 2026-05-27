@@ -263,6 +263,15 @@ a {
   white-space: nowrap;
 }
 
+.status-pill.danger {
+  color: #8c2d25;
+  background: var(--coral-2);
+}
+
+.cloud-status {
+  max-width: 190px;
+}
+
 .status-pill strong,
 .metric-badge strong {
   color: var(--ink);
@@ -734,6 +743,27 @@ input[type="range"] {
   align-items: end;
 }
 
+.cloud-card {
+  border-color: rgba(21, 111, 105, 0.28);
+}
+
+.cloud-form {
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+}
+
+.cloud-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.form-error {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  color: #8c2d25;
+  background: var(--coral-2);
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -998,6 +1028,7 @@ label {
   .debt-item,
   .cooldown-item,
   .inline-form,
+  .cloud-form,
   .diagnosis-form,
   .phase-grid,
   .score-grid {
