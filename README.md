@@ -16,7 +16,8 @@ Aplicacion personal de finanzas basada en economia conductual. El objetivo no es
 - **Mis datos:** ingreso, gastos comprometidos, ahorro disponible, deuda, ansiedad financiera, confianza y patrones de dinero.
 - **Registrar como pantalla principal:** la app abre en el registro de gastos para que el habito diario sea inmediato.
 - **Menu vertical desplegable:** guarda Plan, Deudas, Ahorro, Inicio, Datos, nube y avisos sin ocupar la pantalla principal.
-- **Barra de dinero disponible:** muestra siempre cuanto queda para gastar sin mezclarlo con otros estados.
+- **Barra de dinero disponible:** queda fija en el encabezado y no tapa el contenido.
+- **Registro primero:** el formulario para guardar un gasto aparece antes de los resumenes por categoria.
 - **Inicio accionable:** muestra el siguiente paso: poner datos reales, clasificar gastos, cerrar la revision, ahorrar o pagar deuda.
 - **Contexto estudiante becado:** permite modelar ingreso semestral, gasolina semanal de moto, salidas con pareja, regalos, gastos de universidad e imprevistos.
 - **Presupuesto 1/3:** divide ingreso en deuda, ahorro y gastos; ajusta ahorro precautorio si el ingreso es variable.

@@ -420,6 +420,7 @@ function render() {
           <span>Menu</span>
         </button>
       </div>
+      ${renderHeader(plan)}
       <div class="nav-panel ${menuOpen ? "is-open" : ""}" id="main-menu" aria-hidden="${!menuOpen}">
         <nav class="nav-list" aria-label="Secciones principales">
           ${NAV_ITEMS.map((item) => renderNavItem(item)).join("")}
@@ -439,7 +440,6 @@ function render() {
       </div>
     </aside>
     <main class="main-panel">
-      ${renderHeader(plan)}
       ${renderView(plan)}
     </main>
     ${state.showDiagnosis ? renderDiagnosisModal() : ""}
@@ -975,17 +975,6 @@ function renderSpending(plan) {
       <article class="card wide-card">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">Gasto por categoria</p>
-            <h2>Lo que va usado</h2>
-          </div>
-          <span class="metric-badge">Compra grande: ${formatMoney(threshold)}</span>
-        </div>
-        ${renderCategoryBars(plan, state.budgetJobs.length)}
-      </article>
-
-      <article class="card">
-        <div class="card-heading">
-          <div>
             <p class="eyebrow">Nuevo movimiento</p>
             <h2>Registrar gasto</h2>
           </div>
@@ -1011,6 +1000,17 @@ function renderSpending(plan) {
           </label>
           <button class="btn primary" type="submit">Guardar gasto</button>
         </form>
+      </article>
+
+      <article class="card wide-card">
+        <div class="card-heading">
+          <div>
+            <p class="eyebrow">Gasto por categoria</p>
+            <h2>Lo que va usado</h2>
+          </div>
+          <span class="metric-badge">Compra grande: ${formatMoney(threshold)}</span>
+        </div>
+        ${renderCategoryBars(plan, state.budgetJobs.length)}
       </article>
 
       <article class="card">
