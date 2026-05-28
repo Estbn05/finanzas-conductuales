@@ -28,7 +28,6 @@ const DEFAULT_VIEW = "spending";
 const STUDENT_SEMESTER_INCOME = 1_750_000;
 const STUDENT_SEMESTER_MONTHS = 6;
 const STUDENT_WEEKLY_GAS = 30_000;
-const TODAY = todayKey();
 
 const NAV_ITEMS = [
   { id: "spending", label: "Registrar gasto", icon: "01" },
@@ -72,6 +71,7 @@ if ("serviceWorker" in navigator && window.location.protocol !== "file:") {
 }
 
 function createDefaultState() {
+  const today = todayKey();
   const daysAgo = (days) => {
     const date = new Date();
     date.setDate(date.getDate() - days);
@@ -130,7 +130,7 @@ function createDefaultState() {
     transactions: [
       {
         id: uid("tx"),
-        date: TODAY,
+        date: today,
         merchant: "Tanqueada moto",
         amount: 30_000,
         category: "",
@@ -139,7 +139,7 @@ function createDefaultState() {
       },
       {
         id: uid("tx"),
-        date: TODAY,
+        date: today,
         merchant: "Salida con novia",
         amount: 42_000,
         category: "",
@@ -148,7 +148,7 @@ function createDefaultState() {
       },
       {
         id: uid("tx"),
-        date: TODAY,
+        date: today,
         merchant: "Almuerzo universidad",
         amount: 14_000,
         category: "",
@@ -581,9 +581,10 @@ function renderPrimaryActionButton(action) {
 }
 
 function renderToday(plan) {
+  const today = todayKey();
   const unlabeled = state.transactions.filter((transaction) => !transaction.labeled);
-  const unlabeledToday = state.transactions.filter((transaction) => transaction.date === TODAY && !transaction.labeled);
-  const checkinDone = state.checkins.includes(TODAY);
+  const unlabeledToday = state.transactions.filter((transaction) => transaction.date === today && !transaction.labeled);
+  const checkinDone = state.checkins.includes(today);
   const script = dominantMoneyScript();
   const primaryAction = getPrimaryAction(plan, unlabeled, checkinDone);
 
@@ -1608,7 +1609,7 @@ function handleDiagnosisSubmit(event) {
     state.wins = [
       {
         id: uid("win"),
-        date: TODAY,
+        date: todayKey(),
         text: "Guardaste tus datos reales y convertiste numeros sueltos en un plan."
       }
     ];
@@ -1763,17 +1764,18 @@ function handleImport(event) {
 }
 
 function completeCheckin() {
-  const unlabeledToday = state.transactions.filter((transaction) => transaction.date === TODAY && !transaction.labeled);
+  const today = todayKey();
+  const unlabeledToday = state.transactions.filter((transaction) => transaction.date === today && !transaction.labeled);
   if (unlabeledToday.length) {
     state.lastAlert = `Quedan ${unlabeledToday.length} gastos de hoy sin categoria.`;
     return;
   }
 
-  if (!state.checkins.includes(TODAY)) {
-    state.checkins.push(TODAY);
+  if (!state.checkins.includes(today)) {
+    state.checkins.push(today);
     state.wins.push({
       id: uid("win"),
-      date: TODAY,
+      date: today,
       text: "Completaste la revision de hoy."
     });
   }
@@ -1787,7 +1789,7 @@ function simulateSpendingAlert() {
 function addProcessWin() {
   state.wins.push({
     id: uid("win"),
-    date: TODAY,
+    date: todayKey(),
     text: "Revisaste el plan sin convertir un desvio en identidad."
   });
   state.lastAlert = "Victoria de proceso registrada.";
@@ -1822,7 +1824,7 @@ function applyStudentContext() {
   state.lastAlert = "Contexto estudiante aplicado: beca semestral, moto, gasolina y salidas.";
   state.wins.push({
     id: uid("win"),
-    date: TODAY,
+    date: todayKey(),
     text: "Personalizaste la app a tu vida de estudiante becado."
   });
 }
@@ -1839,7 +1841,7 @@ function registerDebtPayment(id) {
     state.debts = state.debts.filter((item) => item.id !== id);
     state.wins.push({
       id: uid("win"),
-      date: TODAY,
+      date: todayKey(),
       text: `Cerraste ${debt.name}. Una cuenta menos pesa mas que un numero perfecto.`
     });
     state.lastAlert = `${debt.name} cerrada. Una cuenta menos.`;
@@ -1867,7 +1869,7 @@ function cancelCooldown(id) {
   state.cooldowns = state.cooldowns.filter((cooldown) => cooldown.id !== id);
   state.wins.push({
     id: uid("win"),
-    date: TODAY,
+    date: todayKey(),
     text: "Cancelaste una compra despues de pausarla."
   });
   state.lastAlert = "Compra cancelada. Ese ahorro ya cuenta.";
@@ -1894,7 +1896,7 @@ function exportData() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `finanzas-conductuales-${TODAY}.json`;
+  link.download = `finanzas-conductuales-${todayKey()}.json`;
   link.click();
   URL.revokeObjectURL(url);
   state.lastAlert = "Archivo JSON exportado.";
@@ -1909,7 +1911,7 @@ function resetDemo() {
 function addTransaction({ merchant, amount, category, budgeted }) {
   state.transactions.push({
     id: uid("tx"),
-    date: TODAY,
+    date: todayKey(),
     merchant,
     amount,
     category,
@@ -1923,15 +1925,15 @@ function calculatePlan() {
 }
 
 function categoryStatus() {
-  return getCategoryStatus(state, TODAY);
+  return getCategoryStatus(state, todayKey());
 }
 
 function spendByCategory() {
-  return getSpendByCategory(state, TODAY);
+  return getSpendByCategory(state, todayKey());
 }
 
 function monthlyLabeledSpend() {
-  return getMonthlyLabeledSpend(state, TODAY);
+  return getMonthlyLabeledSpend(state, todayKey());
 }
 
 function sortedDebts() {
@@ -2110,10 +2112,6 @@ function hoursFromNow(hours) {
 function todayKey(date = new Date()) {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 10);
-}
-
-function isCurrentMonth(dateValue) {
-  return String(dateValue).slice(0, 7) === TODAY.slice(0, 7);
 }
 
 function relativeUnlock(dateValue) {
