@@ -74,7 +74,7 @@ a {
   top: 0;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 14px;
   min-width: 0;
   height: 100vh;
   padding: 22px;
@@ -82,6 +82,13 @@ a {
   background:
     linear-gradient(180deg, rgba(21, 111, 105, 0.96), rgba(38, 87, 78, 0.98)),
     var(--teal);
+}
+
+.sidebar-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
 }
 
 .brand {
@@ -118,6 +125,90 @@ a {
   color: rgba(255, 253, 248, 0.72);
 }
 
+.menu-toggle,
+.active-route {
+  border: 1px solid rgba(255, 253, 248, 0.24);
+  border-radius: var(--radius);
+  color: #fffdf8;
+  background: rgba(255, 253, 248, 0.12);
+}
+
+.menu-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  gap: 8px;
+  padding: 0 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.menu-toggle:hover,
+.menu-toggle[aria-expanded="true"],
+.active-route:hover {
+  background: rgba(255, 253, 248, 0.18);
+}
+
+.menu-bars {
+  position: relative;
+  width: 18px;
+  height: 12px;
+  border-top: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+}
+
+.menu-bars::after {
+  position: absolute;
+  top: 3px;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: currentColor;
+  content: "";
+}
+
+.active-route {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  align-items: center;
+  min-height: 58px;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  text-align: left;
+}
+
+.active-route small,
+.active-route strong {
+  display: block;
+}
+
+.active-route small {
+  color: rgba(255, 253, 248, 0.68);
+}
+
+.active-route strong {
+  margin-top: 2px;
+}
+
+.nav-panel {
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    max-height 220ms ease,
+    opacity 180ms ease,
+    visibility 180ms ease;
+}
+
+.nav-panel.is-open {
+  max-height: 430px;
+  opacity: 1;
+  visibility: visible;
+}
+
 .nav-list {
   display: grid;
   gap: 8px;
@@ -147,6 +238,10 @@ a {
   border-color: rgba(255, 253, 248, 0.22);
   color: #fffdf8;
   background: rgba(255, 253, 248, 0.12);
+}
+
+.nav-item.is-primary {
+  border-color: rgba(245, 191, 73, 0.42);
 }
 
 .nav-number {
@@ -960,7 +1055,8 @@ label {
   }
 
   .sidebar {
-    position: static;
+    position: sticky;
+    z-index: 10;
     overflow-x: hidden;
     height: auto;
     padding: 16px;
@@ -976,15 +1072,15 @@ label {
   }
 
   .nav-list {
-    display: flex;
+    display: grid;
     width: 100%;
     max-width: 100%;
-    overflow-x: auto;
+    overflow-x: hidden;
     padding-bottom: 2px;
   }
 
   .nav-item {
-    flex: 0 0 128px;
+    width: 100%;
   }
 
   .sidebar-meter {

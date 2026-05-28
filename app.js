@@ -24,23 +24,25 @@ import {
 } from "./sync-client.js";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
+const DEFAULT_VIEW = "spending";
 const STUDENT_SEMESTER_INCOME = 1_750_000;
 const STUDENT_SEMESTER_MONTHS = 6;
 const STUDENT_WEEKLY_GAS = 30_000;
 const TODAY = todayKey();
 
 const NAV_ITEMS = [
-  { id: "today", label: "Inicio", icon: "01" },
-  { id: "budget", label: "Plan", icon: "02" },
-  { id: "debt", label: "Deudas", icon: "03" },
+  { id: "spending", label: "Registrar gasto", icon: "01" },
+  { id: "today", label: "Inicio", icon: "02" },
+  { id: "budget", label: "Plan", icon: "03" },
   { id: "savings", label: "Ahorro", icon: "04" },
-  { id: "spending", label: "Registrar", icon: "05" },
+  { id: "debt", label: "Deudas", icon: "05" },
   { id: "profile", label: "Datos", icon: "06" }
 ];
 
 const app = document.querySelector("#app");
 let state = loadState();
-state.activeView = viewFromHash(state.activeView);
+state.activeView = viewFromHash(DEFAULT_VIEW);
+let menuOpen = false;
 let applyingCloudState = false;
 let cloudSaveTimer;
 let authUnsubscribe = () => {};
@@ -56,9 +58,10 @@ let cloudState = {
 render();
 initializeCloudSync();
 window.addEventListener("hashchange", () => {
-  const nextView = viewFromHash(state.activeView);
+  const nextView = viewFromHash(DEFAULT_VIEW);
   if (nextView !== state.activeView) {
     state.activeView = nextView;
+    menuOpen = false;
     saveState({ sync: false });
     render();
   }
@@ -76,9 +79,9 @@ function createDefaultState() {
   };
 
   return {
-    activeView: "today",
+    activeView: DEFAULT_VIEW,
     showDiagnosis: false,
-    lastAlert: "Estas viendo datos de ejemplo. Usa Mis datos para poner tus numeros reales.",
+    lastAlert: "Registra cada gasto en menos de un minuto. Usa Mis datos para ajustar tus numeros reales.",
     meta: {
       updatedAt: new Date().toISOString(),
       cloudUpdatedAt: "",
@@ -308,7 +311,7 @@ async function pullCloudAfterLogin() {
       applyingCloudState = true;
       state = migrateState(remote.app_state);
       state.showDiagnosis = false;
-      state.activeView = "today";
+      activateView(DEFAULT_VIEW);
       state.lastAlert = "Nube sincronizada automaticamente.";
       state.meta = {
         ...(state.meta || {}),
@@ -401,18 +404,36 @@ function friendlyCloudError(error) {
 
 function render() {
   const plan = calculatePlan();
+  const activeItem = currentNavItem();
+  const activeRouteLabel = activeItem.id === DEFAULT_VIEW ? "Vista principal" : "Vista actual";
+  app.classList.toggle("is-menu-open", menuOpen);
   app.innerHTML = `
     <aside class="sidebar">
-      <a class="brand" href="#" data-action="go-today" aria-label="Ir al tablero diario">
-        <span class="brand-mark">FC</span>
+      <div class="sidebar-head">
+        <a class="brand" href="#" data-action="go-spending" aria-label="Ir a registrar gasto">
+          <span class="brand-mark">FC</span>
+          <span>
+            <strong>Finanzas Conductuales</strong>
+            <small>Tu dinero en 5 minutos</small>
+          </span>
+        </a>
+        <button class="menu-toggle" type="button" data-action="toggle-menu" aria-expanded="${menuOpen}" aria-controls="main-menu">
+          <span class="menu-bars" aria-hidden="true"></span>
+          <span>Menu</span>
+        </button>
+      </div>
+      <button class="active-route" type="button" data-action="toggle-menu" aria-expanded="${menuOpen}" aria-controls="main-menu">
+        <span class="nav-number">${activeItem.icon}</span>
         <span>
-          <strong>Finanzas Conductuales</strong>
-          <small>Tu dinero en 5 minutos</small>
+          <small>${activeRouteLabel}</small>
+          <strong>${escapeHtml(activeItem.label)}</strong>
         </span>
-      </a>
-      <nav class="nav-list" aria-label="Secciones principales">
-        ${NAV_ITEMS.map((item) => renderNavItem(item)).join("")}
-      </nav>
+      </button>
+      <div class="nav-panel ${menuOpen ? "is-open" : ""}" id="main-menu" aria-hidden="${!menuOpen}">
+        <nav class="nav-list" aria-label="Secciones principales">
+          ${NAV_ITEMS.map((item) => renderNavItem(item)).join("")}
+        </nav>
+      </div>
       <div class="sidebar-meter">
         <span>Buffer base</span>
         <strong>${Math.round(plan.emergencyProgress)}%</strong>
@@ -434,12 +455,17 @@ function render() {
 
 function renderNavItem(item) {
   const active = state.activeView === item.id ? "is-active" : "";
+  const primary = item.id === DEFAULT_VIEW ? "is-primary" : "";
   return `
-    <button class="nav-item ${active}" type="button" data-view="${item.id}">
+    <button class="nav-item ${active} ${primary}" type="button" data-view="${item.id}" tabindex="${menuOpen ? "0" : "-1"}">
       <span class="nav-number">${item.icon}</span>
       <span>${item.label}</span>
     </button>
   `;
+}
+
+function currentNavItem() {
+  return NAV_ITEMS.find((item) => item.id === state.activeView) || NAV_ITEMS[0];
 }
 
 function renderHeader(plan) {
@@ -1451,8 +1477,7 @@ function renderProgress(value, label) {
 function bindEvents() {
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.activeView = button.dataset.view;
-      window.location.hash = hashFromView(state.activeView);
+      activateView(button.dataset.view);
       saveState();
       render();
     });
@@ -1515,12 +1540,16 @@ function bindEvents() {
 }
 
 function handleAction(event) {
+  event.preventDefault();
   const action = event.currentTarget.dataset.action;
   const id = event.currentTarget.dataset.id;
 
   const actions = {
-    "go-today": () => {
-      state.activeView = "today";
+    "go-spending": () => {
+      activateView(DEFAULT_VIEW);
+    },
+    "toggle-menu": () => {
+      menuOpen = !menuOpen;
     },
     "open-diagnosis": () => {
       state.showDiagnosis = true;
@@ -1556,8 +1585,11 @@ function handleAction(event) {
 
   if (actions[action]) {
     actions[action]();
-    if (!["push-cloud-now", "pull-cloud-now", "cloud-sign-out"].includes(action)) {
+    const asyncCloudAction = ["push-cloud-now", "pull-cloud-now", "cloud-sign-out"].includes(action);
+    if (!asyncCloudAction && action !== "toggle-menu") {
       saveState();
+    }
+    if (!asyncCloudAction) {
       render();
     }
   }
@@ -1617,8 +1649,8 @@ function handleDiagnosisSubmit(event) {
   }
 
   state.showDiagnosis = false;
-  state.activeView = "today";
-  state.lastAlert = "Datos guardados. Tu inicio ya muestra el siguiente paso.";
+  activateView(DEFAULT_VIEW);
+  state.lastAlert = "Datos guardados. Ahora registra tus gastos desde la pantalla principal.";
   saveState();
   render();
 }
@@ -2067,6 +2099,18 @@ function viewFromHash(fallback) {
   };
   const view = aliases[rawHash] || rawHash;
   return NAV_ITEMS.some((item) => item.id === view) ? view : fallback;
+}
+
+function activateView(view) {
+  if (!NAV_ITEMS.some((item) => item.id === view)) {
+    return;
+  }
+  state.activeView = view;
+  menuOpen = false;
+  const nextHash = hashFromView(view);
+  if (window.location.hash.replace("#", "") !== nextHash) {
+    window.location.hash = nextHash;
+  }
 }
 
 function hashFromView(view) {
