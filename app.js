@@ -404,8 +404,6 @@ function friendlyCloudError(error) {
 
 function render() {
   const plan = calculatePlan();
-  const activeItem = currentNavItem();
-  const activeRouteLabel = activeItem.id === DEFAULT_VIEW ? "Vista principal" : "Vista actual";
   app.classList.toggle("is-menu-open", menuOpen);
   app.innerHTML = `
     <aside class="sidebar">
@@ -422,17 +420,15 @@ function render() {
           <span>Menu</span>
         </button>
       </div>
-      <button class="active-route" type="button" data-action="toggle-menu" aria-expanded="${menuOpen}" aria-controls="main-menu">
-        <span class="nav-number">${activeItem.icon}</span>
-        <span>
-          <small>${activeRouteLabel}</small>
-          <strong>${escapeHtml(activeItem.label)}</strong>
-        </span>
-      </button>
       <div class="nav-panel ${menuOpen ? "is-open" : ""}" id="main-menu" aria-hidden="${!menuOpen}">
         <nav class="nav-list" aria-label="Secciones principales">
           ${NAV_ITEMS.map((item) => renderNavItem(item)).join("")}
         </nav>
+        <div class="menu-tools">
+          ${renderCloudStatus()}
+          <button class="btn primary" type="button" data-action="open-diagnosis">Mis datos</button>
+          ${state.lastAlert ? `<div class="menu-notice" role="status">${escapeHtml(state.lastAlert)}</div>` : ""}
+        </div>
       </div>
       <div class="sidebar-meter">
         <span>Buffer base</span>
@@ -444,7 +440,6 @@ function render() {
     </aside>
     <main class="main-panel">
       ${renderHeader(plan)}
-      ${state.lastAlert ? `<div class="notice" role="status">${escapeHtml(state.lastAlert)}</div>` : ""}
       ${renderView(plan)}
     </main>
     ${state.showDiagnosis ? renderDiagnosisModal() : ""}
@@ -464,32 +459,14 @@ function renderNavItem(item) {
   `;
 }
 
-function currentNavItem() {
-  return NAV_ITEMS.find((item) => item.id === state.activeView) || NAV_ITEMS[0];
-}
-
 function renderHeader(plan) {
-  const streak = currentStreak();
   const remaining = Math.max(0, plan.expenses - monthlyLabeledSpend());
 
   return `
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">${state.profile.completed ? "Datos reales activos" : "Datos de ejemplo"}</p>
-        <h1>${headerTitle()}</h1>
-      </div>
-      <div class="topbar-actions">
-        <span class="status-pill">
-          <strong>${streak}</strong>
-          revisiones
-        </span>
-        <span class="status-pill">
-          <strong>${formatMoney(remaining)}</strong>
-          para gastar
-        </span>
-        ${renderCloudStatus()}
-        <button class="btn primary" type="button" data-action="open-diagnosis">Mis datos</button>
-      </div>
+    <header class="money-bar" role="status" aria-label="Dinero disponible para gastar">
+      <span>Disponible</span>
+      <strong>${formatMoney(remaining)}</strong>
+      <span>para gastar</span>
     </header>
   `;
 }
@@ -523,18 +500,6 @@ function renderView(plan) {
     profile: renderProfile
   };
   return views[state.activeView](plan);
-}
-
-function headerTitle() {
-  const titles = {
-    today: "Inicio",
-    budget: "Plan mensual",
-    debt: "Salir de deudas",
-    savings: "Fondo de emergencia",
-    spending: "Registrar gasto",
-    profile: "Mis datos"
-  };
-  return titles[state.activeView] || "Finanzas Conductuales";
 }
 
 function getPrimaryAction(plan, unlabeled, checkinDone) {
@@ -1553,6 +1518,7 @@ function handleAction(event) {
     },
     "open-diagnosis": () => {
       state.showDiagnosis = true;
+      menuOpen = false;
     },
     "close-diagnosis": () => {
       state.showDiagnosis = false;
@@ -2052,17 +2018,6 @@ function createSpendAlert(categoryId) {
     return `${category.name} esta al ${Math.round(category.ratio)}%. Quedan ${formatMoney(Math.max(0, category.budget - category.spent))}.`;
   }
   return `${category.name} va al ${Math.round(category.ratio)}%. El limite sigue visible antes de comprar.`;
-}
-
-function currentStreak() {
-  const dates = new Set(state.checkins);
-  let streak = 0;
-  const cursor = new Date();
-  while (dates.has(todayKey(cursor))) {
-    streak += 1;
-    cursor.setDate(cursor.getDate() - 1);
-  }
-  return streak;
 }
 
 function uniqueCategoryId(name) {
