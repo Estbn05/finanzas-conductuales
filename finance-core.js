@@ -2,7 +2,8 @@ export const EMERGENCY_BASELINE = 8_000_000;
 export const LARGE_PURCHASE_RATIO = 0.08;
 
 export function calculatePlan(state) {
-  const income = Number(state.profile.monthlyIncome || 0);
+  const income = getMonthlyIncome(state.profile);
+  const isSemesterIncome = state.profile.incomeCadence === "semester";
   const base = income / 3;
   const hasDebt = state.debts.some((debt) => Number(debt.balance || 0) > 0);
   const alphaMap = { low: 1.08, medium: 1.18, high: 1.32 };
@@ -10,15 +11,24 @@ export function calculatePlan(state) {
   let savings = base * alpha;
   let debt = hasDebt ? base * (alpha > 1 ? 0.92 : 1) : base * 0.35;
   let expenses = income - savings - debt;
+  const minimumDebt = minimumDebtPayments(state);
+
+  if (isSemesterIncome) {
+    const committed = Number(state.profile.committedExpenses || 0);
+    const flexiblePool = Math.max(0, income - committed - (hasDebt ? minimumDebt : 0));
+    debt = hasDebt ? Math.max(minimumDebt, flexiblePool * 0.25) : 0;
+    savings = flexiblePool * 0.45;
+    expenses = Math.max(committed, income - savings - debt);
+  }
 
   if (expenses < Number(state.profile.committedExpenses || 0)) {
     const gap = Number(state.profile.committedExpenses || 0) - expenses;
     savings = Math.max(base * 0.65, savings - gap * 0.7);
-    debt = hasDebt ? Math.max(minimumDebtPayments(state), debt - gap * 0.3) : debt;
+    debt = hasDebt ? Math.max(minimumDebt, debt - gap * 0.3) : debt;
     expenses = income - savings - debt;
   }
 
-  if (!hasDebt) {
+  if (!hasDebt && !isSemesterIncome) {
     savings += debt * 0.7;
     expenses += debt * 0.3;
     debt = 0;
@@ -41,10 +51,27 @@ export function calculatePlan(state) {
     debtDegrees: (debt / total) * 360,
     savingsDegrees: ((debt + savings) / total) * 360,
     incomeNote:
-      state.profile.incomeType === "variable"
+      isSemesterIncome
+        ? `Ingreso semestral: ${formatPlanNumber(Number(state.profile.semesterIncome || 0))} dividido en ${Number(state.profile.semesterMonths || 6)} meses.`
+        : state.profile.incomeType === "variable"
         ? `Ingreso variable: factor alpha ${alpha.toFixed(2)} aumenta ahorro precautorio.`
         : "Ingreso fijo: se mantiene reparto 1/3 antes de optimizaciones."
   };
+}
+
+export function getMonthlyIncome(profile) {
+  if (profile.incomeCadence === "semester") {
+    const months = Math.max(1, Number(profile.semesterMonths || 6));
+    const semesterIncome = Number(profile.semesterIncome || 0);
+    return Math.round(semesterIncome / months);
+  }
+  return Number(profile.monthlyIncome || 0);
+}
+
+function formatPlanNumber(value) {
+  return new Intl.NumberFormat("es-CO", {
+    maximumFractionDigits: 0
+  }).format(Number(value || 0));
 }
 
 export function categoryStatus(state, today) {

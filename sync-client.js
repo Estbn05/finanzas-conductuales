@@ -50,6 +50,9 @@ export function onCloudAuthChange(callback) {
 
 export async function signInToCloud(email, password) {
   const cloud = getCloudClient();
+  if (!cloud) {
+    throw new Error("La libreria de nube no esta disponible.");
+  }
   const { data, error } = await cloud.auth.signInWithPassword({ email, password });
   if (error) {
     throw error;
@@ -59,6 +62,9 @@ export async function signInToCloud(email, password) {
 
 export async function signUpToCloud(email, password) {
   const cloud = getCloudClient();
+  if (!cloud) {
+    throw new Error("La libreria de nube no esta disponible.");
+  }
   const { data, error } = await cloud.auth.signUp({ email, password });
   if (error) {
     throw error;

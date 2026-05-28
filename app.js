@@ -4,6 +4,7 @@ import {
   calculatePlan as calculateFinancePlan,
   categoryStatus as getCategoryStatus,
   minimumDebtPayments as getMinimumDebtPayments,
+  getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   shouldUseDebtExposureMode as getShouldUseDebtExposureMode,
   sortedDebts as getSortedDebts,
@@ -23,6 +24,9 @@ import {
 } from "./sync-client.js";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
+const STUDENT_SEMESTER_INCOME = 1_750_000;
+const STUDENT_SEMESTER_MONTHS = 6;
+const STUDENT_WEEKLY_GAS = 30_000;
 const TODAY = todayKey();
 
 const NAV_ITEMS = [
@@ -36,6 +40,7 @@ const NAV_ITEMS = [
 
 const app = document.querySelector("#app");
 let state = loadState();
+state.activeView = viewFromHash(state.activeView);
 let applyingCloudState = false;
 let cloudSaveTimer;
 let authUnsubscribe = () => {};
@@ -50,6 +55,14 @@ let cloudState = {
 
 render();
 initializeCloudSync();
+window.addEventListener("hashchange", () => {
+  const nextView = viewFromHash(state.activeView);
+  if (nextView !== state.activeView) {
+    state.activeView = nextView;
+    saveState({ sync: false });
+    render();
+  }
+});
 
 if ("serviceWorker" in navigator && window.location.protocol !== "file:") {
   navigator.serviceWorker.register("./service-worker.js").catch(() => {});
@@ -75,11 +88,17 @@ function createDefaultState() {
       completed: false,
       name: "Tu plan",
       currency: "COP",
-      monthlyIncome: 5_200_000,
-      incomeType: "fixed",
+      monthlyIncome: monthlyFromSemester(STUDENT_SEMESTER_INCOME, STUDENT_SEMESTER_MONTHS),
+      semesterIncome: STUDENT_SEMESTER_INCOME,
+      semesterMonths: STUDENT_SEMESTER_MONTHS,
+      incomeCadence: "semester",
+      incomeType: "variable",
       volatility: "medium",
-      committedExpenses: 1_850_000,
-      emergencySavings: 1_200_000,
+      committedExpenses: monthlyFromWeekly(STUDENT_WEEKLY_GAS),
+      weeklyGas: STUDENT_WEEKLY_GAS,
+      relationshipMonthlyBudget: 45_000,
+      giftMonthlyBudget: 20_000,
+      emergencySavings: 0,
       payday: 1,
       financialAnxiety: 6,
       selfEfficacy: 5,
@@ -98,24 +117,19 @@ function createDefaultState() {
       escalationPct: 50
     },
     budgetJobs: [
-      { id: "housing", name: "Vivienda y servicios", budget: 1_650_000 },
-      { id: "food", name: "Mercado y comida", budget: 780_000 },
-      { id: "transport", name: "Transporte", budget: 320_000 },
-      { id: "health", name: "Salud", budget: 220_000 },
-      { id: "learning", name: "Aprendizaje", budget: 180_000 },
-      { id: "flex", name: "Gasto flexible", budget: 380_000 }
+      { id: "gas", name: "Gasolina moto", budget: monthlyFromWeekly(STUDENT_WEEKLY_GAS) },
+      { id: "dates", name: "Salidas con novia", budget: 45_000 },
+      { id: "gifts", name: "Regalos para novia", budget: 20_000 },
+      { id: "university", name: "Universidad y comida", budget: 25_000 },
+      { id: "flex", name: "Imprevistos", budget: 9_000 }
     ],
-    debts: [
-      { id: uid("debt"), name: "Tarjeta de credito", balance: 1_450_000, apr: 31, minimum: 180_000 },
-      { id: uid("debt"), name: "Compra a cuotas", balance: 620_000, apr: 18, minimum: 95_000 },
-      { id: uid("debt"), name: "Prestamo personal", balance: 4_800_000, apr: 24, minimum: 310_000 }
-    ],
+    debts: [],
     transactions: [
       {
         id: uid("tx"),
         date: TODAY,
-        merchant: "Supermercado",
-        amount: 128_000,
+        merchant: "Tanqueada moto",
+        amount: 30_000,
         category: "",
         labeled: false,
         budgeted: true
@@ -123,8 +137,8 @@ function createDefaultState() {
       {
         id: uid("tx"),
         date: TODAY,
-        merchant: "Plataforma streaming",
-        amount: 34_900,
+        merchant: "Salida con novia",
+        amount: 42_000,
         category: "",
         labeled: false,
         budgeted: true
@@ -132,8 +146,8 @@ function createDefaultState() {
       {
         id: uid("tx"),
         date: TODAY,
-        merchant: "Cafe y snack",
-        amount: 22_000,
+        merchant: "Almuerzo universidad",
+        amount: 14_000,
         category: "",
         labeled: false,
         budgeted: true
@@ -141,27 +155,27 @@ function createDefaultState() {
       {
         id: uid("tx"),
         date: daysAgo(1),
-        merchant: "Arriendo",
-        amount: 1_300_000,
-        category: "housing",
+        merchant: "Gasolina semana pasada",
+        amount: 30_000,
+        category: "gas",
         labeled: true,
         budgeted: true
       },
       {
         id: uid("tx"),
         date: daysAgo(2),
-        merchant: "Transporte app",
-        amount: 46_000,
-        category: "transport",
+        merchant: "Detalles pequenos",
+        amount: 18_000,
+        category: "gifts",
         labeled: true,
         budgeted: true
       },
       {
         id: uid("tx"),
         date: daysAgo(3),
-        merchant: "Curso online",
-        amount: 110_000,
-        category: "learning",
+        merchant: "Fotocopias",
+        amount: 8_000,
+        category: "university",
         labeled: true,
         budgeted: true
       }
@@ -169,8 +183,8 @@ function createDefaultState() {
     cooldowns: [
       {
         id: uid("cool"),
-        merchant: "Audifonos premium",
-        amount: 540_000,
+        merchant: "Regalo grande sorpresa",
+        amount: 180_000,
         category: "flex",
         createdAt: new Date().toISOString(),
         unlockAt: hoursFromNow(24).toISOString()
@@ -378,6 +392,9 @@ function friendlyCloudError(error) {
   }
   if (message.toLowerCase().includes("fetch")) {
     return "No pude conectar con la nube. Revisa internet.";
+  }
+  if (message.toLowerCase().includes("libreria de nube")) {
+    return "No pude cargar Supabase. Revisa internet y recarga la pagina.";
   }
   return message;
 }
@@ -897,7 +914,7 @@ function renderSavings(plan) {
   const monthsCovered = state.profile.committedExpenses
     ? state.profile.emergencySavings / state.profile.committedExpenses
     : 0;
-  const futureRaise = state.profile.monthlyIncome * (state.settings.monthlyRaisePct / 100);
+  const futureRaise = getMonthlyIncome(state.profile) * (state.settings.monthlyRaisePct / 100);
   const escalatedSavings = futureRaise * (state.settings.escalationPct / 100);
 
   return `
@@ -1055,10 +1072,12 @@ function renderCooldown(cooldown) {
 function renderProfile(plan) {
   const script = dominantMoneyScript();
   const anxietyTone = state.profile.financialAnxiety >= 7 ? "Revision suave" : "Revision estandar";
+  const monthlyIncome = getMonthlyIncome(state.profile);
 
   return `
     <section class="content-grid profile-grid">
       ${renderCloudPanel()}
+      ${renderStudentContextPanel()}
 
       <article class="card">
         <p class="eyebrow">Tus datos</p>
@@ -1093,7 +1112,7 @@ function renderProfile(plan) {
 
       <article class="card">
         <p class="eyebrow">Resumen mensual</p>
-        <h2>${formatMoney(state.profile.monthlyIncome)} / mes</h2>
+        <h2>${formatMoney(monthlyIncome)} / mes</h2>
         ${renderAllocation("Deuda", plan.debt, "debt")}
         ${renderAllocation("Ahorro", plan.savings, "savings")}
         ${renderAllocation("Gastos", plan.expenses, "expenses")}
@@ -1131,6 +1150,45 @@ function renderProfile(plan) {
         </div>
       </article>
     </section>
+  `;
+}
+
+function renderStudentContextPanel() {
+  const semesterIncome = Number(state.profile.semesterIncome || STUDENT_SEMESTER_INCOME);
+  const semesterMonths = Number(state.profile.semesterMonths || STUDENT_SEMESTER_MONTHS);
+  const weeklyGas = Number(state.profile.weeklyGas || STUDENT_WEEKLY_GAS);
+  return `
+    <article class="card wide-card context-card">
+      <div class="card-heading">
+        <div>
+          <p class="eyebrow">Contexto personal</p>
+          <h2>Estudiante becado con moto</h2>
+        </div>
+        <span class="metric-badge">${formatMoney(monthlyFromSemester(semesterIncome, semesterMonths))} / mes</span>
+      </div>
+      <div class="context-grid">
+        <div>
+          <strong>${formatMoney(semesterIncome)}</strong>
+          <span>beca semestral</span>
+        </div>
+        <div>
+          <strong>${semesterMonths} meses</strong>
+          <span>para cubrir</span>
+        </div>
+        <div>
+          <strong>${formatMoney(weeklyGas)}</strong>
+          <span>gasolina semanal</span>
+        </div>
+        <div>
+          <strong>${formatMoney(state.profile.relationshipMonthlyBudget || 45_000)}</strong>
+          <span>salidas con novia</span>
+        </div>
+      </div>
+      <p>Este preset reparte la beca por meses, aparta gasolina de moto y deja categorias para salidas, regalos, universidad e imprevistos.</p>
+      <div class="card-actions">
+        <button class="btn secondary" type="button" data-action="apply-student-context">Aplicar mi contexto</button>
+      </div>
+    </article>
   `;
 }
 
@@ -1242,12 +1300,39 @@ function renderDiagnosisModal() {
               <input name="name" type="text" maxlength="32" value="${escapeAttr(profile.name)}" required>
             </label>
             <label>
-              Ingreso mensual
-              <input name="monthlyIncome" type="number" min="0" step="1000" value="${profile.monthlyIncome}" required>
+              Como recibes ingresos
+              <select name="incomeCadence">
+                <option value="semester" ${profile.incomeCadence === "semester" ? "selected" : ""}>Semestral / beca</option>
+                <option value="monthly" ${profile.incomeCadence !== "semester" ? "selected" : ""}>Mensual</option>
+              </select>
+            </label>
+            <label>
+              Ingreso semestral
+              <input name="semesterIncome" type="number" min="0" step="1000" value="${profile.semesterIncome || STUDENT_SEMESTER_INCOME}" required>
+            </label>
+            <label>
+              Meses que debe cubrir
+              <input name="semesterMonths" type="number" min="1" max="12" step="1" value="${profile.semesterMonths || STUDENT_SEMESTER_MONTHS}" required>
+            </label>
+            <label>
+              Ingreso mensual equivalente
+              <input name="monthlyIncome" type="number" min="0" step="1000" value="${getMonthlyIncome(profile)}" required>
             </label>
             <label>
               Gastos comprometidos
               <input name="committedExpenses" type="number" min="0" step="1000" value="${profile.committedExpenses}" required>
+            </label>
+            <label>
+              Gasolina semanal
+              <input name="weeklyGas" type="number" min="0" step="1000" value="${profile.weeklyGas || STUDENT_WEEKLY_GAS}" required>
+            </label>
+            <label>
+              Salidas con novia / mes
+              <input name="relationshipMonthlyBudget" type="number" min="0" step="1000" value="${profile.relationshipMonthlyBudget || 45_000}">
+            </label>
+            <label>
+              Regalos / mes
+              <input name="giftMonthlyBudget" type="number" min="0" step="1000" value="${profile.giftMonthlyBudget || 20_000}">
             </label>
             <label>
               Ahorro disponible
@@ -1367,6 +1452,7 @@ function bindEvents() {
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
       state.activeView = button.dataset.view;
+      window.location.hash = hashFromView(state.activeView);
       saveState();
       render();
     });
@@ -1456,6 +1542,7 @@ function handleAction(event) {
       state.settings[setting] = !state.settings[setting];
       state.lastAlert = state.settings[setting] ? "Automatizacion activada por defecto." : "Automatizacion pausada manualmente.";
     },
+    "apply-student-context": applyStudentContext,
     "pay-debt": () => registerDebtPayment(id),
     "remove-job": () => removeBudgetJob(id),
     "cancel-cooldown": () => cancelCooldown(id),
@@ -1481,13 +1568,24 @@ function handleDiagnosisSubmit(event) {
   const data = new FormData(event.currentTarget);
   const wasIncomplete = !state.profile.completed;
   const estimatedDebt = numberFrom(data.get("totalDebt"));
+  const incomeCadence = data.get("incomeCadence") === "semester" ? "semester" : "monthly";
+  const semesterIncome = numberFrom(data.get("semesterIncome"));
+  const semesterMonths = clamp(numberFrom(data.get("semesterMonths")), 1, 12);
+  const weeklyGas = numberFrom(data.get("weeklyGas"));
+  const monthlyIncome = incomeCadence === "semester" ? monthlyFromSemester(semesterIncome, semesterMonths) : numberFrom(data.get("monthlyIncome"));
 
   state.profile = {
     ...state.profile,
     completed: true,
     name: cleanText(data.get("name"), "Mi plan"),
-    monthlyIncome: numberFrom(data.get("monthlyIncome")),
+    incomeCadence,
+    semesterIncome,
+    semesterMonths,
+    monthlyIncome,
     committedExpenses: numberFrom(data.get("committedExpenses")),
+    weeklyGas,
+    relationshipMonthlyBudget: numberFrom(data.get("relationshipMonthlyBudget")),
+    giftMonthlyBudget: numberFrom(data.get("giftMonthlyBudget")),
     emergencySavings: numberFrom(data.get("emergencySavings")),
     payday: clamp(numberFrom(data.get("payday")), 1, 28),
     incomeType: data.get("incomeType") === "variable" ? "variable" : "fixed",
@@ -1697,6 +1795,40 @@ function addProcessWin() {
   state.lastAlert = "Victoria de proceso registrada.";
 }
 
+function applyStudentContext() {
+  const semesterIncome = STUDENT_SEMESTER_INCOME;
+  const semesterMonths = STUDENT_SEMESTER_MONTHS;
+  const weeklyGas = STUDENT_WEEKLY_GAS;
+  state.profile = {
+    ...state.profile,
+    completed: true,
+    name: "Plan estudiante becado",
+    incomeCadence: "semester",
+    incomeType: "variable",
+    volatility: "medium",
+    semesterIncome,
+    semesterMonths,
+    monthlyIncome: monthlyFromSemester(semesterIncome, semesterMonths),
+    weeklyGas,
+    committedExpenses: monthlyFromWeekly(weeklyGas),
+    relationshipMonthlyBudget: 45_000,
+    giftMonthlyBudget: 20_000
+  };
+  state.budgetJobs = [
+    { id: "gas", name: "Gasolina moto", budget: monthlyFromWeekly(weeklyGas) },
+    { id: "dates", name: "Salidas con novia", budget: 45_000 },
+    { id: "gifts", name: "Regalos para novia", budget: 20_000 },
+    { id: "university", name: "Universidad y comida", budget: 25_000 },
+    { id: "flex", name: "Imprevistos", budget: 9_000 }
+  ];
+  state.lastAlert = "Contexto estudiante aplicado: beca semestral, moto, gasolina y salidas.";
+  state.wins.push({
+    id: uid("win"),
+    date: TODAY,
+    text: "Personalizaste la app a tu vida de estudiante becado."
+  });
+}
+
 function registerDebtPayment(id) {
   const debt = state.debts.find((item) => item.id === id);
   if (!debt) {
@@ -1869,7 +2001,7 @@ function graduatedPresenceTask() {
 
 function futureFreedom(plan) {
   const monthlyReturn = plan.savings * 0.006;
-  const hours = monthlyReturn / Math.max(1, state.profile.monthlyIncome / 160);
+  const hours = monthlyReturn / Math.max(1, getMonthlyIncome(state.profile) / 160);
   if (hours < 1) {
     return `${Math.round(hours * 60)} minutos libres/mes`;
   }
@@ -1918,8 +2050,47 @@ function uniqueCategoryId(name) {
   return candidate;
 }
 
+function viewFromHash(fallback) {
+  const rawHash = window.location.hash.replace("#", "");
+  const aliases = {
+    inicio: "today",
+    hoy: "today",
+    plan: "budget",
+    presupuesto: "budget",
+    deudas: "debt",
+    ahorro: "savings",
+    registrar: "spending",
+    gastos: "spending",
+    datos: "profile",
+    cuenta: "profile",
+    profile: "profile"
+  };
+  const view = aliases[rawHash] || rawHash;
+  return NAV_ITEMS.some((item) => item.id === view) ? view : fallback;
+}
+
+function hashFromView(view) {
+  const hashes = {
+    today: "inicio",
+    budget: "plan",
+    debt: "deudas",
+    savings: "ahorro",
+    spending: "registrar",
+    profile: "datos"
+  };
+  return hashes[view] || view;
+}
+
 function numberFrom(value) {
   return Math.max(0, Number(value) || 0);
+}
+
+function monthlyFromSemester(amount, months) {
+  return Math.round(numberFrom(amount) / Math.max(1, Number(months) || STUDENT_SEMESTER_MONTHS));
+}
+
+function monthlyFromWeekly(amount) {
+  return Math.round((numberFrom(amount) * 52) / 12);
 }
 
 function cleanText(value, fallback) {

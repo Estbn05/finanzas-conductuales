@@ -15,6 +15,7 @@ Aplicacion personal de finanzas basada en economia conductual. El objetivo no es
 
 - **Mis datos:** ingreso, gastos comprometidos, ahorro disponible, deuda, ansiedad financiera, confianza y patrones de dinero.
 - **Inicio accionable:** muestra siempre el siguiente paso: poner datos reales, clasificar gastos, cerrar la revision, ahorrar o pagar deuda.
+- **Contexto estudiante becado:** permite modelar ingreso semestral, gasolina semanal de moto, salidas con pareja, regalos, gastos de universidad e imprevistos.
 - **Presupuesto 1/3:** divide ingreso en deuda, ahorro y gastos; ajusta ahorro precautorio si el ingreso es variable.
 - **Zero-based budgeting:** cada categoria de gasto recibe un trabajo especifico.
 - **Buffer de emergencia:** meta base equivalente a US$2.000, con barrido automatico sugerido el dia 5.
@@ -31,6 +32,18 @@ Aplicacion personal de finanzas basada en economia conductual. El objetivo no es
 - Service worker y manifest para comportamiento PWA.
 - Tests con `node:test`, sin framework externo.
 - Servidor local minimo en Node.js para desarrollo.
+
+## Personalizacion real incluida
+
+La app incluye un preset personal para un estudiante becado:
+
+- Beca semestral: `$1.750.000`.
+- Meses a cubrir: `6`.
+- Ingreso mensual equivalente: cerca de `$291.667`.
+- Moto: gasolina semanal de `$30.000`, convertida a presupuesto mensual.
+- Categorias iniciales: gasolina moto, salidas con novia, regalos para novia, universidad/comida e imprevistos.
+
+La documentacion conductual base se conserva, pero el motor financiero ahora adapta la regla general al contexto de ingreso semestral: primero divide el dinero por meses, protege gastos fijos semanales y luego reparte ahorro/flexible.
 
 ## Ejecutar localmente
 

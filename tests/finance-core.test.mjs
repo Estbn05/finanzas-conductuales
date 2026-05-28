@@ -64,6 +64,26 @@ test("variable high-volatility income increases precautionary savings", () => {
   assert.match(plan.incomeNote, /alpha 1\.32/);
 });
 
+test("semester scholarship income is normalized and protects weekly fixed costs", () => {
+  const plan = calculatePlan(
+    makeState({
+      profile: {
+        incomeCadence: "semester",
+        semesterIncome: 1_750_000,
+        semesterMonths: 6,
+        monthlyIncome: 0,
+        committedExpenses: 130_000
+      },
+      debts: []
+    })
+  );
+
+  assert.equal(plan.income, 291_667);
+  assert.ok(plan.expenses >= 130_000);
+  assert.ok(plan.savings > 70_000);
+  assert.match(plan.incomeNote, /Ingreso semestral/);
+});
+
 test("when debt is gone, the debt third is redirected to savings and expenses", () => {
   const plan = calculatePlan(
     makeState({

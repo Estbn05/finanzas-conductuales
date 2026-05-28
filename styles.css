@@ -748,13 +748,19 @@ input[type="range"] {
 }
 
 .cloud-form {
-  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: end;
 }
 
 .cloud-form-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  grid-column: 1 / -1;
+}
+
+.cloud-form-actions .btn {
+  flex: 1 1 180px;
 }
 
 .form-error {
@@ -824,7 +830,8 @@ label {
 }
 
 .phase-grid,
-.score-grid {
+.score-grid,
+.context-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
@@ -835,7 +842,8 @@ label {
 }
 
 .phase-grid div,
-.score-grid div {
+.score-grid div,
+.context-grid div {
   display: grid;
   gap: 5px;
   min-height: 72px;
@@ -846,8 +854,17 @@ label {
 }
 
 .phase-grid span,
-.score-grid span {
+.score-grid span,
+.context-grid span {
   color: var(--muted);
+}
+
+.context-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.context-card {
+  border-color: rgba(245, 191, 73, 0.45);
 }
 
 .cooldown-item {
@@ -915,7 +932,7 @@ label {
 }
 
 .diagnosis-form {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
 .diagnosis-form fieldset {
@@ -1031,7 +1048,8 @@ label {
   .cloud-form,
   .diagnosis-form,
   .phase-grid,
-  .score-grid {
+  .score-grid,
+  .context-grid {
     grid-template-columns: 1fr;
   }
 
