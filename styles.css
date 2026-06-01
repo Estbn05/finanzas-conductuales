@@ -907,9 +907,12 @@ label {
   grid-template-columns: minmax(0, 1fr) 34px;
 }
 
-.category-row,
 .script-row {
   grid-template-columns: minmax(150px, 1fr) minmax(150px, 0.92fr);
+}
+
+.category-row {
+  grid-template-columns: minmax(150px, 1fr) minmax(150px, 0.92fr) auto;
 }
 
 .debt-item {

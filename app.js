@@ -1492,7 +1492,9 @@ function renderCategoryBars(plan, limit) {
     <div class="category-bars">
       ${categories
         .map(
-          (category) => `
+          (category) => {
+            const lastTransaction = lastTransactionForCategory(category.id);
+            return `
             <div class="category-row">
               <div>
                 <strong>${escapeHtml(category.name)}</strong>
@@ -1501,8 +1503,14 @@ function renderCategoryBars(plan, limit) {
               <div class="bar ${category.band}">
                 <span style="width:${clamp(category.ratio, 0, 120)}%"></span>
               </div>
+              ${
+                lastTransaction
+                  ? `<button class="btn ghost" type="button" data-action="remove-transaction" data-id="${escapeAttr(lastTransaction.id)}">Deshacer ultimo</button>`
+                  : ""
+              }
             </div>
-          `
+          `;
+          }
         )
         .join("")}
     </div>
@@ -2131,6 +2139,12 @@ function transactionsForSummary(summary = budgetSummary()) {
     const date = String(transaction.date || "").slice(0, 10);
     return date >= summary.window.start && date < summary.window.end;
   });
+}
+
+function lastTransactionForCategory(categoryId) {
+  return transactionsForSummary()
+    .filter((transaction) => transaction.category === categoryId)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
 }
 
 function categoryStatus() {
