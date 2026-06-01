@@ -1,5 +1,6 @@
 export const EMERGENCY_BASELINE = 8_000_000;
 export const LARGE_PURCHASE_RATIO = 0.08;
+export const FREE_CATEGORY_ID = "free";
 
 export function calculatePlan(state) {
   const income = getMonthlyIncome(state.profile);
@@ -68,6 +69,52 @@ export function getMonthlyIncome(profile) {
   return Number(profile.monthlyIncome || 0);
 }
 
+export function getSemesterIncome(profile) {
+  if (profile.incomeCadence === "semester") {
+    return Number(profile.semesterIncome || 0);
+  }
+  return getMonthlyIncome(profile) * getSemesterMonths(profile);
+}
+
+export function getSemesterMonths(profile) {
+  return Math.max(1, Number(profile.semesterMonths || 6));
+}
+
+export function getSemesterWeeks(profile) {
+  return Math.max(1, Math.round((getSemesterMonths(profile) * 52) / 12));
+}
+
+export function budgetAmountForJob(job, profile) {
+  const amount = Number(job.amount ?? job.budget ?? 0);
+  const cadence = job.cadence || "monthly";
+  if (cadence === "weekly") {
+    return Math.round(amount * getSemesterWeeks(profile));
+  }
+  if (cadence === "semester") {
+    return amount;
+  }
+  return Math.round(amount * getSemesterMonths(profile));
+}
+
+export function budgetSummary(state, today) {
+  const spent = spendByCategory(state, today);
+  const income = getSemesterIncome(state.profile);
+  const reserved = state.budgetJobs.reduce((sum, job) => sum + budgetAmountForJob(job, state.profile), 0);
+  const freeBudget = Math.max(0, income - reserved);
+  const freeSpent = spent[FREE_CATEGORY_ID] || 0;
+  return {
+    income,
+    reserved,
+    freeBudget,
+    freeSpent,
+    freeRemaining: Math.max(0, freeBudget - freeSpent),
+    overReserved: Math.max(0, reserved - income),
+    months: getSemesterMonths(state.profile),
+    weeks: getSemesterWeeks(state.profile),
+    window: budgetWindow(state.profile, today)
+  };
+}
+
 function formatPlanNumber(value) {
   return new Intl.NumberFormat("es-CO", {
     maximumFractionDigits: 0
@@ -78,11 +125,12 @@ export function categoryStatus(state, today) {
   const spent = spendByCategory(state, today);
   return state.budgetJobs.map((job) => {
     const used = spent[job.id] || 0;
-    const ratio = job.budget ? (used / job.budget) * 100 : 0;
+    const budget = budgetAmountForJob(job, state.profile);
+    const ratio = budget ? (used / budget) * 100 : 0;
     return {
       id: job.id,
       name: job.name,
-      budget: job.budget,
+      budget,
       spent: used,
       ratio,
       band: ratio >= 95 ? "danger" : ratio >= 75 ? "warning" : "good"
@@ -92,7 +140,7 @@ export function categoryStatus(state, today) {
 
 export function spendByCategory(state, today) {
   return state.transactions
-    .filter((transaction) => transaction.labeled && isCurrentMonth(transaction.date, today))
+    .filter((transaction) => transaction.labeled && isInBudgetWindow(transaction.date, state.profile, today))
     .reduce((acc, transaction) => {
       acc[transaction.category] = (acc[transaction.category] || 0) + Number(transaction.amount || 0);
       return acc;
@@ -101,7 +149,7 @@ export function spendByCategory(state, today) {
 
 export function monthlyLabeledSpend(state, today) {
   return state.transactions
-    .filter((transaction) => transaction.labeled && isCurrentMonth(transaction.date, today))
+    .filter((transaction) => transaction.labeled && isInBudgetWindow(transaction.date, state.profile, today))
     .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
 }
 
@@ -130,4 +178,52 @@ export function isLargeUnbudgetedPurchase(amount, expenses) {
 
 export function isCurrentMonth(dateValue, today) {
   return String(dateValue).slice(0, 7) === String(today).slice(0, 7);
+}
+
+export function budgetWindow(profile, today) {
+  const todayKey = today ? String(today).slice(0, 10) : dateKey(new Date());
+  const months = getSemesterMonths(profile);
+  const fallbackStart = monthStartKey(todayKey);
+  let start = parseDateOnly(profile.semesterStart || fallbackStart);
+  const current = parseDateOnly(todayKey);
+
+  while (addMonths(start, months) <= current) {
+    start = addMonths(start, months);
+  }
+
+  while (start > current) {
+    start = addMonths(start, -months);
+  }
+
+  const end = addMonths(start, months);
+  return {
+    start: dateKey(start),
+    end: dateKey(end)
+  };
+}
+
+export function isInBudgetWindow(dateValue, profile, today) {
+  const window = budgetWindow(profile, today);
+  const date = String(dateValue).slice(0, 10);
+  return date >= window.start && date < window.end;
+}
+
+function monthStartKey(today) {
+  return `${String(today).slice(0, 7)}-01`;
+}
+
+function parseDateOnly(value) {
+  const [year, month, day] = String(value || "").slice(0, 10).split("-").map(Number);
+  return new Date(year || 1970, (month || 1) - 1, day || 1);
+}
+
+function addMonths(date, months) {
+  return new Date(date.getFullYear(), date.getMonth() + months, date.getDate());
+}
+
+function dateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }

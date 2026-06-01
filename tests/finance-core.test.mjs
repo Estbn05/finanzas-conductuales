@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   EMERGENCY_BASELINE,
+  budgetAmountForJob,
+  budgetSummary,
   calculatePlan,
   categoryStatus,
   isLargeUnbudgetedPurchase,
@@ -113,8 +115,16 @@ test("debt snowball orders accounts by smallest balance first", () => {
   );
 });
 
-test("category status only counts labeled transactions in the current month", () => {
+test("category status only counts labeled transactions in the current budget period", () => {
   const state = makeState({
+    profile: {
+      semesterStart: "2026-05-01",
+      semesterMonths: 6
+    },
+    budgetJobs: [
+      { id: "food", name: "Mercado", amount: 600_000, cadence: "semester" },
+      { id: "transport", name: "Transporte", amount: 300_000, cadence: "semester" }
+    ],
     transactions: [
       { date: "2026-05-03", amount: 450_000, category: "food", labeled: true },
       { date: "2026-05-04", amount: 120_000, category: "transport", labeled: false },
@@ -130,6 +140,31 @@ test("category status only counts labeled transactions in the current month", ()
   assert.equal(food.band, "warning");
   assert.equal(transport.spent, 0);
   assert.equal(transport.band, "good");
+});
+
+test("weekly fields reserve the whole semester from the scholarship budget", () => {
+  const state = makeState({
+    profile: {
+      incomeCadence: "semester",
+      semesterIncome: 1_750_000,
+      semesterMonths: 6,
+      semesterStart: "2026-05-01"
+    },
+    budgetJobs: [
+      { id: "gas", name: "Gasolina moto", amount: 30_000, cadence: "weekly" },
+      { id: "dates", name: "Salidas", amount: 45_000, cadence: "monthly" }
+    ],
+    transactions: [{ date: "2026-05-03", amount: 30_000, category: "gas", labeled: true }]
+  });
+
+  assert.equal(budgetAmountForJob(state.budgetJobs[0], state.profile), 780_000);
+  const summary = budgetSummary(state, "2026-05-27");
+  assert.equal(summary.reserved, 1_050_000);
+  assert.equal(summary.freeBudget, 700_000);
+
+  const gas = categoryStatus(state, "2026-05-27").find((category) => category.id === "gas");
+  assert.equal(gas.spent, 30_000);
+  assert.equal(Math.round(gas.ratio), 4);
 });
 
 test("high anxiety or avoidance enables gradual debt exposure", () => {

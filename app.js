@@ -1,6 +1,9 @@
 import {
   EMERGENCY_BASELINE,
+  FREE_CATEGORY_ID,
   LARGE_PURCHASE_RATIO,
+  budgetAmountForJob as getBudgetAmountForJob,
+  budgetSummary as getBudgetSummary,
   calculatePlan as calculateFinancePlan,
   categoryStatus as getCategoryStatus,
   minimumDebtPayments as getMinimumDebtPayments,
@@ -94,6 +97,7 @@ function createDefaultState() {
       monthlyIncome: monthlyFromSemester(STUDENT_SEMESTER_INCOME, STUDENT_SEMESTER_MONTHS),
       semesterIncome: STUDENT_SEMESTER_INCOME,
       semesterMonths: STUDENT_SEMESTER_MONTHS,
+      semesterStart: monthStartKey(today),
       incomeCadence: "semester",
       incomeType: "variable",
       volatility: "medium",
@@ -120,11 +124,10 @@ function createDefaultState() {
       escalationPct: 50
     },
     budgetJobs: [
-      { id: "gas", name: "Gasolina moto", budget: monthlyFromWeekly(STUDENT_WEEKLY_GAS) },
-      { id: "dates", name: "Salidas con novia", budget: 45_000 },
-      { id: "gifts", name: "Regalos para novia", budget: 20_000 },
-      { id: "university", name: "Universidad y comida", budget: 25_000 },
-      { id: "flex", name: "Imprevistos", budget: 9_000 }
+      { id: "gas", name: "Gasolina moto", amount: STUDENT_WEEKLY_GAS, cadence: "weekly" },
+      { id: "dates", name: "Salidas con novia", amount: 45_000, cadence: "monthly" },
+      { id: "gifts", name: "Regalos para novia", amount: 20_000, cadence: "monthly" },
+      { id: "university", name: "Universidad y comida", amount: 25_000, cadence: "monthly" }
     ],
     debts: [],
     transactions: [
@@ -215,19 +218,21 @@ function loadState() {
 
 function migrateState(savedState) {
   const defaults = createDefaultState();
-  return {
+  const migrated = {
     ...defaults,
     ...savedState,
     meta: { ...defaults.meta, ...(savedState.meta || {}) },
     profile: { ...defaults.profile, ...(savedState.profile || {}) },
     settings: { ...defaults.settings, ...(savedState.settings || {}) },
-    budgetJobs: savedState.budgetJobs || defaults.budgetJobs,
     debts: savedState.debts || defaults.debts,
     transactions: savedState.transactions || defaults.transactions,
     cooldowns: savedState.cooldowns || defaults.cooldowns,
     checkins: savedState.checkins || defaults.checkins,
     wins: savedState.wins || defaults.wins
   };
+  migrated.profile.semesterStart = migrated.profile.semesterStart || defaults.profile.semesterStart;
+  migrated.budgetJobs = normalizeBudgetJobs(savedState.budgetJobs || defaults.budgetJobs);
+  return migrated;
 }
 
 function saveState(options = {}) {
@@ -460,13 +465,13 @@ function renderNavItem(item) {
 }
 
 function renderHeader(plan) {
-  const remaining = Math.max(0, plan.expenses - monthlyLabeledSpend());
+  const summary = budgetSummary();
 
   return `
-    <header class="money-bar" role="status" aria-label="Dinero disponible para gastar">
-      <span>Disponible</span>
-      <strong>${formatMoney(remaining)}</strong>
-      <span>para gastar</span>
+    <header class="money-bar ${summary.overReserved ? "danger" : ""}" role="status" aria-label="Dinero libre del semestre">
+      <span>Libre semestre</span>
+      <strong>${formatMoney(summary.freeRemaining)}</strong>
+      <span>${summary.overReserved ? "sobreasignado" : "sin asignar"}</span>
     </header>
   `;
 }
@@ -719,49 +724,39 @@ function renderTransactionLabeler(transaction) {
 }
 
 function renderBudget(plan) {
-  const assigned = state.budgetJobs.reduce((sum, job) => sum + Number(job.budget || 0), 0);
-  const assignmentRatio = plan.expenses ? (assigned / plan.expenses) * 100 : 0;
-  const status = assigned > plan.expenses ? "over" : assigned < plan.expenses * 0.95 ? "under" : "balanced";
+  const summary = budgetSummary();
+  const assignmentRatio = summary.income ? (summary.reserved / summary.income) * 100 : 0;
+  const status = summary.overReserved ? "over" : summary.freeBudget > 0 ? "under" : "balanced";
 
   return `
     <section class="content-grid budget-grid">
       <article class="card split-card">
-        <div class="budget-ring" style="--debt:${plan.debtDegrees}deg; --savings:${plan.savingsDegrees}deg">
+        <div class="budget-ring" style="--debt:${Math.min(360, (summary.reserved / Math.max(1, summary.income)) * 360)}deg; --savings:${Math.min(360, ((summary.reserved + summary.freeSpent) / Math.max(1, summary.income)) * 360)}deg">
           <div>
-            <strong>1/3</strong>
-            <span>Regla base</span>
+            <strong>${Math.round(assignmentRatio)}%</strong>
+            <span>reservado</span>
           </div>
         </div>
         <div class="split-details">
-          <p class="eyebrow">Arquitectura de eleccion</p>
-          <h2>Tres pilares, pocas decisiones</h2>
-          ${renderAllocation("Deuda", plan.debt, "debt")}
-          ${renderAllocation("Ahorro", plan.savings, "savings")}
-          ${renderAllocation("Gastos", plan.expenses, "expenses")}
-          <p class="helper-text">${plan.incomeNote}</p>
+          <p class="eyebrow">Presupuesto semestral</p>
+          <h2>${formatMoney(summary.income)} disponibles</h2>
+          ${renderAllocation("Campos reservados", summary.reserved, "debt")}
+          ${renderAllocation("Libre sin asignar", summary.freeBudget, "savings")}
+          ${renderAllocation("Libre ya usado", summary.freeSpent, "expenses")}
+          <p class="helper-text">${summary.months} meses, aprox. ${summary.weeks} semanas. Periodo: ${formatDate(summary.window.start)} - ${formatDate(previousDay(summary.window.end))}.</p>
         </div>
       </article>
 
       <article class="card">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">Gastos del mes</p>
-            <h2>${formatMoney(assigned)} asignados</h2>
+            <p class="eyebrow">Crear campo</p>
+            <h2>Reservar dinero</h2>
           </div>
-          <span class="metric-badge ${status}">${Math.round(assignmentRatio)}%</span>
+          <span class="metric-badge ${status}">${formatMoney(summary.freeBudget)} libre</span>
         </div>
-        ${renderProgress(assignmentRatio, "Trabajos asignados del tercio de gastos")}
-        <form class="inline-form" id="budget-job-form">
-          <label>
-            Trabajo
-            <input name="name" type="text" placeholder="Ej. Regalos" maxlength="32" required>
-          </label>
-          <label>
-            Presupuesto
-            <input name="budget" type="number" min="1000" step="1000" placeholder="150000" required>
-          </label>
-          <button class="btn secondary" type="submit">Agregar</button>
-        </form>
+        ${renderProgress(assignmentRatio, "Reservado del presupuesto semestral")}
+        ${renderBudgetJobForm()}
       </article>
 
       <article class="card wide-card">
@@ -780,6 +775,30 @@ function renderBudget(plan) {
   `;
 }
 
+function renderBudgetJobForm() {
+  return `
+    <form class="inline-form" id="budget-job-form">
+      <label>
+        Campo
+        <input name="name" type="text" placeholder="Ej. Novia, ahorro, comida" maxlength="32" required>
+      </label>
+      <label>
+        Monto
+        <input name="amount" type="number" min="1000" step="1000" placeholder="30000" required>
+      </label>
+      <label>
+        Frecuencia
+        <select name="cadence">
+          <option value="weekly">Semanal</option>
+          <option value="monthly">Mensual</option>
+          <option value="semester">Una vez por semestre</option>
+        </select>
+      </label>
+      <button class="btn secondary" type="submit">Agregar campo</button>
+    </form>
+  `;
+}
+
 function renderAllocation(label, amount, type) {
   return `
     <div class="allocation-row ${type}">
@@ -791,14 +810,15 @@ function renderAllocation(label, amount, type) {
 
 function renderBudgetJob(job) {
   const spent = spendByCategory()[job.id] || 0;
-  const ratio = job.budget ? (spent / job.budget) * 100 : 0;
+  const budget = getBudgetAmountForJob(job, state.profile);
+  const ratio = budget ? (spent / budget) * 100 : 0;
   const band = ratio >= 95 ? "danger" : ratio >= 75 ? "warning" : "good";
 
   return `
     <div class="job-row">
       <div>
         <strong>${escapeHtml(job.name)}</strong>
-        <span>${formatMoney(spent)} de ${formatMoney(job.budget)}</span>
+        <span>${formatMoney(spent)} de ${formatMoney(budget)} (${formatMoney(job.amount)} ${cadenceLabel(job.cadence)})</span>
       </div>
       <div class="bar ${band}" aria-label="${Math.round(ratio)} por ciento usado">
         <span style="width:${clamp(ratio, 0, 120)}%"></span>
@@ -969,7 +989,8 @@ function renderSavings(plan) {
 
 function renderSpending(plan) {
   const overBudget = categoryStatus().filter((category) => category.ratio > 100);
-  const threshold = plan.expenses * LARGE_PURCHASE_RATIO;
+  const summary = budgetSummary();
+  const threshold = Math.max(1, summary.income * LARGE_PURCHASE_RATIO);
 
   return `
     <section class="content-grid spending-grid">
@@ -992,6 +1013,7 @@ function renderSpending(plan) {
           <label>
             Categoria
             <select name="category" required>
+              <option value="${FREE_CATEGORY_ID}">Libre / sin clasificar</option>
               ${state.budgetJobs.map((job) => `<option value="${escapeAttr(job.id)}">${escapeHtml(job.name)}</option>`).join("")}
             </select>
           </label>
@@ -1006,12 +1028,23 @@ function renderSpending(plan) {
       <article class="card wide-card">
         <div class="card-heading">
           <div>
+            <p class="eyebrow">Nuevo campo</p>
+            <h2>Reservar del semestre</h2>
+          </div>
+          <span class="metric-badge">${formatMoney(summary.freeBudget)} libre</span>
+        </div>
+        ${renderBudgetJobForm()}
+      </article>
+
+      <article class="card wide-card">
+        <div class="card-heading">
+          <div>
             <p class="eyebrow">Gasto por categoria</p>
             <h2>Lo que va usado</h2>
           </div>
           <span class="metric-badge">Compra grande: ${formatMoney(threshold)}</span>
         </div>
-        ${renderCategoryBars(plan, state.budgetJobs.length)}
+        ${renderCategoryBars(plan, state.budgetJobs.length + 1)}
       </article>
 
       <article class="card">
@@ -1580,6 +1613,7 @@ function handleDiagnosisSubmit(event) {
     incomeCadence,
     semesterIncome,
     semesterMonths,
+    semesterStart: state.profile.semesterStart || monthStartKey(),
     monthlyIncome,
     committedExpenses: numberFrom(data.get("committedExpenses")),
     weeklyGas,
@@ -1632,13 +1666,18 @@ function handleBudgetSubmit(event) {
     return;
   }
 
-  const name = cleanText(data.get("name"), "Nuevo trabajo");
-  state.budgetJobs.push({
+  const name = cleanText(data.get("name"), "Nuevo campo");
+  const amount = numberFrom(data.get("amount"));
+  const cadence = ["weekly", "monthly", "semester"].includes(data.get("cadence")) ? data.get("cadence") : "monthly";
+  const job = {
     id: uniqueCategoryId(name),
     name,
-    budget: numberFrom(data.get("budget"))
-  });
-  state.lastAlert = `${name} ya tiene un trabajo asignado.`;
+    amount,
+    cadence
+  };
+  state.budgetJobs.push(job);
+  const semesterBudget = getBudgetAmountForJob(job, state.profile);
+  state.lastAlert = `${name} reserva ${formatMoney(semesterBudget)} del semestre.`;
   saveState();
   render();
 }
@@ -1808,6 +1847,7 @@ function applyStudentContext() {
     volatility: "medium",
     semesterIncome,
     semesterMonths,
+    semesterStart: monthStartKey(),
     monthlyIncome: monthlyFromSemester(semesterIncome, semesterMonths),
     weeklyGas,
     committedExpenses: monthlyFromWeekly(weeklyGas),
@@ -1815,11 +1855,10 @@ function applyStudentContext() {
     giftMonthlyBudget: 20_000
   };
   state.budgetJobs = [
-    { id: "gas", name: "Gasolina moto", budget: monthlyFromWeekly(weeklyGas) },
-    { id: "dates", name: "Salidas con novia", budget: 45_000 },
-    { id: "gifts", name: "Regalos para novia", budget: 20_000 },
-    { id: "university", name: "Universidad y comida", budget: 25_000 },
-    { id: "flex", name: "Imprevistos", budget: 9_000 }
+    { id: "gas", name: "Gasolina moto", amount: weeklyGas, cadence: "weekly" },
+    { id: "dates", name: "Salidas con novia", amount: 45_000, cadence: "monthly" },
+    { id: "gifts", name: "Regalos para novia", amount: 20_000, cadence: "monthly" },
+    { id: "university", name: "Universidad y comida", amount: 25_000, cadence: "monthly" }
   ];
   state.lastAlert = "Contexto estudiante aplicado: beca semestral, moto, gasolina y salidas.";
   state.wins.push({
@@ -1851,10 +1890,6 @@ function registerDebtPayment(id) {
 }
 
 function removeBudgetJob(id) {
-  if (state.budgetJobs.length <= 3) {
-    state.lastAlert = "Dejemos al menos 3 trabajos para mantener estructura basica.";
-    return;
-  }
   state.budgetJobs = state.budgetJobs.filter((job) => job.id !== id);
   state.transactions.forEach((transaction) => {
     if (transaction.category === id) {
@@ -1924,8 +1959,24 @@ function calculatePlan() {
   return calculateFinancePlan(state);
 }
 
+function budgetSummary() {
+  return getBudgetSummary(state, todayKey());
+}
+
 function categoryStatus() {
-  return getCategoryStatus(state, todayKey());
+  const summary = budgetSummary();
+  const freeRatio = summary.freeBudget ? (summary.freeSpent / summary.freeBudget) * 100 : summary.freeSpent > 0 ? 120 : 0;
+  return [
+    ...getCategoryStatus(state, todayKey()),
+    {
+      id: FREE_CATEGORY_ID,
+      name: "Libre / sin clasificar",
+      budget: summary.freeBudget,
+      spent: summary.freeSpent,
+      ratio: freeRatio,
+      band: freeRatio >= 95 ? "danger" : freeRatio >= 75 ? "warning" : "good"
+    }
+  ];
 }
 
 function spendByCategory() {
@@ -2094,6 +2145,38 @@ function monthlyFromWeekly(amount) {
   return Math.round((numberFrom(amount) * 52) / 12);
 }
 
+function normalizeBudgetJobs(jobs) {
+  const defaults = {
+    gas: { amount: STUDENT_WEEKLY_GAS, cadence: "weekly" },
+    dates: { amount: 45_000, cadence: "monthly" },
+    gifts: { amount: 20_000, cadence: "monthly" },
+    university: { amount: 25_000, cadence: "monthly" },
+    flex: { amount: 9_000, cadence: "monthly" }
+  };
+
+  return jobs.map((job) => {
+    const known = defaults[job.id] || {};
+    return {
+      ...job,
+      amount: Number(job.amount ?? known.amount ?? job.budget ?? 0),
+      cadence: ["weekly", "monthly", "semester"].includes(job.cadence) ? job.cadence : known.cadence || "monthly"
+    };
+  });
+}
+
+function cadenceLabel(cadence) {
+  const labels = {
+    weekly: "semanal",
+    monthly: "mensual",
+    semester: "semestral"
+  };
+  return labels[cadence] || labels.monthly;
+}
+
+function monthStartKey(dateValue = todayKey()) {
+  return `${String(dateValue).slice(0, 7)}-01`;
+}
+
 function cleanText(value, fallback) {
   const text = String(value || "").trim().replace(/\s+/g, " ");
   return text || fallback;
@@ -2107,6 +2190,12 @@ function hoursFromNow(hours) {
   const date = new Date();
   date.setHours(date.getHours() + hours);
   return date;
+}
+
+function previousDay(dateValue) {
+  const date = new Date(`${dateValue}T12:00:00`);
+  date.setDate(date.getDate() - 1);
+  return todayKey(date);
 }
 
 function todayKey(date = new Date()) {

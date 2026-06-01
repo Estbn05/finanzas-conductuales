@@ -330,6 +330,11 @@ a {
   font-size: 1.12rem;
 }
 
+.money-bar.danger {
+  color: #8c2d25;
+  background: var(--coral-2);
+}
+
 .eyebrow {
   margin: 0 0 7px;
   color: var(--teal);
