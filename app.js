@@ -238,6 +238,7 @@ function migrateState(savedState) {
   migrated.profile.incomeAmount = migrated.profile.incomeAmount ?? migrated.profile.semesterIncome ?? migrated.profile.monthlyIncome ?? defaults.profile.incomeAmount;
   migrated.profile.periodStart = migrated.profile.periodStart || migrated.profile.semesterStart || defaults.profile.periodStart;
   migrated.profile.semesterStart = migrated.profile.semesterStart || migrated.profile.periodStart;
+  migrated.profile.payday = normalizePayday(migrated.profile.payday ?? defaults.profile.payday);
   migrated.budgetJobs = normalizeBudgetJobs(savedState.budgetJobs || defaults.budgetJobs);
   return migrated;
 }
@@ -668,7 +669,7 @@ function renderToday(plan) {
         </div>
         ${renderProgress(plan.emergencyProgress, "Meta inicial de emergencia")}
         <p class="helper-text">
-          Reserva sugerida dia ${state.profile.payday + 4}: ${formatMoney(plan.dayFiveSweep)}.
+          Reserva sugerida dia ${dayFiveSweepDay()}: ${formatMoney(plan.dayFiveSweep)}.
         </p>
       </article>
 
@@ -1436,7 +1437,8 @@ function renderDiagnosisModal() {
             </label>
             <label>
               Dia de pago principal
-              <input name="payday" type="number" min="1" max="28" value="${profile.payday}" required>
+              <input name="payday" type="number" min="0" max="28" inputmode="numeric" value="${profile.payday}">
+              <small>Usa 0 si no tienes un dia fijo.</small>
             </label>
           </fieldset>
 
@@ -1727,7 +1729,7 @@ function handleDiagnosisSubmit(event) {
     relationshipMonthlyBudget: data.has("relationshipMonthlyBudget") ? numberFrom(data.get("relationshipMonthlyBudget")) : Number(state.profile.relationshipMonthlyBudget || 0),
     giftMonthlyBudget: data.has("giftMonthlyBudget") ? numberFrom(data.get("giftMonthlyBudget")) : Number(state.profile.giftMonthlyBudget || 0),
     emergencySavings: numberFrom(data.get("emergencySavings")),
-    payday: clamp(numberFrom(data.get("payday")), 1, 28),
+    payday: normalizePayday(data.get("payday")),
     incomeType: data.get("incomeType") === "variable" ? "variable" : "fixed",
     volatility: ["low", "medium", "high"].includes(data.get("volatility")) ? data.get("volatility") : "medium",
     selfEfficacy: clamp(numberFrom(data.get("selfEfficacy")), 1, 10),
@@ -2209,6 +2211,11 @@ function futureFreedom(plan) {
   return `${hours.toFixed(1)} horas libres/mes`;
 }
 
+function dayFiveSweepDay() {
+  const payday = Number(state.profile.payday || 0);
+  return payday > 0 ? clamp(payday + 4, 5, 28) : 5;
+}
+
 function createSpendAlert(categoryId) {
   const category = categoryStatus().find((item) => item.id === categoryId) || categoryStatus()[0];
   if (!category) {
@@ -2285,6 +2292,14 @@ function hashFromView(view) {
 
 function numberFrom(value) {
   return Math.max(0, Number(value) || 0);
+}
+
+function normalizePayday(value) {
+  const day = Number(value);
+  if (!Number.isFinite(day) || day <= 0) {
+    return 0;
+  }
+  return clamp(day, 1, 28);
 }
 
 function monthlyFromSemester(amount, months) {
