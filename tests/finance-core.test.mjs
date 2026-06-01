@@ -6,6 +6,7 @@ import {
   budgetSummary,
   calculatePlan,
   categoryStatus,
+  extraIncomeForPeriod,
   isLargeUnbudgetedPurchase,
   minimumDebtPayments,
   shouldUseDebtExposureMode,
@@ -38,6 +39,7 @@ function makeState(overrides = {}) {
       { id: "card", name: "Tarjeta", balance: 1_200_000, minimum: 120_000 },
       { id: "loan", name: "Prestamo", balance: 3_800_000, minimum: 260_000 }
     ],
+    budgetExtras: overrides.budgetExtras || [],
     transactions: overrides.transactions || []
   };
 }
@@ -188,6 +190,29 @@ test("income cadence can be weekly biweekly monthly semester or yearly", () => {
   assert.equal(budgetAmountForJob(state.budgetJobs[1], state.profile), 276_923);
   assert.equal(summary.window.start, "2026-05-15");
   assert.equal(summary.window.end, "2026-05-29");
+});
+
+test("extra money increases only the current period budget", () => {
+  const state = makeState({
+    profile: {
+      incomeCadence: "semester",
+      incomeAmount: 1_750_000,
+      periodStart: "2026-05-01"
+    },
+    budgetJobs: [{ id: "gas", name: "Gasolina", amount: 30_000, cadence: "weekly" }],
+    budgetExtras: [
+      { id: "gift", source: "Regalo", amount: 80_000, date: "2026-05-10" },
+      { id: "old", source: "Venta vieja", amount: 50_000, date: "2026-04-10" }
+    ]
+  });
+
+  const summary = budgetSummary(state, "2026-05-20");
+
+  assert.equal(extraIncomeForPeriod(state, "2026-05-20"), 80_000);
+  assert.equal(summary.baseIncome, 1_750_000);
+  assert.equal(summary.extraIncome, 80_000);
+  assert.equal(summary.income, 1_830_000);
+  assert.equal(summary.freeBudget, 1_050_000);
 });
 
 test("high anxiety or avoidance enables gradual debt exposure", () => {

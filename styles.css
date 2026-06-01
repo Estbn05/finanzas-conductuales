@@ -568,6 +568,7 @@ a {
 
 .transaction-row,
 .job-row,
+.extra-budget-row,
 .category-row,
 .script-row,
 .cooldown-item,
@@ -590,6 +591,8 @@ a {
 .transaction-row span,
 .job-row strong,
 .job-row span,
+.extra-budget-row strong,
+.extra-budget-row span,
 .category-row strong,
 .category-row span,
 .script-row strong,
@@ -605,6 +608,7 @@ a {
 
 .transaction-row span,
 .job-row span,
+.extra-budget-row span,
 .category-row span,
 .script-row span,
 .cooldown-item span,
@@ -836,6 +840,10 @@ input[type="range"] {
   align-items: end;
 }
 
+.extra-budget-form {
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 160px) minmax(150px, 180px) auto;
+}
+
 .cloud-card {
   border-color: rgba(21, 111, 105, 0.28);
 }
@@ -884,6 +892,10 @@ label {
 
 .job-row {
   grid-template-columns: minmax(150px, 1fr) minmax(130px, 0.8fr) 34px;
+}
+
+.extra-budget-row {
+  grid-template-columns: minmax(0, 1fr) 34px;
 }
 
 .category-row,
@@ -1126,11 +1138,13 @@ label {
   .paying-visual,
   .transaction-row,
   .job-row,
+  .extra-budget-row,
   .category-row,
   .script-row,
   .debt-item,
   .cooldown-item,
   .inline-form,
+  .extra-budget-form,
   .cloud-form,
   .diagnosis-form,
   .phase-grid,

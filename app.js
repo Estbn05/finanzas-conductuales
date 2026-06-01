@@ -126,6 +126,7 @@ function createDefaultState() {
       monthlyRaisePct: 8,
       escalationPct: 50
     },
+    budgetExtras: [],
     budgetJobs: [
       { id: "gas", name: "Gasolina moto", amount: STUDENT_WEEKLY_GAS, cadence: "weekly" },
       { id: "dates", name: "Salidas con novia", amount: 45_000, cadence: "monthly" },
@@ -229,6 +230,7 @@ function migrateState(savedState) {
     settings: { ...defaults.settings, ...(savedState.settings || {}) },
     debts: savedState.debts || defaults.debts,
     transactions: savedState.transactions || defaults.transactions,
+    budgetExtras: normalizeBudgetExtras(savedState.budgetExtras || defaults.budgetExtras),
     cooldowns: savedState.cooldowns || defaults.cooldowns,
     checkins: savedState.checkins || defaults.checkins,
     wins: savedState.wins || defaults.wins
@@ -745,6 +747,8 @@ function renderBudget(plan) {
         <div class="split-details">
           <p class="eyebrow">Presupuesto ${summary.cadenceLabel}</p>
           <h2>${formatMoney(summary.income)} por periodo</h2>
+          ${renderAllocation("Presupuesto base", summary.baseIncome, "savings")}
+          ${renderAllocation("Dinero extra", summary.extraIncome, "expenses")}
           ${renderAllocation("Campos reservados", summary.reserved, "debt")}
           ${renderAllocation("Libre sin asignar", summary.freeBudget, "savings")}
           ${renderAllocation("Libre ya usado", summary.freeSpent, "expenses")}
@@ -1036,6 +1040,33 @@ function renderSpending(plan) {
       <article class="card wide-card">
         <div class="card-heading">
           <div>
+            <p class="eyebrow">Dinero recibido</p>
+            <h2>Sumar al presupuesto</h2>
+          </div>
+          <span class="metric-badge">${formatMoney(summary.extraIncome)} extra</span>
+        </div>
+        <p class="helper-text">Suma regalos, bonos o ayudas solo al periodo actual. Tu presupuesto base no cambia.</p>
+        <form class="inline-form extra-budget-form" id="extra-budget-form">
+          <label>
+            Origen
+            <input name="source" type="text" maxlength="36" placeholder="Ej. Regalo, ayuda, venta" required>
+          </label>
+          <label>
+            Monto
+            <input name="amount" type="number" min="1000" step="1000" required>
+          </label>
+          <label>
+            Fecha
+            <input name="date" type="date" value="${todayKey()}" required>
+          </label>
+          <button class="btn secondary" type="submit">Sumar dinero</button>
+        </form>
+        ${renderBudgetExtras(summary)}
+      </article>
+
+      <article class="card wide-card">
+        <div class="card-heading">
+          <div>
             <p class="eyebrow">Nuevo campo</p>
             <h2>Reservar del periodo</h2>
           </div>
@@ -1083,6 +1114,34 @@ function renderSpending(plan) {
         </div>
       </article>
     </section>
+  `;
+}
+
+function renderBudgetExtras(summary = budgetSummary()) {
+  const extras = budgetExtrasForSummary(summary)
+    .slice()
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+
+  if (!extras.length) {
+    return `<div class="empty-state">Aun no has sumado dinero extra en este periodo.</div>`;
+  }
+
+  return `
+    <div class="job-table extra-budget-list">
+      ${extras
+        .map(
+          (extra) => `
+            <div class="extra-budget-row">
+              <div>
+                <strong>${escapeHtml(extra.source)}</strong>
+                <span>${formatMoney(extra.amount)} · ${formatDate(extra.date)}</span>
+              </div>
+              <button class="icon-btn muted" type="button" data-action="remove-extra" data-id="${escapeAttr(extra.id)}" aria-label="Eliminar ${escapeAttr(extra.source)}">x</button>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
   `;
 }
 
@@ -1521,6 +1580,11 @@ function bindEvents() {
     budgetForm.addEventListener("submit", handleBudgetSubmit);
   }
 
+  const extraBudgetForm = document.querySelector("#extra-budget-form");
+  if (extraBudgetForm) {
+    extraBudgetForm.addEventListener("submit", handleExtraBudgetSubmit);
+  }
+
   const debtForm = document.querySelector("#debt-form");
   if (debtForm) {
     debtForm.addEventListener("submit", handleDebtSubmit);
@@ -1610,6 +1674,7 @@ function handleAction(event) {
     "apply-student-context": applyStudentContext,
     "pay-debt": () => registerDebtPayment(id),
     "remove-job": () => removeBudgetJob(id),
+    "remove-extra": () => removeBudgetExtra(id),
     "cancel-cooldown": () => cancelCooldown(id),
     "unlock-cooldown": () => unlockCooldown(id),
     "push-cloud-now": () => pushCloudState(),
@@ -1720,6 +1785,34 @@ function handleBudgetSubmit(event) {
   state.budgetJobs.push(job);
   const semesterBudget = getBudgetAmountForJob(job, state.profile);
   state.lastAlert = `${name} reserva ${formatMoney(semesterBudget)} del periodo ${budgetSummary().cadenceLabel}.`;
+  saveState();
+  render();
+}
+
+function handleExtraBudgetSubmit(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  const amount = numberFrom(data.get("amount"));
+  if (amount <= 0) {
+    state.lastAlert = "El dinero extra debe ser mayor que cero.";
+    saveState();
+    render();
+    return;
+  }
+
+  const source = cleanText(data.get("source"), "Dinero extra");
+  const extra = {
+    id: uid("extra"),
+    source,
+    amount,
+    date: cleanDate(data.get("date"), todayKey())
+  };
+  state.budgetExtras.push(extra);
+  const summary = budgetSummary();
+  const appliesNow = budgetExtrasForSummary(summary).some((item) => item.id === extra.id);
+  state.lastAlert = appliesNow
+    ? `${source} sumo ${formatMoney(amount)} al presupuesto ${summary.cadenceLabel}.`
+    : `${source} quedo guardado, pero esa fecha pertenece a otro periodo.`;
   saveState();
   render();
 }
@@ -1944,6 +2037,12 @@ function removeBudgetJob(id) {
   state.lastAlert = "Categoria eliminada. Sus gastos vuelven a revision.";
 }
 
+function removeBudgetExtra(id) {
+  const extra = state.budgetExtras.find((item) => item.id === id);
+  state.budgetExtras = state.budgetExtras.filter((item) => item.id !== id);
+  state.lastAlert = extra ? `${extra.source} ya no suma al presupuesto.` : "Dinero extra eliminado.";
+}
+
 function cancelCooldown(id) {
   state.cooldowns = state.cooldowns.filter((cooldown) => cooldown.id !== id);
   state.wins.push({
@@ -2005,6 +2104,13 @@ function calculatePlan() {
 
 function budgetSummary() {
   return getBudgetSummary(state, todayKey());
+}
+
+function budgetExtrasForSummary(summary = budgetSummary()) {
+  return (state.budgetExtras || []).filter((extra) => {
+    const date = String(extra.date || "").slice(0, 10);
+    return date >= summary.window.start && date < summary.window.end;
+  });
 }
 
 function categoryStatus() {
@@ -2206,6 +2312,15 @@ function normalizeBudgetJobs(jobs) {
       cadence: ["weekly", "biweekly", "monthly", "semester", "yearly", "period"].includes(job.cadence) ? job.cadence : known.cadence || "monthly"
     };
   });
+}
+
+function normalizeBudgetExtras(extras) {
+  return extras.map((extra) => ({
+    id: extra.id || uid("extra"),
+    source: cleanText(extra.source || extra.name, "Dinero extra"),
+    amount: Number(extra.amount || 0),
+    date: cleanDate(extra.date, todayKey())
+  }));
 }
 
 function cadenceLabel(cadence) {

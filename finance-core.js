@@ -128,11 +128,15 @@ export function budgetAmountForJob(job, profile) {
 
 export function budgetSummary(state, today) {
   const spent = spendByCategory(state, today);
-  const income = getPeriodIncome(state.profile);
+  const baseIncome = getPeriodIncome(state.profile);
+  const extraIncome = extraIncomeForPeriod(state, today);
+  const income = baseIncome + extraIncome;
   const reserved = state.budgetJobs.reduce((sum, job) => sum + budgetAmountForJob(job, state.profile), 0);
   const freeBudget = Math.max(0, income - reserved);
   const freeSpent = spent[FREE_CATEGORY_ID] || 0;
   return {
+    baseIncome,
+    extraIncome,
     income,
     reserved,
     freeBudget,
@@ -145,6 +149,12 @@ export function budgetSummary(state, today) {
     cadenceLabel: cadenceLabel(getIncomeCadence(state.profile)),
     window: budgetWindow(state.profile, today)
   };
+}
+
+export function extraIncomeForPeriod(state, today) {
+  return (state.budgetExtras || [])
+    .filter((extra) => isInBudgetWindow(extra.date, state.profile, today))
+    .reduce((sum, extra) => sum + Number(extra.amount || 0), 0);
 }
 
 function formatPlanNumber(value) {
