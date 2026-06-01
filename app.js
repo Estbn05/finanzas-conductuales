@@ -6,6 +6,7 @@ import {
   budgetSummary as getBudgetSummary,
   calculatePlan as calculateFinancePlan,
   categoryStatus as getCategoryStatus,
+  getPeriodIncome,
   minimumDebtPayments as getMinimumDebtPayments,
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
@@ -94,9 +95,11 @@ function createDefaultState() {
       completed: false,
       name: "Tu plan",
       currency: "COP",
+      incomeAmount: STUDENT_SEMESTER_INCOME,
       monthlyIncome: monthlyFromSemester(STUDENT_SEMESTER_INCOME, STUDENT_SEMESTER_MONTHS),
       semesterIncome: STUDENT_SEMESTER_INCOME,
       semesterMonths: STUDENT_SEMESTER_MONTHS,
+      periodStart: monthStartKey(today),
       semesterStart: monthStartKey(today),
       incomeCadence: "semester",
       incomeType: "variable",
@@ -230,7 +233,9 @@ function migrateState(savedState) {
     checkins: savedState.checkins || defaults.checkins,
     wins: savedState.wins || defaults.wins
   };
-  migrated.profile.semesterStart = migrated.profile.semesterStart || defaults.profile.semesterStart;
+  migrated.profile.incomeAmount = migrated.profile.incomeAmount ?? migrated.profile.semesterIncome ?? migrated.profile.monthlyIncome ?? defaults.profile.incomeAmount;
+  migrated.profile.periodStart = migrated.profile.periodStart || migrated.profile.semesterStart || defaults.profile.periodStart;
+  migrated.profile.semesterStart = migrated.profile.semesterStart || migrated.profile.periodStart;
   migrated.budgetJobs = normalizeBudgetJobs(savedState.budgetJobs || defaults.budgetJobs);
   return migrated;
 }
@@ -468,8 +473,8 @@ function renderHeader(plan) {
   const summary = budgetSummary();
 
   return `
-    <header class="money-bar ${summary.overReserved ? "danger" : ""}" role="status" aria-label="Dinero libre del semestre">
-      <span>Libre semestre</span>
+    <header class="money-bar ${summary.overReserved ? "danger" : ""}" role="status" aria-label="Dinero libre del periodo">
+      <span>Libre ${summary.cadenceLabel}</span>
       <strong>${formatMoney(summary.freeRemaining)}</strong>
       <span>${summary.overReserved ? "sobreasignado" : "sin asignar"}</span>
     </header>
@@ -738,12 +743,12 @@ function renderBudget(plan) {
           </div>
         </div>
         <div class="split-details">
-          <p class="eyebrow">Presupuesto semestral</p>
-          <h2>${formatMoney(summary.income)} disponibles</h2>
+          <p class="eyebrow">Presupuesto ${summary.cadenceLabel}</p>
+          <h2>${formatMoney(summary.income)} por periodo</h2>
           ${renderAllocation("Campos reservados", summary.reserved, "debt")}
           ${renderAllocation("Libre sin asignar", summary.freeBudget, "savings")}
           ${renderAllocation("Libre ya usado", summary.freeSpent, "expenses")}
-          <p class="helper-text">${summary.months} meses, aprox. ${summary.weeks} semanas. Periodo: ${formatDate(summary.window.start)} - ${formatDate(previousDay(summary.window.end))}.</p>
+          <p class="helper-text">Periodo actual: ${formatDate(summary.window.start)} - ${formatDate(previousDay(summary.window.end))}. Equivale a ${formatMoney(getMonthlyIncome(state.profile))} / mes.</p>
         </div>
       </article>
 
@@ -755,7 +760,7 @@ function renderBudget(plan) {
           </div>
           <span class="metric-badge ${status}">${formatMoney(summary.freeBudget)} libre</span>
         </div>
-        ${renderProgress(assignmentRatio, "Reservado del presupuesto semestral")}
+        ${renderProgress(assignmentRatio, "Reservado del presupuesto del periodo")}
         ${renderBudgetJobForm()}
       </article>
 
@@ -790,8 +795,11 @@ function renderBudgetJobForm() {
         Frecuencia
         <select name="cadence">
           <option value="weekly">Semanal</option>
+          <option value="biweekly">Quincenal</option>
           <option value="monthly">Mensual</option>
-          <option value="semester">Una vez por semestre</option>
+          <option value="semester">Semestral</option>
+          <option value="yearly">Anual</option>
+          <option value="period">Una vez por periodo</option>
         </select>
       </label>
       <button class="btn secondary" type="submit">Agregar campo</button>
@@ -1029,7 +1037,7 @@ function renderSpending(plan) {
         <div class="card-heading">
           <div>
             <p class="eyebrow">Nuevo campo</p>
-            <h2>Reservar del semestre</h2>
+            <h2>Reservar del periodo</h2>
           </div>
           <span class="metric-badge">${formatMoney(summary.freeBudget)} libre</span>
         </div>
@@ -1186,7 +1194,7 @@ function renderStudentContextPanel() {
     <article class="card wide-card context-card">
       <div class="card-heading">
         <div>
-          <p class="eyebrow">Contexto personal</p>
+          <p class="eyebrow">Plantilla opcional</p>
           <h2>Estudiante becado con moto</h2>
         </div>
         <span class="metric-badge">${formatMoney(monthlyFromSemester(semesterIncome, semesterMonths))} / mes</span>
@@ -1209,7 +1217,7 @@ function renderStudentContextPanel() {
           <span>salidas con novia</span>
         </div>
       </div>
-      <p>Este preset reparte la beca por meses, aparta gasolina de moto y deja categorias para salidas, regalos, universidad e imprevistos.</p>
+      <p>Este preset es solo un punto de partida. Puedes cambiar el presupuesto, su frecuencia y crear campos propios.</p>
       <div class="card-actions">
         <button class="btn secondary" type="button" data-action="apply-student-context">Aplicar mi contexto</button>
       </div>
@@ -1304,6 +1312,19 @@ function renderScriptBar(key, value) {
   `;
 }
 
+function renderIncomeCadenceOptions(selected) {
+  const options = [
+    ["weekly", "Semanal"],
+    ["biweekly", "Quincenal"],
+    ["monthly", "Mensual"],
+    ["semester", "Semestral"],
+    ["yearly", "Anual"]
+  ];
+  return options
+    .map(([value, label]) => `<option value="${value}" ${selected === value ? "selected" : ""}>${label}</option>`)
+    .join("");
+}
+
 function renderDiagnosisModal() {
   const profile = state.profile;
 
@@ -1325,39 +1346,26 @@ function renderDiagnosisModal() {
               <input name="name" type="text" maxlength="32" value="${escapeAttr(profile.name)}" required>
             </label>
             <label>
-              Como recibes ingresos
+              Cada cuanto recibes presupuesto
               <select name="incomeCadence">
-                <option value="semester" ${profile.incomeCadence === "semester" ? "selected" : ""}>Semestral / beca</option>
-                <option value="monthly" ${profile.incomeCadence !== "semester" ? "selected" : ""}>Mensual</option>
+                ${renderIncomeCadenceOptions(profile.incomeCadence)}
               </select>
             </label>
             <label>
-              Ingreso semestral
-              <input name="semesterIncome" type="number" min="0" step="1000" value="${profile.semesterIncome || STUDENT_SEMESTER_INCOME}" required>
+              Presupuesto por periodo
+              <input name="incomeAmount" type="number" min="0" step="1000" value="${getPeriodIncome(profile)}" required>
             </label>
             <label>
-              Meses que debe cubrir
-              <input name="semesterMonths" type="number" min="1" max="12" step="1" value="${profile.semesterMonths || STUDENT_SEMESTER_MONTHS}" required>
+              Inicio del periodo actual
+              <input name="periodStart" type="date" value="${escapeAttr(profile.periodStart || profile.semesterStart || monthStartKey())}" required>
             </label>
             <label>
               Ingreso mensual equivalente
-              <input name="monthlyIncome" type="number" min="0" step="1000" value="${getMonthlyIncome(profile)}" required>
+              <input name="monthlyIncome" type="number" min="0" step="1000" value="${getMonthlyIncome(profile)}" readonly>
             </label>
             <label>
               Gastos comprometidos
               <input name="committedExpenses" type="number" min="0" step="1000" value="${profile.committedExpenses}" required>
-            </label>
-            <label>
-              Gasolina semanal
-              <input name="weeklyGas" type="number" min="0" step="1000" value="${profile.weeklyGas || STUDENT_WEEKLY_GAS}" required>
-            </label>
-            <label>
-              Salidas con novia / mes
-              <input name="relationshipMonthlyBudget" type="number" min="0" step="1000" value="${profile.relationshipMonthlyBudget || 45_000}">
-            </label>
-            <label>
-              Regalos / mes
-              <input name="giftMonthlyBudget" type="number" min="0" step="1000" value="${profile.giftMonthlyBudget || 20_000}">
             </label>
             <label>
               Ahorro disponible
@@ -1504,6 +1512,7 @@ function bindEvents() {
 
   const diagnosisForm = document.querySelector("#diagnosis-form");
   if (diagnosisForm) {
+    bindDiagnosisPreview(diagnosisForm);
     diagnosisForm.addEventListener("submit", handleDiagnosisSubmit);
   }
 
@@ -1536,6 +1545,33 @@ function bindEvents() {
   if (importFile) {
     importFile.addEventListener("change", handleImport);
   }
+}
+
+function bindDiagnosisPreview(form) {
+  const updateMonthlyEquivalent = () => {
+    const data = new FormData(form);
+    const incomeCadence = ["weekly", "biweekly", "monthly", "semester", "yearly"].includes(data.get("incomeCadence"))
+      ? data.get("incomeCadence")
+      : "monthly";
+    const monthlyInput = form.elements.namedItem("monthlyIncome");
+    if (!monthlyInput) {
+      return;
+    }
+    monthlyInput.value = getMonthlyIncome({
+      ...state.profile,
+      incomeCadence,
+      incomeAmount: numberFrom(data.get("incomeAmount"))
+    });
+  };
+
+  ["incomeCadence", "incomeAmount"].forEach((name) => {
+    const field = form.elements.namedItem(name);
+    if (field) {
+      field.addEventListener("input", updateMonthlyEquivalent);
+      field.addEventListener("change", updateMonthlyEquivalent);
+    }
+  });
+  updateMonthlyEquivalent();
 }
 
 function handleAction(event) {
@@ -1600,25 +1636,31 @@ function handleDiagnosisSubmit(event) {
   const data = new FormData(event.currentTarget);
   const wasIncomplete = !state.profile.completed;
   const estimatedDebt = numberFrom(data.get("totalDebt"));
-  const incomeCadence = data.get("incomeCadence") === "semester" ? "semester" : "monthly";
-  const semesterIncome = numberFrom(data.get("semesterIncome"));
-  const semesterMonths = clamp(numberFrom(data.get("semesterMonths")), 1, 12);
-  const weeklyGas = numberFrom(data.get("weeklyGas"));
-  const monthlyIncome = incomeCadence === "semester" ? monthlyFromSemester(semesterIncome, semesterMonths) : numberFrom(data.get("monthlyIncome"));
+  const incomeCadence = ["weekly", "biweekly", "monthly", "semester", "yearly"].includes(data.get("incomeCadence"))
+    ? data.get("incomeCadence")
+    : "monthly";
+  const incomeAmount = numberFrom(data.get("incomeAmount"));
+  const periodStart = cleanDate(data.get("periodStart"), monthStartKey());
+  const semesterIncome = incomeCadence === "semester" ? incomeAmount : state.profile.semesterIncome || STUDENT_SEMESTER_INCOME;
+  const semesterMonths = incomeCadence === "semester" ? STUDENT_SEMESTER_MONTHS : state.profile.semesterMonths || STUDENT_SEMESTER_MONTHS;
+  const weeklyGas = data.has("weeklyGas") ? numberFrom(data.get("weeklyGas")) : Number(state.profile.weeklyGas || 0);
+  const monthlyIncome = getMonthlyIncome({ ...state.profile, incomeCadence, incomeAmount, semesterIncome, semesterMonths });
 
   state.profile = {
     ...state.profile,
     completed: true,
     name: cleanText(data.get("name"), "Mi plan"),
     incomeCadence,
+    incomeAmount,
     semesterIncome,
     semesterMonths,
-    semesterStart: state.profile.semesterStart || monthStartKey(),
+    periodStart,
+    semesterStart: periodStart,
     monthlyIncome,
     committedExpenses: numberFrom(data.get("committedExpenses")),
     weeklyGas,
-    relationshipMonthlyBudget: numberFrom(data.get("relationshipMonthlyBudget")),
-    giftMonthlyBudget: numberFrom(data.get("giftMonthlyBudget")),
+    relationshipMonthlyBudget: data.has("relationshipMonthlyBudget") ? numberFrom(data.get("relationshipMonthlyBudget")) : Number(state.profile.relationshipMonthlyBudget || 0),
+    giftMonthlyBudget: data.has("giftMonthlyBudget") ? numberFrom(data.get("giftMonthlyBudget")) : Number(state.profile.giftMonthlyBudget || 0),
     emergencySavings: numberFrom(data.get("emergencySavings")),
     payday: clamp(numberFrom(data.get("payday")), 1, 28),
     incomeType: data.get("incomeType") === "variable" ? "variable" : "fixed",
@@ -1668,7 +1710,7 @@ function handleBudgetSubmit(event) {
 
   const name = cleanText(data.get("name"), "Nuevo campo");
   const amount = numberFrom(data.get("amount"));
-  const cadence = ["weekly", "monthly", "semester"].includes(data.get("cadence")) ? data.get("cadence") : "monthly";
+  const cadence = ["weekly", "biweekly", "monthly", "semester", "yearly", "period"].includes(data.get("cadence")) ? data.get("cadence") : "monthly";
   const job = {
     id: uniqueCategoryId(name),
     name,
@@ -1677,7 +1719,7 @@ function handleBudgetSubmit(event) {
   };
   state.budgetJobs.push(job);
   const semesterBudget = getBudgetAmountForJob(job, state.profile);
-  state.lastAlert = `${name} reserva ${formatMoney(semesterBudget)} del semestre.`;
+  state.lastAlert = `${name} reserva ${formatMoney(semesterBudget)} del periodo ${budgetSummary().cadenceLabel}.`;
   saveState();
   render();
 }
@@ -1843,10 +1885,12 @@ function applyStudentContext() {
     completed: true,
     name: "Plan estudiante becado",
     incomeCadence: "semester",
+    incomeAmount: semesterIncome,
     incomeType: "variable",
     volatility: "medium",
     semesterIncome,
     semesterMonths,
+    periodStart: monthStartKey(),
     semesterStart: monthStartKey(),
     monthlyIncome: monthlyFromSemester(semesterIncome, semesterMonths),
     weeklyGas,
@@ -2159,7 +2203,7 @@ function normalizeBudgetJobs(jobs) {
     return {
       ...job,
       amount: Number(job.amount ?? known.amount ?? job.budget ?? 0),
-      cadence: ["weekly", "monthly", "semester"].includes(job.cadence) ? job.cadence : known.cadence || "monthly"
+      cadence: ["weekly", "biweekly", "monthly", "semester", "yearly", "period"].includes(job.cadence) ? job.cadence : known.cadence || "monthly"
     };
   });
 }
@@ -2167,8 +2211,11 @@ function normalizeBudgetJobs(jobs) {
 function cadenceLabel(cadence) {
   const labels = {
     weekly: "semanal",
+    biweekly: "quincenal",
     monthly: "mensual",
-    semester: "semestral"
+    semester: "semestral",
+    yearly: "anual",
+    period: "por periodo"
   };
   return labels[cadence] || labels.monthly;
 }
@@ -2180,6 +2227,10 @@ function monthStartKey(dateValue = todayKey()) {
 function cleanText(value, fallback) {
   const text = String(value || "").trim().replace(/\s+/g, " ");
   return text || fallback;
+}
+
+function cleanDate(value, fallback) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) ? String(value) : fallback;
 }
 
 function uid(prefix) {

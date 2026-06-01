@@ -16,11 +16,11 @@ Aplicacion personal de finanzas basada en economia conductual. El objetivo no es
 - **Mis datos:** ingreso, gastos comprometidos, ahorro disponible, deuda, ansiedad financiera, confianza y patrones de dinero.
 - **Registrar como pantalla principal:** la app abre en el registro de gastos para que el habito diario sea inmediato.
 - **Menu vertical desplegable:** guarda Plan, Deudas, Ahorro, Inicio, Datos, nube y avisos sin ocupar la pantalla principal.
-- **Barra de dinero disponible:** queda fija en el encabezado y no tapa el contenido.
+- **Barra de dinero disponible:** muestra lo libre del periodo actual y no tapa el contenido.
 - **Registro primero:** el formulario para guardar un gasto aparece antes de los resumenes por categoria.
-- **Sobres semestrales:** cada campo semanal, mensual o semestral reserva automaticamente parte de la beca y muestra cuanto queda libre.
+- **Sobres por periodo:** el presupuesto puede ser semanal, quincenal, mensual, semestral o anual; cada campo semanal, quincenal, mensual, semestral, anual o por periodo reserva automaticamente su parte.
 - **Inicio accionable:** muestra el siguiente paso: poner datos reales, clasificar gastos, cerrar la revision, ahorrar o pagar deuda.
-- **Contexto estudiante becado:** permite modelar ingreso semestral, gasolina semanal de moto, salidas con pareja, regalos, gastos de universidad e imprevistos.
+- **Contexto estudiante becado:** queda como preset opcional, no como unica forma de usar la app.
 - **Presupuesto 1/3:** divide ingreso en deuda, ahorro y gastos; ajusta ahorro precautorio si el ingreso es variable.
 - **Zero-based budgeting:** cada categoria de gasto recibe un trabajo especifico.
 - **Buffer de emergencia:** meta base equivalente a US$2.000, con barrido automatico sugerido el dia 5.
@@ -45,10 +45,10 @@ La app incluye un preset personal para un estudiante becado:
 - Beca semestral: `$1.750.000`.
 - Meses a cubrir: `6`.
 - Ingreso mensual equivalente: cerca de `$291.667`.
-- Moto: gasolina semanal de `$30.000`, convertida a presupuesto mensual.
+- Moto: gasolina semanal de `$30.000`, convertida al presupuesto del periodo elegido.
 - Campos iniciales: gasolina moto semanal, salidas con novia mensual, regalos para novia mensual y universidad/comida mensual.
 
-La documentacion conductual base se conserva, pero el motor financiero ahora adapta la regla general al contexto de ingreso semestral: primero reserva campos semanales o mensuales para todo el semestre y luego muestra el dinero libre para gastos aparte o sin clasificar.
+La documentacion conductual base se conserva, pero el motor financiero ya no depende solo del contexto semestral: primero toma el presupuesto y su frecuencia, luego reserva campos segun su frecuencia y muestra el dinero libre para gastos aparte o sin clasificar.
 
 ## Ejecutar localmente
 

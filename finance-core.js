@@ -2,9 +2,27 @@ export const EMERGENCY_BASELINE = 8_000_000;
 export const LARGE_PURCHASE_RATIO = 0.08;
 export const FREE_CATEGORY_ID = "free";
 
+export const INCOME_CADENCES = {
+  weekly: { label: "semanal", months: 12 / 52, weeks: 1, days: 7 },
+  biweekly: { label: "quincenal", months: 12 / 26, weeks: 2, days: 14 },
+  monthly: { label: "mensual", months: 1, weeks: 52 / 12, monthsInterval: 1 },
+  semester: { label: "semestral", months: 6, weeks: 26, monthsInterval: 6 },
+  yearly: { label: "anual", months: 12, weeks: 52, monthsInterval: 12 }
+};
+
+export const JOB_CADENCES = {
+  weekly: { label: "semanal" },
+  biweekly: { label: "quincenal" },
+  monthly: { label: "mensual" },
+  semester: { label: "semestral" },
+  yearly: { label: "anual" },
+  period: { label: "una vez por periodo" }
+};
+
 export function calculatePlan(state) {
   const income = getMonthlyIncome(state.profile);
-  const isSemesterIncome = state.profile.incomeCadence === "semester";
+  const incomeCadence = getIncomeCadence(state.profile);
+  const isPeriodIncome = incomeCadence !== "monthly";
   const base = income / 3;
   const hasDebt = state.debts.some((debt) => Number(debt.balance || 0) > 0);
   const alphaMap = { low: 1.08, medium: 1.18, high: 1.32 };
@@ -14,7 +32,7 @@ export function calculatePlan(state) {
   let expenses = income - savings - debt;
   const minimumDebt = minimumDebtPayments(state);
 
-  if (isSemesterIncome) {
+  if (isPeriodIncome) {
     const committed = Number(state.profile.committedExpenses || 0);
     const flexiblePool = Math.max(0, income - committed - (hasDebt ? minimumDebt : 0));
     debt = hasDebt ? Math.max(minimumDebt, flexiblePool * 0.25) : 0;
@@ -29,7 +47,7 @@ export function calculatePlan(state) {
     expenses = income - savings - debt;
   }
 
-  if (!hasDebt && !isSemesterIncome) {
+  if (!hasDebt && !isPeriodIncome) {
     savings += debt * 0.7;
     expenses += debt * 0.3;
     debt = 0;
@@ -52,8 +70,8 @@ export function calculatePlan(state) {
     debtDegrees: (debt / total) * 360,
     savingsDegrees: ((debt + savings) / total) * 360,
     incomeNote:
-      isSemesterIncome
-        ? `Ingreso semestral: ${formatPlanNumber(Number(state.profile.semesterIncome || 0))} dividido en ${Number(state.profile.semesterMonths || 6)} meses.`
+      isPeriodIncome
+        ? `Ingreso ${cadenceLabel(incomeCadence)}: ${formatPlanNumber(getPeriodIncome(state.profile))} por periodo, equivalente mensual ${formatPlanNumber(income)}.`
         : state.profile.incomeType === "variable"
         ? `Ingreso variable: factor alpha ${alpha.toFixed(2)} aumenta ahorro precautorio.`
         : "Ingreso fijo: se mantiene reparto 1/3 antes de optimizaciones."
@@ -61,44 +79,56 @@ export function calculatePlan(state) {
 }
 
 export function getMonthlyIncome(profile) {
+  return Math.round(getPeriodIncome(profile) / getPeriodMonths(profile));
+}
+
+export function getPeriodIncome(profile) {
+  if (profile.incomeAmount != null) {
+    return Number(profile.incomeAmount || 0);
+  }
   if (profile.incomeCadence === "semester") {
-    const months = Math.max(1, Number(profile.semesterMonths || 6));
-    const semesterIncome = Number(profile.semesterIncome || 0);
-    return Math.round(semesterIncome / months);
+    return Number(profile.semesterIncome || 0);
   }
   return Number(profile.monthlyIncome || 0);
 }
 
-export function getSemesterIncome(profile) {
-  if (profile.incomeCadence === "semester") {
-    return Number(profile.semesterIncome || 0);
-  }
-  return getMonthlyIncome(profile) * getSemesterMonths(profile);
+export function getIncomeCadence(profile) {
+  const cadence = profile.incomeCadence || "monthly";
+  return INCOME_CADENCES[cadence] ? cadence : "monthly";
 }
 
-export function getSemesterMonths(profile) {
-  return Math.max(1, Number(profile.semesterMonths || 6));
+export function getPeriodMonths(profile) {
+  return INCOME_CADENCES[getIncomeCadence(profile)].months;
 }
 
-export function getSemesterWeeks(profile) {
-  return Math.max(1, Math.round((getSemesterMonths(profile) * 52) / 12));
+export function getPeriodWeeks(profile) {
+  return INCOME_CADENCES[getIncomeCadence(profile)].weeks;
 }
 
 export function budgetAmountForJob(job, profile) {
   const amount = Number(job.amount ?? job.budget ?? 0);
   const cadence = job.cadence || "monthly";
   if (cadence === "weekly") {
-    return Math.round(amount * getSemesterWeeks(profile));
+    return Math.round(amount * getPeriodWeeks(profile));
+  }
+  if (cadence === "biweekly") {
+    return Math.round(amount * (getPeriodWeeks(profile) / 2));
   }
   if (cadence === "semester") {
+    return Math.round(amount * (getPeriodMonths(profile) / 6));
+  }
+  if (cadence === "yearly") {
+    return Math.round(amount * (getPeriodMonths(profile) / 12));
+  }
+  if (cadence === "period") {
     return amount;
   }
-  return Math.round(amount * getSemesterMonths(profile));
+  return Math.round(amount * getPeriodMonths(profile));
 }
 
 export function budgetSummary(state, today) {
   const spent = spendByCategory(state, today);
-  const income = getSemesterIncome(state.profile);
+  const income = getPeriodIncome(state.profile);
   const reserved = state.budgetJobs.reduce((sum, job) => sum + budgetAmountForJob(job, state.profile), 0);
   const freeBudget = Math.max(0, income - reserved);
   const freeSpent = spent[FREE_CATEGORY_ID] || 0;
@@ -109,8 +139,10 @@ export function budgetSummary(state, today) {
     freeSpent,
     freeRemaining: Math.max(0, freeBudget - freeSpent),
     overReserved: Math.max(0, reserved - income),
-    months: getSemesterMonths(state.profile),
-    weeks: getSemesterWeeks(state.profile),
+    months: getPeriodMonths(state.profile),
+    weeks: getPeriodWeeks(state.profile),
+    cadence: getIncomeCadence(state.profile),
+    cadenceLabel: cadenceLabel(getIncomeCadence(state.profile)),
     window: budgetWindow(state.profile, today)
   };
 }
@@ -182,20 +214,22 @@ export function isCurrentMonth(dateValue, today) {
 
 export function budgetWindow(profile, today) {
   const todayKey = today ? String(today).slice(0, 10) : dateKey(new Date());
-  const months = getSemesterMonths(profile);
+  const cadence = INCOME_CADENCES[getIncomeCadence(profile)];
   const fallbackStart = monthStartKey(todayKey);
-  let start = parseDateOnly(profile.semesterStart || fallbackStart);
+  let start = parseDateOnly(profile.periodStart || profile.semesterStart || fallbackStart);
   const current = parseDateOnly(todayKey);
+  const advance = (date, direction = 1) =>
+    cadence.days ? addDays(date, cadence.days * direction) : addMonths(date, cadence.monthsInterval * direction);
 
-  while (addMonths(start, months) <= current) {
-    start = addMonths(start, months);
+  while (advance(start) <= current) {
+    start = advance(start);
   }
 
   while (start > current) {
-    start = addMonths(start, -months);
+    start = advance(start, -1);
   }
 
-  const end = addMonths(start, months);
+  const end = advance(start);
   return {
     start: dateKey(start),
     end: dateKey(end)
@@ -221,9 +255,19 @@ function addMonths(date, months) {
   return new Date(date.getFullYear(), date.getMonth() + months, date.getDate());
 }
 
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
 function dateKey(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function cadenceLabel(cadence) {
+  return INCOME_CADENCES[cadence]?.label || "mensual";
 }

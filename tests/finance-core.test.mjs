@@ -118,6 +118,8 @@ test("debt snowball orders accounts by smallest balance first", () => {
 test("category status only counts labeled transactions in the current budget period", () => {
   const state = makeState({
     profile: {
+      incomeCadence: "semester",
+      incomeAmount: 1_750_000,
       semesterStart: "2026-05-01",
       semesterMonths: 6
     },
@@ -165,6 +167,27 @@ test("weekly fields reserve the whole semester from the scholarship budget", () 
   const gas = categoryStatus(state, "2026-05-27").find((category) => category.id === "gas");
   assert.equal(gas.spent, 30_000);
   assert.equal(Math.round(gas.ratio), 4);
+});
+
+test("income cadence can be weekly biweekly monthly semester or yearly", () => {
+  const state = makeState({
+    profile: {
+      incomeCadence: "biweekly",
+      incomeAmount: 800_000,
+      periodStart: "2026-05-01"
+    },
+    budgetJobs: [
+      { id: "gas", name: "Gasolina", amount: 30_000, cadence: "weekly" },
+      { id: "rent", name: "Arriendo", amount: 600_000, cadence: "monthly" }
+    ]
+  });
+
+  const summary = budgetSummary(state, "2026-05-20");
+  assert.equal(summary.income, 800_000);
+  assert.equal(budgetAmountForJob(state.budgetJobs[0], state.profile), 60_000);
+  assert.equal(budgetAmountForJob(state.budgetJobs[1], state.profile), 276_923);
+  assert.equal(summary.window.start, "2026-05-15");
+  assert.equal(summary.window.end, "2026-05-29");
 });
 
 test("high anxiety or avoidance enables gradual debt exposure", () => {
