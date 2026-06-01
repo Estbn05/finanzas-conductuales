@@ -17,6 +17,7 @@ Aplicacion personal de finanzas basada en economia conductual. El objetivo no es
 - **Registrar como pantalla principal:** la app abre en el registro de gastos para que el habito diario sea inmediato.
 - **Menu vertical desplegable:** guarda Plan, Deudas, Ahorro, Inicio, Datos, nube y avisos sin ocupar la pantalla principal.
 - **Barra de dinero disponible:** muestra lo libre del periodo actual y no tapa el contenido.
+- **Cuenta y efectivo:** separa el disponible entre dinero en cuenta y dinero fisico sin perder el total.
 - **Registro primero:** el formulario para guardar un gasto aparece antes de los resumenes por categoria.
 - **Correccion de errores:** los gastos registrados se pueden eliminar desde el historial o deshacer directamente desde su categoria.
 - **Dinero extra:** permite sumar regalos, bonos o ayudas al presupuesto del periodo sin cambiar el presupuesto base recurrente.

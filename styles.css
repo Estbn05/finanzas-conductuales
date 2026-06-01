@@ -306,6 +306,7 @@ a {
 
 .money-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: center;
   gap: 8px;
@@ -316,7 +317,6 @@ a {
   border-radius: var(--radius);
   color: var(--muted);
   background: #fffdf8;
-  white-space: nowrap;
 }
 
 .card h2,
@@ -328,6 +328,12 @@ a {
 .money-bar strong {
   color: var(--ink);
   font-size: 1.12rem;
+}
+
+.money-split {
+  flex-basis: 100%;
+  text-align: center;
+  font-size: 0.86rem;
 }
 
 .money-bar.danger {
@@ -849,8 +855,9 @@ input[type="range"] {
   align-items: end;
 }
 
-.extra-budget-form {
-  grid-template-columns: minmax(0, 1fr) minmax(120px, 160px) minmax(150px, 180px) auto;
+.extra-budget-form,
+.liquidity-form {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
 .cloud-card {
@@ -1167,6 +1174,7 @@ label {
   .cooldown-item,
   .inline-form,
   .extra-budget-form,
+  .liquidity-form,
   .cloud-form,
   .diagnosis-form,
   .phase-grid,

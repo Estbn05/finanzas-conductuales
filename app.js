@@ -130,6 +130,11 @@ function createDefaultState() {
       escalationPct: 50
     },
     budgetExtras: [],
+    liquidity: {
+      account: 0,
+      cash: 0,
+      initialized: false
+    },
     budgetJobs: [],
     debts: [],
     transactions: [],
@@ -162,6 +167,7 @@ function migrateState(savedState) {
     debts: savedState.debts || defaults.debts,
     transactions: savedState.transactions || defaults.transactions,
     budgetExtras: normalizeBudgetExtras(savedState.budgetExtras || defaults.budgetExtras),
+    liquidity: normalizeLiquidity(savedState.liquidity || defaults.liquidity),
     cooldowns: savedState.cooldowns || defaults.cooldowns,
     checkins: savedState.checkins || defaults.checkins,
     wins: savedState.wins || defaults.wins
@@ -409,12 +415,15 @@ function renderNavItem(item) {
 
 function renderHeader(plan) {
   const summary = budgetSummary();
+  const liquidity = liquiditySummary(summary);
+  const visibleFree = liquidity.initialized ? liquidity.total : summary.freeRemaining;
 
   return `
     <header class="money-bar ${summary.overReserved ? "danger" : ""}" role="status" aria-label="Dinero libre del periodo">
       <span>Libre ${summary.cadenceLabel}</span>
-      <strong>${formatMoney(summary.freeRemaining)}</strong>
+      <strong>${formatMoney(visibleFree)}</strong>
       <span>${summary.overReserved ? "sobreasignado" : "sin asignar"}</span>
+      <span class="money-split">Cuenta ${formatMoney(liquidity.account)} · Efectivo ${formatMoney(liquidity.cash)}</span>
     </header>
   `;
 }
@@ -942,6 +951,7 @@ function renderSavings(plan) {
 function renderSpending(plan) {
   const overBudget = categoryStatus().filter((category) => category.ratio > 100);
   const summary = budgetSummary();
+  const liquidity = liquiditySummary(summary);
   const threshold = Math.max(1, summary.income * LARGE_PURCHASE_RATIO);
 
   return `
@@ -969,11 +979,38 @@ function renderSpending(plan) {
               ${state.budgetJobs.map((job) => `<option value="${escapeAttr(job.id)}">${escapeHtml(job.name)}</option>`).join("")}
             </select>
           </label>
+          <label>
+            Pagado con
+            <select name="source">
+              ${renderLocationOptions("account")}
+            </select>
+          </label>
           <label class="check-row">
             <input name="budgeted" type="checkbox" checked>
             Ya estaba previsto en el plan
           </label>
           <button class="btn primary" type="submit">Guardar gasto</button>
+        </form>
+      </article>
+
+      <article class="card wide-card">
+        <div class="card-heading">
+          <div>
+            <p class="eyebrow">Disponible por lugar</p>
+            <h2>Cuenta + efectivo</h2>
+          </div>
+          <span class="metric-badge">${formatMoney(liquidity.total)} total</span>
+        </div>
+        <form class="inline-form liquidity-form" id="liquidity-form">
+          <label>
+            En cuenta
+            <input name="account" type="number" min="0" step="1000" value="${liquidity.account}">
+          </label>
+          <label>
+            En efectivo
+            <input name="cash" type="number" min="0" step="1000" value="${liquidity.cash}">
+          </label>
+          <button class="btn secondary" type="submit">Actualizar disponible</button>
         </form>
       </article>
 
@@ -1009,6 +1046,12 @@ function renderSpending(plan) {
           <label>
             Fecha
             <input name="date" type="date" value="${todayKey()}" required>
+          </label>
+          <label>
+            Entra a
+            <select name="location">
+              ${renderLocationOptions("account")}
+            </select>
           </label>
           <button class="btn secondary" type="submit">Sumar dinero</button>
         </form>
@@ -1085,7 +1128,7 @@ function renderBudgetExtras(summary = budgetSummary()) {
             <div class="extra-budget-row">
               <div>
                 <strong>${escapeHtml(extra.source)}</strong>
-                <span>${formatMoney(extra.amount)} · ${formatDate(extra.date)}</span>
+                <span>${formatMoney(extra.amount)} · ${locationLabel(extra.location)} · ${formatDate(extra.date)}</span>
               </div>
               <button class="icon-btn muted" type="button" data-action="remove-extra" data-id="${escapeAttr(extra.id)}" aria-label="Eliminar ${escapeAttr(extra.source)}">x</button>
             </div>
@@ -1094,6 +1137,15 @@ function renderBudgetExtras(summary = budgetSummary()) {
         .join("")}
     </div>
   `;
+}
+
+function renderLocationOptions(selected) {
+  return [
+    ["account", "Cuenta"],
+    ["cash", "Efectivo"]
+  ]
+    .map(([value, label]) => `<option value="${value}" ${selected === value ? "selected" : ""}>${label}</option>`)
+    .join("");
 }
 
 function renderTransactionHistory(summary = budgetSummary()) {
@@ -1113,7 +1165,7 @@ function renderTransactionHistory(summary = budgetSummary()) {
             <div class="history-row">
               <div>
                 <strong>${escapeHtml(transaction.merchant)}</strong>
-                <span>${formatMoney(transaction.amount)} · ${escapeHtml(categoryName(transaction.category))} · ${formatDate(transaction.date)}</span>
+                <span>${formatMoney(transaction.amount)} · ${escapeHtml(categoryName(transaction.category))} · ${locationLabel(transaction.source)} · ${formatDate(transaction.date)}</span>
               </div>
               <button class="btn ghost" type="button" data-action="remove-transaction" data-id="${escapeAttr(transaction.id)}">Eliminar</button>
             </div>
@@ -1577,6 +1629,11 @@ function bindEvents() {
     extraBudgetForm.addEventListener("submit", handleExtraBudgetSubmit);
   }
 
+  const liquidityForm = document.querySelector("#liquidity-form");
+  if (liquidityForm) {
+    liquidityForm.addEventListener("submit", handleLiquiditySubmit);
+  }
+
   const debtForm = document.querySelector("#debt-form");
   if (debtForm) {
     debtForm.addEventListener("submit", handleDebtSubmit);
@@ -1801,18 +1858,38 @@ function handleExtraBudgetSubmit(event) {
   }
 
   const source = cleanText(data.get("source"), "Dinero extra");
+  const location = normalizeLocation(data.get("location"));
+  const date = cleanDate(data.get("date"), todayKey());
+  const currentWindow = budgetSummary().window;
+  const appliesNow = date >= currentWindow.start && date < currentWindow.end;
+  if (appliesNow) {
+    adjustLiquidity(location, amount, "extra");
+  }
   const extra = {
     id: uid("extra"),
     source,
     amount,
-    date: cleanDate(data.get("date"), todayKey())
+    date,
+    location
   };
   state.budgetExtras.push(extra);
   const summary = budgetSummary();
-  const appliesNow = budgetExtrasForSummary(summary).some((item) => item.id === extra.id);
   state.lastAlert = appliesNow
-    ? `${source} sumo ${formatMoney(amount)} al presupuesto ${summary.cadenceLabel}.`
+    ? `${source} sumo ${formatMoney(amount)} al presupuesto ${summary.cadenceLabel} en ${locationLabel(location)}.`
     : `${source} quedo guardado, pero esa fecha pertenece a otro periodo.`;
+  saveState();
+  render();
+}
+
+function handleLiquiditySubmit(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  state.liquidity = {
+    account: numberFrom(data.get("account")),
+    cash: numberFrom(data.get("cash")),
+    initialized: true
+  };
+  state.lastAlert = `Disponible actualizado: ${formatMoney(state.liquidity.account + state.liquidity.cash)} en total.`;
   saveState();
   render();
 }
@@ -1840,6 +1917,7 @@ function handleTransactionSubmit(event) {
   const merchant = cleanText(data.get("merchant"), "Compra");
   const category = String(data.get("category"));
   const budgeted = data.get("budgeted") === "on";
+  const source = normalizeLocation(data.get("source"));
   const threshold = plan.expenses * LARGE_PURCHASE_RATIO;
 
   if (!budgeted && amount >= threshold) {
@@ -1848,12 +1926,13 @@ function handleTransactionSubmit(event) {
       merchant,
       amount,
       category,
+      source,
       createdAt: new Date().toISOString(),
       unlockAt: hoursFromNow(24).toISOString()
     });
     state.lastAlert = `${merchant} quedo en pausa 24 horas antes de decidir.`;
   } else {
-    addTransaction({ merchant, amount, category, budgeted });
+    addTransaction({ merchant, amount, category, budgeted, source });
     state.lastAlert = createSpendAlert(category);
   }
 
@@ -2036,6 +2115,9 @@ function removeBudgetJob(id) {
 function removeTransaction(id) {
   const transaction = state.transactions.find((item) => item.id === id);
   state.transactions = state.transactions.filter((item) => item.id !== id);
+  if (transaction && state.liquidity?.initialized) {
+    adjustLiquidity(transaction.source, Number(transaction.amount || 0), "refund");
+  }
   state.lastAlert = transaction
     ? `${transaction.merchant} eliminado. La categoria se recalculo.`
     : "Gasto eliminado.";
@@ -2061,6 +2143,9 @@ function clearTemplateBudget(target = state) {
 function removeBudgetExtra(id) {
   const extra = state.budgetExtras.find((item) => item.id === id);
   state.budgetExtras = state.budgetExtras.filter((item) => item.id !== id);
+  if (extra && state.liquidity?.initialized) {
+    adjustLiquidity(extra.location, -Number(extra.amount || 0), "remove-extra");
+  }
   state.lastAlert = extra ? `${extra.source} ya no suma al presupuesto.` : "Dinero extra eliminado.";
 }
 
@@ -2083,7 +2168,8 @@ function unlockCooldown(id) {
     merchant: cooldown.merchant,
     amount: cooldown.amount,
     category: cooldown.category,
-    budgeted: false
+    budgeted: false,
+    source: cooldown.source
   });
   state.cooldowns = state.cooldowns.filter((item) => item.id !== id);
   state.lastAlert = createSpendAlert(cooldown.category);
@@ -2107,7 +2193,9 @@ function resetDemo() {
   state.lastAlert = "Demo reiniciada. Usa Mis datos para personalizarla.";
 }
 
-function addTransaction({ merchant, amount, category, budgeted }) {
+function addTransaction({ merchant, amount, category, budgeted, source = "account" }) {
+  const location = normalizeLocation(source);
+  adjustLiquidity(location, -Number(amount || 0), "expense");
   state.transactions.push({
     id: uid("tx"),
     date: todayKey(),
@@ -2115,7 +2203,8 @@ function addTransaction({ merchant, amount, category, budgeted }) {
     amount,
     category,
     labeled: Boolean(category),
-    budgeted
+    budgeted,
+    source: location
   });
 }
 
@@ -2125,6 +2214,39 @@ function calculatePlan() {
 
 function budgetSummary() {
   return getBudgetSummary(state, todayKey());
+}
+
+function liquiditySummary(summary = budgetSummary()) {
+  const liquidity = normalizeLiquidity(state.liquidity);
+  if (!liquidity.initialized) {
+    return {
+      account: summary.freeRemaining,
+      cash: 0,
+      total: summary.freeRemaining,
+      initialized: false
+    };
+  }
+  return {
+    ...liquidity,
+    total: liquidity.account + liquidity.cash
+  };
+}
+
+function adjustLiquidity(location, delta, reason) {
+  const key = normalizeLocation(location);
+  const amount = Number(delta || 0);
+  if (!state.liquidity?.initialized) {
+    const total = budgetSummary().freeRemaining;
+    state.liquidity =
+      reason === "expense" && key === "cash"
+        ? { account: Math.max(0, total + amount), cash: Math.abs(amount), initialized: true }
+        : { account: total, cash: 0, initialized: true };
+  }
+
+  const liquidity = normalizeLiquidity(state.liquidity);
+  liquidity[key] = Math.max(0, liquidity[key] + amount);
+  liquidity.initialized = true;
+  state.liquidity = liquidity;
 }
 
 function budgetExtrasForSummary(summary = budgetSummary()) {
@@ -2385,8 +2507,25 @@ function normalizeBudgetExtras(extras) {
     id: extra.id || uid("extra"),
     source: cleanText(extra.source || extra.name, "Dinero extra"),
     amount: Number(extra.amount || 0),
-    date: cleanDate(extra.date, todayKey())
+    date: cleanDate(extra.date, todayKey()),
+    location: normalizeLocation(extra.location)
   }));
+}
+
+function normalizeLiquidity(liquidity) {
+  return {
+    account: numberFrom(liquidity?.account),
+    cash: numberFrom(liquidity?.cash),
+    initialized: Boolean(liquidity?.initialized)
+  };
+}
+
+function normalizeLocation(value) {
+  return value === "cash" ? "cash" : "account";
+}
+
+function locationLabel(location) {
+  return normalizeLocation(location) === "cash" ? "Efectivo" : "Cuenta";
 }
 
 function cadenceLabel(cadence) {
