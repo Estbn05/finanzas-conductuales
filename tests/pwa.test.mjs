@@ -17,7 +17,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
 test("service worker caches the app shell needed for offline launch", async () => {
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
-  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v19"/);
+  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v20"/);
   assert.ok(worker.includes('"./index.html"'));
   assert.ok(worker.includes('"./app.js"'));
   assert.ok(worker.includes('"./finance-core.js"'));
@@ -35,14 +35,26 @@ test("navigation opens on expense registration with a vertical collapsible menu"
   assert.ok(app.includes('data-action="toggle-menu"'));
   assert.ok(app.includes('class="money-bar '));
   assert.ok(app.includes('class="menu-tools"'));
-  assert.ok(app.indexOf("<h2>Registrar gasto</h2>") < app.indexOf("<h2>Lo que va usado</h2>"));
-  assert.ok(app.indexOf("<h2>Registrar gasto</h2>") < app.indexOf("<h2>Movimientos del periodo</h2>"));
-  assert.ok(app.indexOf("<h2>Registrar gasto</h2>") < app.indexOf("<h2>Reservar del periodo</h2>"));
-  assert.ok(app.indexOf("<h2>Registrar gasto</h2>") < app.indexOf("<h2>Sumar al presupuesto</h2>"));
+  const spendingView = app.slice(app.indexOf("function renderSpending"), app.indexOf("function renderLiquidityCard"));
+  assert.ok(spendingView.indexOf("<h2>Registrar gasto</h2>") < spendingView.indexOf("<h2>Lo que va usado</h2>"));
+  assert.equal(spendingView.includes("<h2>Movimientos del periodo</h2>"), false);
+  assert.equal(spendingView.includes("<h2>Reservar del periodo</h2>"), false);
+  assert.equal(spendingView.includes("<h2>Sumar al presupuesto</h2>"), false);
   assert.ok(app.includes('id="extra-budget-form"'));
+  assert.ok(app.includes('id="extra-allocation-form"'));
   assert.ok(app.includes('id="liquidity-form"'));
   assert.ok(app.includes("Cuenta + efectivo"));
   assert.ok(app.includes("Pagado con"));
+  assert.ok(app.includes("Gasto registrado. ¿Deshacer?"));
+  assert.ok(app.includes("setTimeout(() =>"));
+  assert.ok(app.includes('"undo-snackbar"'));
+  assert.ok(app.includes("savingsPercent"));
+  assert.ok(app.includes("finanzas-${todayKey()}.json"));
+  assert.ok(app.includes("window.confirm"));
+  assert.ok(app.includes("stateUpdatedTime"));
+  assert.ok(app.includes("cloudRecordUpdatedTime"));
+  assert.ok(app.includes("hasMeaningfulLocalData"));
+  assert.ok(app.includes("Nube</strong> pendiente"));
   assert.ok(app.includes("liquiditySummary"));
   assert.ok(app.includes("adjustLiquidity"));
   assert.ok(app.includes('id="diagnosis-form" class="diagnosis-form" novalidate'));
@@ -51,8 +63,8 @@ test("navigation opens on expense registration with a vertical collapsible menu"
   assert.ok(app.includes("Usa 0 si no tienes un dia fijo."));
   assert.ok(app.includes("budgetJobs: []"));
   assert.ok(app.includes('data-action="remove-transaction"'));
-  assert.ok(app.includes("Deshacer ultimo"));
-  assert.ok(app.includes("lastTransactionForCategory"));
+  assert.equal(app.includes("Deshacer ultimo"), false);
+  assert.equal(app.includes("lastTransactionForCategory"), false);
   assert.ok(app.includes("transactionsForSummary"));
   assert.ok(app.includes("shouldClearTemplateBudgetOnPlanSave"));
   assert.ok(app.includes("Quite los campos de plantilla"));

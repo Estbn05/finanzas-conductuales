@@ -327,13 +327,14 @@ a {
 
 .money-bar strong {
   color: var(--ink);
-  font-size: 1.12rem;
+  font-size: 1.72rem;
+  line-height: 1;
 }
 
 .money-split {
   flex-basis: 100%;
   text-align: center;
-  font-size: 0.86rem;
+  font-size: 0.92rem;
 }
 
 .money-bar.danger {
@@ -377,6 +378,11 @@ a {
   background: var(--coral-2);
 }
 
+.status-pill.pending {
+  color: #87600c;
+  background: var(--amber-2);
+}
+
 .cloud-status {
   max-width: 190px;
 }
@@ -401,6 +407,34 @@ a {
 .metric-badge.under {
   color: #87600c;
   background: var(--amber-2);
+}
+
+.primary-spend-card {
+  border-color: rgba(21, 111, 105, 0.26);
+}
+
+.spend-submit {
+  min-height: 48px;
+  font-size: 1.02rem;
+}
+
+.transaction-options-row,
+.amount-submit-row {
+  display: grid;
+  gap: 12px;
+}
+
+.transaction-options-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.amount-submit-row {
+  grid-template-columns: minmax(0, 1fr) minmax(138px, auto);
+  align-items: end;
+}
+
+.amount-submit-row .btn {
+  width: auto;
 }
 
 .content-grid {
@@ -919,7 +953,7 @@ label {
 }
 
 .category-row {
-  grid-template-columns: minmax(150px, 1fr) minmax(150px, 0.92fr) auto;
+  grid-template-columns: minmax(150px, 1fr) minmax(150px, 0.92fr);
 }
 
 .debt-item {
@@ -1048,6 +1082,10 @@ label {
   box-shadow: 0 24px 70px rgba(32, 38, 37, 0.24);
 }
 
+.compact-modal {
+  width: min(560px, 100%);
+}
+
 .modal-heading {
   display: flex;
   align-items: flex-start;
@@ -1076,6 +1114,55 @@ label {
 .modal-actions {
   grid-column: 1 / -1;
   justify-content: end;
+}
+
+.allocation-preview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.allocation-preview div {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fffdf8;
+}
+
+.allocation-preview strong,
+.allocation-preview span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.allocation-preview span {
+  color: var(--muted);
+}
+
+.snackbar {
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  left: 16px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: min(520px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 12px;
+  border: 1px solid rgba(255, 253, 248, 0.22);
+  border-radius: var(--radius);
+  color: #fffdf8;
+  background: #202625;
+  box-shadow: 0 16px 38px rgba(32, 38, 37, 0.26);
+}
+
+.snackbar span {
+  overflow-wrap: anywhere;
 }
 
 .quick-save-actions {
@@ -1179,7 +1266,8 @@ label {
   .diagnosis-form,
   .phase-grid,
   .score-grid,
-  .context-grid {
+  .context-grid,
+  .allocation-preview {
     grid-template-columns: 1fr;
   }
 
@@ -1230,6 +1318,15 @@ label {
   .btn,
   .status-pill {
     width: 100%;
+  }
+
+  .snackbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .amount-submit-row .btn {
+    width: auto;
   }
 
   .modal-backdrop {

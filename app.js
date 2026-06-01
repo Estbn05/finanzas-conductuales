@@ -56,6 +56,9 @@ let menuOpen = false;
 let applyingCloudState = false;
 let cloudSaveTimer;
 let authUnsubscribe = () => {};
+let snackbar = null;
+let snackbarTimer;
+let pendingExtraAllocation = null;
 let cloudState = {
   configured: isCloudConfigured(),
   email: "",
@@ -83,13 +86,16 @@ if ("serviceWorker" in navigator && window.location.protocol !== "file:") {
 
 function createDefaultState() {
   const today = todayKey();
+  const now = new Date().toISOString();
 
   return {
     activeView: DEFAULT_VIEW,
     showDiagnosis: false,
     lastAlert: "Registra cada gasto en menos de un minuto. Usa Mis datos para ajustar tus numeros reales.",
+    updated_at: now,
     meta: {
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
+      updated_at: now,
       cloudUpdatedAt: "",
       cloudUserEmail: "",
       budgetPreset: ""
@@ -120,20 +126,23 @@ function createDefaultState() {
         avoidance: 3,
         status: 2,
         vigilance: 4
-      }
+      },
+      updated_at: now
     },
     settings: {
       emergencyAutoDefault: true,
       smartEscalator: true,
       revealDebtTotal: false,
       monthlyRaisePct: 8,
-      escalationPct: 50
+      escalationPct: 50,
+      updated_at: now
     },
     budgetExtras: [],
     liquidity: {
       account: 0,
       cash: 0,
-      initialized: false
+      initialized: false,
+      updated_at: now
     },
     budgetJobs: [],
     debts: [],
@@ -164,8 +173,8 @@ function migrateState(savedState) {
     meta: { ...defaults.meta, ...(savedState.meta || {}) },
     profile: { ...defaults.profile, ...(savedState.profile || {}) },
     settings: { ...defaults.settings, ...(savedState.settings || {}) },
-    debts: savedState.debts || defaults.debts,
-    transactions: savedState.transactions || defaults.transactions,
+    debts: normalizeDebts(savedState.debts || defaults.debts),
+    transactions: normalizeTransactions(savedState.transactions || defaults.transactions),
     budgetExtras: normalizeBudgetExtras(savedState.budgetExtras || defaults.budgetExtras),
     liquidity: normalizeLiquidity(savedState.liquidity || defaults.liquidity),
     cooldowns: savedState.cooldowns || defaults.cooldowns,
@@ -185,12 +194,15 @@ function migrateState(savedState) {
 }
 
 function saveState(options = {}) {
-  const { sync = true } = options;
-  state.meta = {
-    ...(state.meta || {}),
-    updatedAt: new Date().toISOString(),
-    cloudUserEmail: cloudState.email || state.meta?.cloudUserEmail || ""
-  };
+  const { sync = true, touch = true } = options;
+  state.meta = { ...(state.meta || {}) };
+  if (touch) {
+    const now = new Date().toISOString();
+    state.updated_at = now;
+    state.meta.updatedAt = now;
+    state.meta.updated_at = now;
+  }
+  state.meta.cloudUserEmail = cloudState.email || state.meta?.cloudUserEmail || "";
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   if (sync && !applyingCloudState) {
     scheduleCloudSave();
@@ -262,19 +274,29 @@ async function pullCloudAfterLogin() {
   try {
     const remote = await loadCloudState();
     if (remote?.app_state) {
-      applyingCloudState = true;
-      state = migrateState(remote.app_state);
-      state.showDiagnosis = false;
-      activateView(DEFAULT_VIEW);
-      state.lastAlert = "Nube sincronizada automaticamente.";
-      state.meta = {
-        ...(state.meta || {}),
-        cloudUpdatedAt: remote.updated_at,
-        cloudUserEmail: cloudState.email
-      };
-      saveState({ sync: false });
-      applyingCloudState = false;
+      const localTime = stateUpdatedTime(state);
+      const remoteTime = cloudRecordUpdatedTime(remote);
+      const localHasData = hasMeaningfulLocalData(state);
+
+      if (localTime > remoteTime && localHasData) {
+        const saved = await saveCloudState(getCloudPayload());
+        markCloudSynced(saved?.updated_at || new Date().toISOString());
+        state.lastAlert = "Tus cambios locales eran mas recientes y se subieron a la nube.";
+        cloudState.status = "synced";
+        render();
+        return;
+      }
+
+      if (remoteTime > localTime || !localHasData) {
+        applyRemoteState(remote.app_state, remote.updated_at, "Nube sincronizada automaticamente.");
+        cloudState.status = "synced";
+        render();
+        return;
+      }
+
+      markCloudSynced(remote.updated_at || new Date().toISOString());
       cloudState.status = "synced";
+      state.lastAlert = "Nube al dia.";
       render();
       return;
     }
@@ -301,6 +323,8 @@ function scheduleCloudSave() {
   if (!cloudState.signedIn || cloudState.status === "syncing") {
     return;
   }
+  cloudState.status = "pending";
+  cloudState.error = "";
   clearTimeout(cloudSaveTimer);
   cloudSaveTimer = setTimeout(pushCloudState, 800);
 }
@@ -314,13 +338,30 @@ async function pushCloudState() {
   render();
 
   try {
+    const remote = await loadCloudState();
+    if (remote?.app_state) {
+      const localTime = stateUpdatedTime(state);
+      const remoteTime = cloudRecordUpdatedTime(remote);
+      const localHasData = hasMeaningfulLocalData(state);
+
+      if (remoteTime > localTime || !localHasData) {
+        applyRemoteState(remote.app_state, remote.updated_at, "La nube tenia cambios mas recientes. Descargue esa version.");
+        cloudState.status = "synced";
+        render();
+        return;
+      }
+
+      if (remoteTime === localTime) {
+        markCloudSynced(remote.updated_at || new Date().toISOString());
+        cloudState.status = "synced";
+        cloudState.error = "";
+        render();
+        return;
+      }
+    }
+
     const saved = await saveCloudState(getCloudPayload());
-    state.meta = {
-      ...(state.meta || {}),
-      cloudUpdatedAt: saved?.updated_at || new Date().toISOString(),
-      cloudUserEmail: cloudState.email
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    markCloudSynced(saved?.updated_at || new Date().toISOString());
     cloudState.status = "synced";
     cloudState.error = "";
     render();
@@ -340,6 +381,61 @@ function getCloudPayload() {
       cloudUserEmail: cloudState.email
     }
   };
+}
+
+function applyRemoteState(remoteState, remoteUpdatedAt, alert) {
+  applyingCloudState = true;
+  state = migrateState(remoteState);
+  state.showDiagnosis = false;
+  pendingExtraAllocation = null;
+  clearSnackbar({ renderNow: false });
+  activateView(DEFAULT_VIEW);
+  state.lastAlert = alert;
+  markCloudSynced(remoteUpdatedAt || new Date().toISOString(), { persist: false });
+  saveState({ sync: false, touch: false });
+  applyingCloudState = false;
+}
+
+function markCloudSynced(updatedAt, options = {}) {
+  const { persist = true } = options;
+  state.meta = {
+    ...(state.meta || {}),
+    cloudUpdatedAt: updatedAt,
+    cloudUserEmail: cloudState.email
+  };
+  if (persist) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+}
+
+function stateUpdatedTime(payload) {
+  return Math.max(
+    timestampValue(payload?.updated_at),
+    timestampValue(payload?.meta?.updated_at),
+    timestampValue(payload?.meta?.updatedAt),
+    timestampValue(payload?.meta?.cloudUpdatedAt)
+  );
+}
+
+function cloudRecordUpdatedTime(record) {
+  return Math.max(timestampValue(record?.updated_at), stateUpdatedTime(record?.app_state));
+}
+
+function timestampValue(value) {
+  const time = Date.parse(value || "");
+  return Number.isFinite(time) ? time : 0;
+}
+
+function hasMeaningfulLocalData(payload) {
+  return Boolean(
+    payload?.profile?.completed ||
+      payload?.liquidity?.initialized ||
+      payload?.transactions?.length ||
+      payload?.budgetExtras?.length ||
+      payload?.budgetJobs?.length ||
+      payload?.debts?.length ||
+      payload?.wins?.length
+  );
 }
 
 function friendlyCloudError(error) {
@@ -397,6 +493,8 @@ function render() {
       ${renderView(plan)}
     </main>
     ${state.showDiagnosis ? renderDiagnosisModal() : ""}
+    ${pendingExtraAllocation ? renderExtraAllocationModal() : ""}
+    ${renderSnackbar()}
   `;
 
   bindEvents();
@@ -440,6 +538,9 @@ function renderCloudStatus() {
   }
   if (cloudState.status === "syncing") {
     return `<span class="status-pill cloud-status"><strong>Nube</strong> sincronizando</span>`;
+  }
+  if (cloudState.status === "pending") {
+    return `<span class="status-pill cloud-status pending"><strong>Nube</strong> pendiente</span>`;
   }
   if (cloudState.status === "error") {
     return `<span class="status-pill cloud-status danger"><strong>Nube</strong> error</span>`;
@@ -544,6 +645,8 @@ function renderToday(plan) {
   const checkinDone = state.checkins.includes(today);
   const script = dominantMoneyScript();
   const primaryAction = getPrimaryAction(plan, unlabeled, checkinDone);
+  const summary = budgetSummary();
+  const overBudget = categoryStatus().filter((category) => category.ratio > 100);
 
   return `
     <section class="content-grid today-grid">
@@ -588,6 +691,17 @@ function renderToday(plan) {
             ? `<p class="helper-text">Quedan gastos de hoy sin categoria.</p>`
             : `<p class="helper-text">Todo lo de hoy ya tiene categoria.</p>`
         }
+      </article>
+
+      <article class="card wide-card">
+        <div class="card-heading">
+          <div>
+            <p class="eyebrow">Gastos registrados</p>
+            <h2>Movimientos del periodo</h2>
+          </div>
+          <span class="metric-badge">${transactionsForSummary(summary).length} gastos</span>
+        </div>
+        ${renderTransactionHistory(summary)}
       </article>
 
       <article class="card hero-visual">
@@ -640,6 +754,34 @@ function renderToday(plan) {
           <button class="icon-btn" type="button" data-action="simulate-alert" aria-label="Simular alerta visual">!</button>
         </div>
         ${renderCategoryBars(plan, 6)}
+      </article>
+
+      <article class="card">
+        <p class="eyebrow">Pausa de 24 horas</p>
+        <h2>${state.cooldowns.length} compras pausadas</h2>
+        <div class="cooldown-list">
+          ${
+            state.cooldowns.length
+              ? state.cooldowns.map((cooldown) => renderCooldown(cooldown)).join("")
+              : `<div class="empty-state">Sin compras en pausa.</div>`
+          }
+        </div>
+      </article>
+
+      <article class="card wide-card">
+        <div class="card-heading">
+          <div>
+            <p class="eyebrow">Cuando te sales del plan</p>
+            <h2>Ajuste sin culpa</h2>
+          </div>
+          <span class="metric-badge">${overBudget.length} categorias excedidas</span>
+        </div>
+        <p class="reframe">
+          Una decision no define tu capacidad. ${overBudget.length ? "Reasigna lo que queda y protege el siguiente pago." : "Mantienes margen para decidir con calma."}
+        </p>
+        <div class="card-actions">
+          <button class="btn secondary" type="button" data-action="add-process-win">Guardar avance</button>
+        </div>
       </article>
 
       <article class="card">
@@ -700,6 +842,9 @@ function renderBudget(plan) {
           <p class="helper-text">Periodo actual: ${formatDate(summary.window.start)} - ${formatDate(previousDay(summary.window.end))}. Equivale a ${formatMoney(getMonthlyIncome(state.profile))} / mes.</p>
         </div>
       </article>
+
+      ${renderLiquidityCard(summary)}
+      ${renderExtraBudgetCard(summary)}
 
       <article class="card">
         <div class="card-heading">
@@ -949,124 +1094,51 @@ function renderSavings(plan) {
 }
 
 function renderSpending(plan) {
-  const overBudget = categoryStatus().filter((category) => category.ratio > 100);
   const summary = budgetSummary();
-  const liquidity = liquiditySummary(summary);
   const threshold = Math.max(1, summary.income * LARGE_PURCHASE_RATIO);
 
   return `
     <section class="content-grid spending-grid">
-      <article class="card wide-card">
+      <article class="card wide-card primary-spend-card">
         <div class="card-heading">
           <div>
             <p class="eyebrow">Nuevo movimiento</p>
             <h2>Registrar gasto</h2>
           </div>
+          <span class="metric-badge">Disponible ${formatMoney(liquiditySummary(summary).total)}</span>
         </div>
         <form class="stacked-form" id="transaction-form">
           <label>
             Comercio
             <input name="merchant" type="text" maxlength="42" placeholder="Ej. Tienda" required>
           </label>
-          <label>
-            Monto
-            <input name="amount" type="number" min="1000" step="1000" required>
-          </label>
-          <label>
-            Categoria
-            <select name="category" required>
-              <option value="${FREE_CATEGORY_ID}">Libre / sin clasificar</option>
-              ${state.budgetJobs.map((job) => `<option value="${escapeAttr(job.id)}">${escapeHtml(job.name)}</option>`).join("")}
-            </select>
-          </label>
-          <label>
-            Pagado con
-            <select name="source">
-              ${renderLocationOptions("account")}
-            </select>
-          </label>
+          <div class="transaction-options-row">
+            <label>
+              Categoria
+              <select name="category" required>
+                <option value="${FREE_CATEGORY_ID}">Libre / sin clasificar</option>
+                ${state.budgetJobs.map((job) => `<option value="${escapeAttr(job.id)}">${escapeHtml(job.name)}</option>`).join("")}
+              </select>
+            </label>
+            <label>
+              Pagado con
+              <select name="source">
+                ${renderLocationOptions("account")}
+              </select>
+            </label>
+          </div>
+          <div class="amount-submit-row">
+            <label>
+              Monto
+              <input name="amount" type="number" min="1000" step="1000" required>
+            </label>
+            <button class="btn primary spend-submit" type="submit">Registrar gasto</button>
+          </div>
           <label class="check-row">
             <input name="budgeted" type="checkbox" checked>
             Ya estaba previsto en el plan
           </label>
-          <button class="btn primary" type="submit">Guardar gasto</button>
         </form>
-      </article>
-
-      <article class="card wide-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Disponible por lugar</p>
-            <h2>Cuenta + efectivo</h2>
-          </div>
-          <span class="metric-badge">${formatMoney(liquidity.total)} total</span>
-        </div>
-        <form class="inline-form liquidity-form" id="liquidity-form">
-          <label>
-            En cuenta
-            <input name="account" type="number" min="0" step="1000" value="${liquidity.account}">
-          </label>
-          <label>
-            En efectivo
-            <input name="cash" type="number" min="0" step="1000" value="${liquidity.cash}">
-          </label>
-          <button class="btn secondary" type="submit">Actualizar disponible</button>
-        </form>
-      </article>
-
-      <article class="card wide-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Gastos registrados</p>
-            <h2>Movimientos del periodo</h2>
-          </div>
-          <span class="metric-badge">${transactionsForSummary(summary).length} gastos</span>
-        </div>
-        ${renderTransactionHistory(summary)}
-      </article>
-
-      <article class="card wide-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Dinero recibido</p>
-            <h2>Sumar al presupuesto</h2>
-          </div>
-          <span class="metric-badge">${formatMoney(summary.extraIncome)} extra</span>
-        </div>
-        <p class="helper-text">Suma regalos, bonos o ayudas solo al periodo actual. Tu presupuesto base no cambia.</p>
-        <form class="inline-form extra-budget-form" id="extra-budget-form">
-          <label>
-            Origen
-            <input name="source" type="text" maxlength="36" placeholder="Ej. Regalo, ayuda, venta" required>
-          </label>
-          <label>
-            Monto
-            <input name="amount" type="number" min="1000" step="1000" required>
-          </label>
-          <label>
-            Fecha
-            <input name="date" type="date" value="${todayKey()}" required>
-          </label>
-          <label>
-            Entra a
-            <select name="location">
-              ${renderLocationOptions("account")}
-            </select>
-          </label>
-          <button class="btn secondary" type="submit">Sumar dinero</button>
-        </form>
-        ${renderBudgetExtras(summary)}
-      </article>
-
-      <article class="card wide-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Nuevo campo</p>
-            <h2>Reservar del periodo</h2>
-          </div>
-          <span class="metric-badge">${formatMoney(summary.freeBudget)} libre</span>
-        </div>
-        ${renderBudgetJobForm()}
       </article>
 
       <article class="card wide-card">
@@ -1079,35 +1151,70 @@ function renderSpending(plan) {
         </div>
         ${renderCategoryBars(plan, state.budgetJobs.length + 1)}
       </article>
-
-      <article class="card">
-        <p class="eyebrow">Pausa de 24 horas</p>
-        <h2>${state.cooldowns.length} compras pausadas</h2>
-        <div class="cooldown-list">
-          ${
-            state.cooldowns.length
-              ? state.cooldowns.map((cooldown) => renderCooldown(cooldown)).join("")
-              : `<div class="empty-state">Sin compras en pausa.</div>`
-          }
-        </div>
-      </article>
-
-      <article class="card wide-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Cuando te sales del plan</p>
-            <h2>Ajuste sin culpa</h2>
-          </div>
-          <span class="metric-badge">${overBudget.length} categorias excedidas</span>
-        </div>
-        <p class="reframe">
-          Una decision no define tu capacidad. ${overBudget.length ? "Reasigna lo que queda y protege el siguiente pago." : "Mantienes margen para decidir con calma."}
-        </p>
-        <div class="card-actions">
-          <button class="btn secondary" type="button" data-action="add-process-win">Guardar avance</button>
-        </div>
-      </article>
     </section>
+  `;
+}
+
+function renderLiquidityCard(summary = budgetSummary()) {
+  const liquidity = liquiditySummary(summary);
+  return `
+    <article class="card wide-card">
+      <div class="card-heading">
+        <div>
+          <p class="eyebrow">Disponible por lugar</p>
+          <h2>Cuenta + efectivo</h2>
+        </div>
+        <span class="metric-badge">${formatMoney(liquidity.total)} total</span>
+      </div>
+      <form class="inline-form liquidity-form" id="liquidity-form">
+        <label>
+          En cuenta
+          <input name="account" type="number" min="0" step="1000" value="${liquidity.account}">
+        </label>
+        <label>
+          En efectivo
+          <input name="cash" type="number" min="0" step="1000" value="${liquidity.cash}">
+        </label>
+        <button class="btn secondary" type="submit">Actualizar disponible</button>
+      </form>
+    </article>
+  `;
+}
+
+function renderExtraBudgetCard(summary = budgetSummary()) {
+  return `
+    <article class="card wide-card">
+      <div class="card-heading">
+        <div>
+          <p class="eyebrow">Dinero recibido</p>
+          <h2>Sumar al presupuesto</h2>
+        </div>
+        <span class="metric-badge">${formatMoney(summary.extraIncome)} extra</span>
+      </div>
+      <p class="helper-text">Suma regalos, bonos o ayudas solo al periodo actual. Antes de guardarlo puedes separar una parte para ahorro.</p>
+      <form class="inline-form extra-budget-form" id="extra-budget-form">
+        <label>
+          Origen
+          <input name="source" type="text" maxlength="36" placeholder="Ej. Regalo, ayuda, venta" required>
+        </label>
+        <label>
+          Monto
+          <input name="amount" type="number" min="1000" step="1000" required>
+        </label>
+        <label>
+          Fecha
+          <input name="date" type="date" value="${todayKey()}" required>
+        </label>
+        <label>
+          Entra a
+          <select name="location">
+            ${renderLocationOptions("account")}
+          </select>
+        </label>
+        <button class="btn secondary" type="submit">Sumar dinero</button>
+      </form>
+      ${renderBudgetExtras(summary)}
+    </article>
   `;
 }
 
@@ -1244,7 +1351,7 @@ function renderProfile(plan) {
       <article class="card">
         <p class="eyebrow">Respaldo</p>
         <h2>Tus datos locales</h2>
-        <p>La informacion queda guardada en este navegador. Puedes exportarla como JSON.</p>
+        <p>La informacion queda guardada en este navegador. Puedes exportarla como JSON o restaurar un respaldo.</p>
         <div class="card-actions">
           <button class="btn secondary" type="button" data-action="export-data">Exportar</button>
           <label class="btn ghost file-btn">
@@ -1544,9 +1651,7 @@ function renderCategoryBars(plan, limit) {
     <div class="category-bars">
       ${categories
         .map(
-          (category) => {
-            const lastTransaction = lastTransactionForCategory(category.id);
-            return `
+          (category) => `
             <div class="category-row">
               <div>
                 <strong>${escapeHtml(category.name)}</strong>
@@ -1555,16 +1660,69 @@ function renderCategoryBars(plan, limit) {
               <div class="bar ${category.band}">
                 <span style="width:${clamp(category.ratio, 0, 120)}%"></span>
               </div>
-              ${
-                lastTransaction
-                  ? `<button class="btn ghost" type="button" data-action="remove-transaction" data-id="${escapeAttr(lastTransaction.id)}">Deshacer ultimo</button>`
-                  : ""
-              }
             </div>
-          `;
-          }
+          `
         )
         .join("")}
+    </div>
+  `;
+}
+
+function renderExtraAllocationModal() {
+  const draft = pendingExtraAllocation;
+  const percent = clamp(Number(draft.savingsPercent ?? 50), 0, 100);
+  const savingsAmount = Math.round(Number(draft.amount || 0) * percent / 100);
+  const freeAmount = Number(draft.amount || 0) - savingsAmount;
+  const target = savingsAllocationTarget();
+
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal compact-modal" role="dialog" aria-modal="true" aria-labelledby="extra-allocation-title">
+        <div class="modal-heading">
+          <div>
+            <p class="eyebrow">Dinero extra</p>
+            <h2 id="extra-allocation-title">Asignar antes de sumar</h2>
+          </div>
+          <button class="icon-btn" type="button" data-action="cancel-extra-allocation" aria-label="Cerrar">x</button>
+        </div>
+        <p>
+          ${escapeHtml(draft.source)} suma ${formatMoney(draft.amount)} en ${locationLabel(draft.location)}.
+          Sugerencia: separar una parte para ${escapeHtml(target.label)} y dejar el resto libre.
+        </p>
+        <form class="stacked-form" id="extra-allocation-form">
+          <label>
+            Porcentaje para ${escapeHtml(target.label)}
+            <input name="savingsPercent" type="range" min="0" max="100" step="5" value="${percent}" data-extra-allocation-range>
+          </label>
+          <div class="allocation-preview" aria-live="polite">
+            <div>
+              <strong data-allocation-savings>${formatMoney(savingsAmount)}</strong>
+              <span>${escapeHtml(target.label)}</span>
+            </div>
+            <div>
+              <strong data-allocation-free>${formatMoney(freeAmount)}</strong>
+              <span>Libre</span>
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button class="btn ghost" type="button" data-action="extra-all-free">Dejar todo libre</button>
+            <button class="btn primary" type="submit">Aplicar asignacion</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function renderSnackbar() {
+  if (!snackbar) {
+    return "";
+  }
+
+  return `
+    <div class="snackbar" role="status" aria-live="polite">
+      <span>${escapeHtml(snackbar.message)}</span>
+      <button class="btn secondary" type="button" data-action="undo-snackbar" data-id="${escapeAttr(snackbar.transactionId)}">Deshacer</button>
     </div>
   `;
 }
@@ -1605,6 +1763,7 @@ function bindEvents() {
       }
       transaction.category = select.value;
       transaction.labeled = Boolean(select.value);
+      transaction.updated_at = new Date().toISOString();
       state.lastAlert = transaction.labeled
         ? `${transaction.merchant} ahora tiene trabajo asignado.`
         : "Ese movimiento sigue pendiente de categoria.";
@@ -1642,6 +1801,12 @@ function bindEvents() {
   const transactionForm = document.querySelector("#transaction-form");
   if (transactionForm) {
     transactionForm.addEventListener("submit", handleTransactionSubmit);
+  }
+
+  const extraAllocationForm = document.querySelector("#extra-allocation-form");
+  if (extraAllocationForm) {
+    bindExtraAllocationPreview(extraAllocationForm);
+    extraAllocationForm.addEventListener("submit", handleExtraAllocationSubmit);
   }
 
   const smartForm = document.querySelector("#smart-form");
@@ -1687,6 +1852,26 @@ function bindDiagnosisPreview(form) {
   updateMonthlyEquivalent();
 }
 
+function bindExtraAllocationPreview(form) {
+  const range = form.querySelector("[data-extra-allocation-range]");
+  const savingsNode = form.querySelector("[data-allocation-savings]");
+  const freeNode = form.querySelector("[data-allocation-free]");
+  if (!range || !savingsNode || !freeNode || !pendingExtraAllocation) {
+    return;
+  }
+
+  const update = () => {
+    const percent = clamp(Number(range.value), 0, 100);
+    const amount = Number(pendingExtraAllocation.amount || 0);
+    const savingsAmount = Math.round(amount * percent / 100);
+    savingsNode.textContent = formatMoney(savingsAmount);
+    freeNode.textContent = formatMoney(amount - savingsAmount);
+  };
+
+  range.addEventListener("input", update);
+  update();
+}
+
 function handleAction(event) {
   event.preventDefault();
   const action = event.currentTarget.dataset.action;
@@ -1711,20 +1896,32 @@ function handleAction(event) {
     "add-process-win": addProcessWin,
     "reveal-debt": () => {
       state.settings.revealDebtTotal = true;
+      state.settings.updated_at = new Date().toISOString();
     },
     "hide-debt": () => {
       state.settings.revealDebtTotal = false;
+      state.settings.updated_at = new Date().toISOString();
     },
     "toggle-setting": () => {
       const setting = event.currentTarget.dataset.setting;
       state.settings[setting] = !state.settings[setting];
+      state.settings.updated_at = new Date().toISOString();
       state.lastAlert = state.settings[setting] ? "Automatizacion activada por defecto." : "Automatizacion pausada manualmente.";
     },
     "apply-student-context": applyStudentContext,
     "pay-debt": () => registerDebtPayment(id),
     "remove-job": () => removeBudgetJob(id),
     "remove-transaction": () => removeTransaction(id),
+    "undo-snackbar": () => {
+      removeTransaction(id);
+      clearSnackbar({ renderNow: false });
+    },
     "remove-extra": () => removeBudgetExtra(id),
+    "extra-all-free": () => applyPendingExtraAllocation(0),
+    "cancel-extra-allocation": () => {
+      pendingExtraAllocation = null;
+      state.lastAlert = "Dinero extra sin guardar.";
+    },
     "cancel-cooldown": () => cancelCooldown(id),
     "unlock-cooldown": () => unlockCooldown(id),
     "push-cloud-now": () => pushCloudState(),
@@ -1788,13 +1985,14 @@ function handleDiagnosisSubmit(event) {
       avoidance: clamp(numberFrom(data.get("avoidance")), 1, 5),
       status: clamp(numberFrom(data.get("status")), 1, 5),
       vigilance: clamp(numberFrom(data.get("vigilance")), 1, 5)
-    }
+    },
+    updated_at: new Date().toISOString()
   };
 
   if (wasIncomplete) {
     state.debts =
       estimatedDebt > 0
-        ? [{ id: uid("debt"), name: "Deuda principal", balance: estimatedDebt, apr: 24, minimum: Math.max(50_000, estimatedDebt * 0.03) }]
+        ? [{ id: uid("debt"), name: "Deuda principal", balance: estimatedDebt, apr: 24, minimum: Math.max(50_000, estimatedDebt * 0.03), updated_at: new Date().toISOString() }]
         : [];
     state.transactions = [];
     state.cooldowns = [];
@@ -1837,7 +2035,8 @@ function handleBudgetSubmit(event) {
     id: uniqueCategoryId(name),
     name,
     amount,
-    cadence
+    cadence,
+    updated_at: new Date().toISOString()
   };
   state.budgetJobs.push(job);
   const semesterBudget = getBudgetAmountForJob(job, state.profile);
@@ -1860,25 +2059,63 @@ function handleExtraBudgetSubmit(event) {
   const source = cleanText(data.get("source"), "Dinero extra");
   const location = normalizeLocation(data.get("location"));
   const date = cleanDate(data.get("date"), todayKey());
-  const currentWindow = budgetSummary().window;
-  const appliesNow = date >= currentWindow.start && date < currentWindow.end;
-  if (appliesNow) {
-    adjustLiquidity(location, amount, "extra");
-  }
-  const extra = {
-    id: uid("extra"),
+  pendingExtraAllocation = {
     source,
     amount,
     date,
-    location
+    location,
+    savingsPercent: 50
+  };
+  state.lastAlert = "Antes de sumarlo, decide cuanto va a ahorro y cuanto queda libre.";
+  render();
+}
+
+function handleExtraAllocationSubmit(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  applyPendingExtraAllocation(numberFrom(data.get("savingsPercent")));
+  saveState();
+  render();
+}
+
+function applyPendingExtraAllocation(rawPercent) {
+  if (!pendingExtraAllocation) {
+    return;
+  }
+
+  const percent = clamp(Number(rawPercent || 0), 0, 100);
+  const savingsAmount = Math.round(Number(pendingExtraAllocation.amount || 0) * percent / 100);
+  const freeAmount = Number(pendingExtraAllocation.amount || 0) - savingsAmount;
+  const now = new Date().toISOString();
+  const currentWindow = budgetSummary().window;
+  const appliesNow = pendingExtraAllocation.date >= currentWindow.start && pendingExtraAllocation.date < currentWindow.end;
+  let savingsJob = null;
+
+  if (appliesNow) {
+    adjustLiquidity(pendingExtraAllocation.location, pendingExtraAllocation.amount, "extra");
+    savingsJob = applySavingsAllocation(savingsAmount, now);
+  }
+
+  const extra = {
+    id: uid("extra"),
+    source: pendingExtraAllocation.source,
+    amount: pendingExtraAllocation.amount,
+    date: pendingExtraAllocation.date,
+    location: pendingExtraAllocation.location,
+    allocation: {
+      savingsPercent: percent,
+      savingsAmount: appliesNow ? savingsAmount : 0,
+      freeAmount: appliesNow ? freeAmount : pendingExtraAllocation.amount,
+      savingsJobId: savingsJob?.id || ""
+    },
+    updated_at: now
   };
   state.budgetExtras.push(extra);
   const summary = budgetSummary();
   state.lastAlert = appliesNow
-    ? `${source} sumo ${formatMoney(amount)} al presupuesto ${summary.cadenceLabel} en ${locationLabel(location)}.`
-    : `${source} quedo guardado, pero esa fecha pertenece a otro periodo.`;
-  saveState();
-  render();
+    ? `${extra.source} sumo ${formatMoney(extra.amount)}: ${formatMoney(extra.allocation.savingsAmount)} a ahorro y ${formatMoney(extra.allocation.freeAmount)} libre.`
+    : `${extra.source} quedo guardado, pero esa fecha pertenece a otro periodo.`;
+  pendingExtraAllocation = null;
 }
 
 function handleLiquiditySubmit(event) {
@@ -1887,7 +2124,8 @@ function handleLiquiditySubmit(event) {
   state.liquidity = {
     account: numberFrom(data.get("account")),
     cash: numberFrom(data.get("cash")),
-    initialized: true
+    initialized: true,
+    updated_at: new Date().toISOString()
   };
   state.lastAlert = `Disponible actualizado: ${formatMoney(state.liquidity.account + state.liquidity.cash)} en total.`;
   saveState();
@@ -1902,7 +2140,8 @@ function handleDebtSubmit(event) {
     name: cleanText(data.get("name"), "Deuda"),
     balance: numberFrom(data.get("balance")),
     apr: numberFrom(data.get("apr")),
-    minimum: numberFrom(data.get("minimum"))
+    minimum: numberFrom(data.get("minimum")),
+    updated_at: new Date().toISOString()
   });
   state.lastAlert = "Nueva deuda agregada. La cuenta mas pequena queda primero.";
   saveState();
@@ -1928,12 +2167,14 @@ function handleTransactionSubmit(event) {
       category,
       source,
       createdAt: new Date().toISOString(),
-      unlockAt: hoursFromNow(24).toISOString()
+      unlockAt: hoursFromNow(24).toISOString(),
+      updated_at: new Date().toISOString()
     });
     state.lastAlert = `${merchant} quedo en pausa 24 horas antes de decidir.`;
   } else {
-    addTransaction({ merchant, amount, category, budgeted, source });
+    const transaction = addTransaction({ merchant, amount, category, budgeted, source });
     state.lastAlert = createSpendAlert(category);
+    showUndoSnackbar(transaction.id);
   }
 
   saveState();
@@ -1945,6 +2186,7 @@ function handleSmartSubmit(event) {
   const data = new FormData(event.currentTarget);
   state.settings.monthlyRaisePct = clamp(numberFrom(data.get("monthlyRaisePct")), 0, 100);
   state.settings.escalationPct = clamp(numberFrom(data.get("escalationPct")), 0, 100);
+  state.settings.updated_at = new Date().toISOString();
   state.lastAlert = "Aumento futuro actualizado.";
   saveState();
   render();
@@ -2001,17 +2243,29 @@ function handleImport(event) {
     return;
   }
 
+  if (!window.confirm("Importar este JSON reemplazara los datos actuales de este navegador. ¿Quieres continuar?")) {
+    event.target.value = "";
+    return;
+  }
+
   const reader = new FileReader();
   reader.addEventListener("load", () => {
     try {
-      state = { ...createDefaultState(), ...JSON.parse(String(reader.result)) };
+      const parsed = JSON.parse(String(reader.result));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("El archivo no contiene datos de la app.");
+      }
+      state = migrateState(parsed);
+      pendingExtraAllocation = null;
+      clearSnackbar({ renderNow: false });
       state.lastAlert = "Datos importados correctamente.";
       saveState();
       render();
     } catch {
-      state.lastAlert = "No pude importar ese archivo JSON.";
+      state.lastAlert = "No pude importar ese archivo. Revisa que sea un JSON exportado desde esta app.";
       render();
     }
+    event.target.value = "";
   });
   reader.readAsText(file);
 }
@@ -2049,6 +2303,7 @@ function addProcessWin() {
 }
 
 function applyStudentContext() {
+  const now = new Date().toISOString();
   const semesterIncome = STUDENT_SEMESTER_INCOME;
   const semesterMonths = STUDENT_SEMESTER_MONTHS;
   const weeklyGas = STUDENT_WEEKLY_GAS;
@@ -2068,9 +2323,10 @@ function applyStudentContext() {
     weeklyGas,
     committedExpenses: monthlyFromWeekly(weeklyGas),
     relationshipMonthlyBudget: 45_000,
-    giftMonthlyBudget: 20_000
+    giftMonthlyBudget: 20_000,
+    updated_at: now
   };
-  state.budgetJobs = STUDENT_BUDGET_JOBS.map((job) => ({ ...job }));
+  state.budgetJobs = STUDENT_BUDGET_JOBS.map((job) => ({ ...job, updated_at: now }));
   state.meta = { ...(state.meta || {}), budgetPreset: "student" };
   state.lastAlert = "Contexto estudiante aplicado: beca semestral, moto, gasolina y salidas.";
   state.wins.push({
@@ -2087,6 +2343,7 @@ function registerDebtPayment(id) {
   }
   const payment = Math.min(debt.balance, Math.max(debt.minimum, 100_000));
   debt.balance = Math.max(0, debt.balance - payment);
+  debt.updated_at = new Date().toISOString();
 
   if (debt.balance === 0) {
     state.debts = state.debts.filter((item) => item.id !== id);
@@ -2146,6 +2403,9 @@ function removeBudgetExtra(id) {
   if (extra && state.liquidity?.initialized) {
     adjustLiquidity(extra.location, -Number(extra.amount || 0), "remove-extra");
   }
+  if (extra?.allocation?.savingsJobId && Number(extra.allocation.savingsAmount || 0) > 0) {
+    reduceSavingsAllocation(extra.allocation.savingsJobId, Number(extra.allocation.savingsAmount || 0));
+  }
   state.lastAlert = extra ? `${extra.source} ya no suma al presupuesto.` : "Dinero extra eliminado.";
 }
 
@@ -2181,7 +2441,7 @@ function exportData() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `finanzas-conductuales-${todayKey()}.json`;
+  link.download = `finanzas-${todayKey()}.json`;
   link.click();
   URL.revokeObjectURL(url);
   state.lastAlert = "Archivo JSON exportado.";
@@ -2195,8 +2455,9 @@ function resetDemo() {
 
 function addTransaction({ merchant, amount, category, budgeted, source = "account" }) {
   const location = normalizeLocation(source);
+  const now = new Date().toISOString();
   adjustLiquidity(location, -Number(amount || 0), "expense");
-  state.transactions.push({
+  const transaction = {
     id: uid("tx"),
     date: todayKey(),
     merchant,
@@ -2204,8 +2465,82 @@ function addTransaction({ merchant, amount, category, budgeted, source = "accoun
     category,
     labeled: Boolean(category),
     budgeted,
-    source: location
-  });
+    source: location,
+    updated_at: now
+  };
+  state.transactions.push(transaction);
+  return transaction;
+}
+
+function savingsAllocationTarget() {
+  const job = findSavingsJob();
+  if (!job) {
+    return { job: null, label: "Ahorro", createName: "Ahorro" };
+  }
+  if (job.cadence === "period") {
+    return { job, label: job.name, createName: job.name };
+  }
+  return { job: null, label: `${job.name} extra`, createName: `${job.name} extra` };
+}
+
+function findSavingsJob() {
+  const matches = state.budgetJobs.filter((job) => /ahorro|emergencia|buffer/i.test(job.name));
+  return matches.find((job) => job.cadence === "period") || matches[0];
+}
+
+function applySavingsAllocation(amount, updatedAt) {
+  if (amount <= 0) {
+    return null;
+  }
+
+  const target = savingsAllocationTarget();
+  if (target.job) {
+    target.job.amount = Number(target.job.amount || 0) + amount;
+    target.job.updated_at = updatedAt;
+    return target.job;
+  }
+
+  const job = {
+    id: uniqueCategoryId(target.createName),
+    name: target.createName,
+    amount,
+    cadence: "period",
+    updated_at: updatedAt
+  };
+  state.budgetJobs.push(job);
+  return job;
+}
+
+function reduceSavingsAllocation(jobId, amount) {
+  const job = state.budgetJobs.find((item) => item.id === jobId);
+  if (!job) {
+    return;
+  }
+  job.amount = Math.max(0, Number(job.amount || 0) - amount);
+  job.updated_at = new Date().toISOString();
+  if (job.cadence === "period" && job.amount === 0 && /ahorro/i.test(job.name)) {
+    state.budgetJobs = state.budgetJobs.filter((item) => item.id !== jobId);
+  }
+}
+
+function showUndoSnackbar(transactionId) {
+  clearTimeout(snackbarTimer);
+  snackbar = {
+    message: "Gasto registrado. ¿Deshacer?",
+    transactionId
+  };
+  snackbarTimer = setTimeout(() => {
+    clearSnackbar();
+  }, 5000);
+}
+
+function clearSnackbar(options = {}) {
+  const { renderNow = true } = options;
+  clearTimeout(snackbarTimer);
+  snackbar = null;
+  if (renderNow) {
+    render();
+  }
 }
 
 function calculatePlan() {
@@ -2246,6 +2581,7 @@ function adjustLiquidity(location, delta, reason) {
   const liquidity = normalizeLiquidity(state.liquidity);
   liquidity[key] = Math.max(0, liquidity[key] + amount);
   liquidity.initialized = true;
+  liquidity.updated_at = new Date().toISOString();
   state.liquidity = liquidity;
 }
 
@@ -2261,12 +2597,6 @@ function transactionsForSummary(summary = budgetSummary()) {
     const date = String(transaction.date || "").slice(0, 10);
     return date >= summary.window.start && date < summary.window.end;
   });
-}
-
-function lastTransactionForCategory(categoryId) {
-  return transactionsForSummary()
-    .filter((transaction) => transaction.category === categoryId)
-    .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
 }
 
 function categoryStatus() {
@@ -2485,9 +2815,37 @@ function normalizeBudgetJobs(jobs) {
     return {
       ...job,
       amount: Number(job.amount ?? known.amount ?? job.budget ?? 0),
-      cadence: ["weekly", "biweekly", "monthly", "semester", "yearly", "period"].includes(job.cadence) ? job.cadence : known.cadence || "monthly"
+      cadence: ["weekly", "biweekly", "monthly", "semester", "yearly", "period"].includes(job.cadence) ? job.cadence : known.cadence || "monthly",
+      updated_at: job.updated_at || ""
     };
   });
+}
+
+function normalizeTransactions(transactions) {
+  return transactions.map((transaction) => ({
+    ...transaction,
+    id: transaction.id || uid("tx"),
+    date: cleanDate(transaction.date, todayKey()),
+    merchant: cleanText(transaction.merchant, "Compra"),
+    amount: Number(transaction.amount || 0),
+    category: transaction.category || "",
+    labeled: Boolean(transaction.category || transaction.labeled),
+    budgeted: Boolean(transaction.budgeted),
+    source: normalizeLocation(transaction.source),
+    updated_at: transaction.updated_at || transaction.createdAt || transaction.date || ""
+  }));
+}
+
+function normalizeDebts(debts) {
+  return debts.map((debt) => ({
+    ...debt,
+    id: debt.id || uid("debt"),
+    name: cleanText(debt.name, "Deuda"),
+    balance: Number(debt.balance || 0),
+    apr: Number(debt.apr || 0),
+    minimum: Number(debt.minimum || 0),
+    updated_at: debt.updated_at || ""
+  }));
 }
 
 function isTemplateBudgetJobs(jobs) {
@@ -2508,7 +2866,9 @@ function normalizeBudgetExtras(extras) {
     source: cleanText(extra.source || extra.name, "Dinero extra"),
     amount: Number(extra.amount || 0),
     date: cleanDate(extra.date, todayKey()),
-    location: normalizeLocation(extra.location)
+    location: normalizeLocation(extra.location),
+    allocation: extra.allocation || null,
+    updated_at: extra.updated_at || extra.date || ""
   }));
 }
 
@@ -2516,7 +2876,8 @@ function normalizeLiquidity(liquidity) {
   return {
     account: numberFrom(liquidity?.account),
     cash: numberFrom(liquidity?.cash),
-    initialized: Boolean(liquidity?.initialized)
+    initialized: Boolean(liquidity?.initialized),
+    updated_at: liquidity?.updated_at || ""
   };
 }
 
