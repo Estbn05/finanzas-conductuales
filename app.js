@@ -1398,7 +1398,7 @@ function renderDiagnosisModal() {
           </div>
           <button class="icon-btn" type="button" data-action="close-diagnosis" aria-label="Cerrar">x</button>
         </div>
-        <form id="diagnosis-form" class="diagnosis-form">
+        <form id="diagnosis-form" class="diagnosis-form" novalidate>
           <fieldset>
             <legend>Datos principales</legend>
             <label>
@@ -1441,6 +1441,10 @@ function renderDiagnosisModal() {
               <small>Usa 0 si no tienes un dia fijo.</small>
             </label>
           </fieldset>
+
+          <div class="modal-actions quick-save-actions">
+            <button class="btn primary" type="submit">Guardar plan</button>
+          </div>
 
           <fieldset>
             <legend>Tipo de ingreso</legend>

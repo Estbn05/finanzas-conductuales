@@ -17,7 +17,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
 test("service worker caches the app shell needed for offline launch", async () => {
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
-  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v14"/);
+  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v15"/);
   assert.ok(worker.includes('"./index.html"'));
   assert.ok(worker.includes('"./app.js"'));
   assert.ok(worker.includes('"./finance-core.js"'));
@@ -39,6 +39,8 @@ test("navigation opens on expense registration with a vertical collapsible menu"
   assert.ok(app.indexOf("<h2>Registrar gasto</h2>") < app.indexOf("<h2>Reservar del periodo</h2>"));
   assert.ok(app.indexOf("<h2>Registrar gasto</h2>") < app.indexOf("<h2>Sumar al presupuesto</h2>"));
   assert.ok(app.includes('id="extra-budget-form"'));
+  assert.ok(app.includes('id="diagnosis-form" class="diagnosis-form" novalidate'));
+  assert.ok(app.includes('<button class="btn primary" type="submit">Guardar plan</button>'));
   assert.ok(app.includes('name="payday" type="number" min="0" max="28"'));
   assert.ok(app.includes("Usa 0 si no tienes un dia fijo."));
   assert.ok(app.includes('name="cadence"'));
