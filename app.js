@@ -32,6 +32,13 @@ const DEFAULT_VIEW = "spending";
 const STUDENT_SEMESTER_INCOME = 1_750_000;
 const STUDENT_SEMESTER_MONTHS = 6;
 const STUDENT_WEEKLY_GAS = 30_000;
+const STUDENT_BUDGET_JOBS = [
+  { id: "gas", name: "Gasolina moto", amount: STUDENT_WEEKLY_GAS, cadence: "weekly" },
+  { id: "dates", name: "Salidas con novia", amount: 45_000, cadence: "monthly" },
+  { id: "gifts", name: "Regalos para novia", amount: 20_000, cadence: "monthly" },
+  { id: "university", name: "Universidad y comida", amount: 25_000, cadence: "monthly" },
+  { id: "flex", name: "Imprevistos", amount: 9_000, cadence: "monthly" }
+];
 
 const NAV_ITEMS = [
   { id: "spending", label: "Registrar gasto", icon: "01" },
@@ -76,11 +83,6 @@ if ("serviceWorker" in navigator && window.location.protocol !== "file:") {
 
 function createDefaultState() {
   const today = todayKey();
-  const daysAgo = (days) => {
-    const date = new Date();
-    date.setDate(date.getDate() - days);
-    return todayKey(date);
-  };
 
   return {
     activeView: DEFAULT_VIEW,
@@ -89,7 +91,8 @@ function createDefaultState() {
     meta: {
       updatedAt: new Date().toISOString(),
       cloudUpdatedAt: "",
-      cloudUserEmail: ""
+      cloudUserEmail: "",
+      budgetPreset: ""
     },
     profile: {
       completed: false,
@@ -127,84 +130,12 @@ function createDefaultState() {
       escalationPct: 50
     },
     budgetExtras: [],
-    budgetJobs: [
-      { id: "gas", name: "Gasolina moto", amount: STUDENT_WEEKLY_GAS, cadence: "weekly" },
-      { id: "dates", name: "Salidas con novia", amount: 45_000, cadence: "monthly" },
-      { id: "gifts", name: "Regalos para novia", amount: 20_000, cadence: "monthly" },
-      { id: "university", name: "Universidad y comida", amount: 25_000, cadence: "monthly" }
-    ],
+    budgetJobs: [],
     debts: [],
-    transactions: [
-      {
-        id: uid("tx"),
-        date: today,
-        merchant: "Tanqueada moto",
-        amount: 30_000,
-        category: "",
-        labeled: false,
-        budgeted: true
-      },
-      {
-        id: uid("tx"),
-        date: today,
-        merchant: "Salida con novia",
-        amount: 42_000,
-        category: "",
-        labeled: false,
-        budgeted: true
-      },
-      {
-        id: uid("tx"),
-        date: today,
-        merchant: "Almuerzo universidad",
-        amount: 14_000,
-        category: "",
-        labeled: false,
-        budgeted: true
-      },
-      {
-        id: uid("tx"),
-        date: daysAgo(1),
-        merchant: "Gasolina semana pasada",
-        amount: 30_000,
-        category: "gas",
-        labeled: true,
-        budgeted: true
-      },
-      {
-        id: uid("tx"),
-        date: daysAgo(2),
-        merchant: "Detalles pequenos",
-        amount: 18_000,
-        category: "gifts",
-        labeled: true,
-        budgeted: true
-      },
-      {
-        id: uid("tx"),
-        date: daysAgo(3),
-        merchant: "Fotocopias",
-        amount: 8_000,
-        category: "university",
-        labeled: true,
-        budgeted: true
-      }
-    ],
-    cooldowns: [
-      {
-        id: uid("cool"),
-        merchant: "Regalo grande sorpresa",
-        amount: 180_000,
-        category: "flex",
-        createdAt: new Date().toISOString(),
-        unlockAt: hoursFromNow(24).toISOString()
-      }
-    ],
+    transactions: [],
+    cooldowns: [],
     checkins: [],
-    wins: [
-      { id: uid("win"), date: daysAgo(2), text: "Clasificaste tus primeros movimientos y redujiste ambiguedad." },
-      { id: uid("win"), date: daysAgo(1), text: "Pagaste el minimo de la cuenta mas pequena." }
-    ]
+    wins: []
   };
 }
 
@@ -240,6 +171,10 @@ function migrateState(savedState) {
   migrated.profile.semesterStart = migrated.profile.semesterStart || migrated.profile.periodStart;
   migrated.profile.payday = normalizePayday(migrated.profile.payday ?? defaults.profile.payday);
   migrated.budgetJobs = normalizeBudgetJobs(savedState.budgetJobs || defaults.budgetJobs);
+  if (migrated.profile.completed && migrated.meta.budgetPreset !== "student" && isTemplateBudgetJobs(migrated.budgetJobs)) {
+    clearTemplateBudget(migrated);
+    migrated.lastAlert = "Quite los campos de plantilla. Crea solo los campos que si usas.";
+  }
   return migrated;
 }
 
@@ -778,7 +713,11 @@ function renderBudget(plan) {
           <span class="metric-badge">${state.budgetJobs.length}/10 maximo</span>
         </div>
         <div class="job-table">
-          ${state.budgetJobs.map((job) => renderBudgetJob(job)).join("")}
+          ${
+            state.budgetJobs.length
+              ? state.budgetJobs.map((job) => renderBudgetJob(job)).join("")
+              : `<div class="empty-state">Aun no tienes campos. Crea uno como gasolina, comida, ahorro o salidas.</div>`
+          }
         </div>
       </article>
     </section>
@@ -1706,6 +1645,7 @@ function handleDiagnosisSubmit(event) {
   event.preventDefault();
   const data = new FormData(event.currentTarget);
   const wasIncomplete = !state.profile.completed;
+  const shouldClearTemplateBudget = shouldClearTemplateBudgetOnPlanSave();
   const estimatedDebt = numberFrom(data.get("totalDebt"));
   const incomeCadence = ["weekly", "biweekly", "monthly", "semester", "yearly"].includes(data.get("incomeCadence"))
     ? data.get("incomeCadence")
@@ -1762,9 +1702,15 @@ function handleDiagnosisSubmit(event) {
     ];
   }
 
+  if (shouldClearTemplateBudget) {
+    clearTemplateBudget();
+  }
+
   state.showDiagnosis = false;
   activateView(DEFAULT_VIEW);
-  state.lastAlert = "Datos guardados. Ahora registra tus gastos desde la pantalla principal.";
+  state.lastAlert = shouldClearTemplateBudget
+    ? "Datos guardados. Quite los campos de plantilla; ahora crea tus propios campos de gasto."
+    : "Datos guardados. Ahora registra tus gastos desde la pantalla principal.";
   saveState();
   render();
 }
@@ -1997,12 +1943,8 @@ function applyStudentContext() {
     relationshipMonthlyBudget: 45_000,
     giftMonthlyBudget: 20_000
   };
-  state.budgetJobs = [
-    { id: "gas", name: "Gasolina moto", amount: weeklyGas, cadence: "weekly" },
-    { id: "dates", name: "Salidas con novia", amount: 45_000, cadence: "monthly" },
-    { id: "gifts", name: "Regalos para novia", amount: 20_000, cadence: "monthly" },
-    { id: "university", name: "Universidad y comida", amount: 25_000, cadence: "monthly" }
-  ];
+  state.budgetJobs = STUDENT_BUDGET_JOBS.map((job) => ({ ...job }));
+  state.meta = { ...(state.meta || {}), budgetPreset: "student" };
   state.lastAlert = "Contexto estudiante aplicado: beca semestral, moto, gasolina y salidas.";
   state.wins.push({
     id: uid("win"),
@@ -2041,6 +1983,23 @@ function removeBudgetJob(id) {
     }
   });
   state.lastAlert = "Categoria eliminada. Sus gastos vuelven a revision.";
+}
+
+function shouldClearTemplateBudgetOnPlanSave() {
+  return state.meta?.budgetPreset !== "student" && isTemplateBudgetJobs(state.budgetJobs);
+}
+
+function clearTemplateBudget(target = state) {
+  const templateIds = new Set(STUDENT_BUDGET_JOBS.map((job) => job.id));
+  target.budgetJobs = [];
+  target.cooldowns = (target.cooldowns || []).filter((cooldown) => !templateIds.has(cooldown.category));
+  (target.transactions || []).forEach((transaction) => {
+    if (templateIds.has(transaction.category)) {
+      transaction.category = "";
+      transaction.labeled = false;
+    }
+  });
+  target.meta = { ...(target.meta || {}), budgetPreset: "" };
 }
 
 function removeBudgetExtra(id) {
@@ -2330,6 +2289,18 @@ function normalizeBudgetJobs(jobs) {
       amount: Number(job.amount ?? known.amount ?? job.budget ?? 0),
       cadence: ["weekly", "biweekly", "monthly", "semester", "yearly", "period"].includes(job.cadence) ? job.cadence : known.cadence || "monthly"
     };
+  });
+}
+
+function isTemplateBudgetJobs(jobs) {
+  return Boolean(jobs?.length) && jobs.every((job) => {
+    const template = STUDENT_BUDGET_JOBS.find((item) => item.id === job.id);
+    if (!template) {
+      return false;
+    }
+    const amount = Number(job.amount ?? job.budget ?? 0);
+    const cadence = job.cadence || template.cadence;
+    return cleanText(job.name, "") === template.name && amount === template.amount && cadence === template.cadence;
   });
 }
 

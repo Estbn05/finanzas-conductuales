@@ -21,7 +21,7 @@ Aplicacion personal de finanzas basada en economia conductual. El objetivo no es
 - **Dinero extra:** permite sumar regalos, bonos o ayudas al presupuesto del periodo sin cambiar el presupuesto base recurrente.
 - **Sobres por periodo:** el presupuesto puede ser semanal, quincenal, mensual, semestral o anual; cada campo semanal, quincenal, mensual, semestral, anual o por periodo reserva automaticamente su parte.
 - **Inicio accionable:** muestra el siguiente paso: poner datos reales, clasificar gastos, cerrar la revision, ahorrar o pagar deuda.
-- **Contexto estudiante becado:** queda como preset opcional, no como unica forma de usar la app.
+- **Contexto estudiante becado:** queda como preset opcional; sus campos solo se cargan al presionar "Aplicar mi contexto".
 - **Presupuesto 1/3:** divide ingreso en deuda, ahorro y gastos; ajusta ahorro precautorio si el ingreso es variable.
 - **Zero-based budgeting:** cada categoria de gasto recibe un trabajo especifico.
 - **Buffer de emergencia:** meta base equivalente a US$2.000, con barrido automatico sugerido el dia 5.
