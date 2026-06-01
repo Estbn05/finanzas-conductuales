@@ -556,6 +556,7 @@ a {
 }
 
 .transaction-list,
+.transaction-history,
 .debt-list,
 .cooldown-list,
 .wins-list,
@@ -567,6 +568,7 @@ a {
 }
 
 .transaction-row,
+.history-row,
 .job-row,
 .extra-budget-row,
 .category-row,
@@ -587,8 +589,14 @@ a {
   grid-template-columns: minmax(0, 1fr) minmax(150px, 220px);
 }
 
+.history-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .transaction-row strong,
 .transaction-row span,
+.history-row strong,
+.history-row span,
 .job-row strong,
 .job-row span,
 .extra-budget-row strong,
@@ -607,6 +615,7 @@ a {
 }
 
 .transaction-row span,
+.history-row span,
 .job-row span,
 .extra-budget-row span,
 .category-row span,
@@ -1146,6 +1155,7 @@ label {
   .focus-card,
   .paying-visual,
   .transaction-row,
+  .history-row,
   .job-row,
   .extra-budget-row,
   .category-row,

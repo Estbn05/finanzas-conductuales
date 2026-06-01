@@ -18,6 +18,7 @@ Aplicacion personal de finanzas basada en economia conductual. El objetivo no es
 - **Menu vertical desplegable:** guarda Plan, Deudas, Ahorro, Inicio, Datos, nube y avisos sin ocupar la pantalla principal.
 - **Barra de dinero disponible:** muestra lo libre del periodo actual y no tapa el contenido.
 - **Registro primero:** el formulario para guardar un gasto aparece antes de los resumenes por categoria.
+- **Correccion de errores:** los gastos registrados en el periodo se pueden eliminar si fueron anotados por accidente.
 - **Dinero extra:** permite sumar regalos, bonos o ayudas al presupuesto del periodo sin cambiar el presupuesto base recurrente.
 - **Sobres por periodo:** el presupuesto puede ser semanal, quincenal, mensual, semestral o anual; cada campo semanal, quincenal, mensual, semestral, anual o por periodo reserva automaticamente su parte.
 - **Inicio accionable:** muestra el siguiente paso: poner datos reales, clasificar gastos, cerrar la revision, ahorrar o pagar deuda.

@@ -980,6 +980,17 @@ function renderSpending(plan) {
       <article class="card wide-card">
         <div class="card-heading">
           <div>
+            <p class="eyebrow">Gastos registrados</p>
+            <h2>Movimientos del periodo</h2>
+          </div>
+          <span class="metric-badge">${transactionsForSummary(summary).length} gastos</span>
+        </div>
+        ${renderTransactionHistory(summary)}
+      </article>
+
+      <article class="card wide-card">
+        <div class="card-heading">
+          <div>
             <p class="eyebrow">Dinero recibido</p>
             <h2>Sumar al presupuesto</h2>
           </div>
@@ -1077,6 +1088,34 @@ function renderBudgetExtras(summary = budgetSummary()) {
                 <span>${formatMoney(extra.amount)} · ${formatDate(extra.date)}</span>
               </div>
               <button class="icon-btn muted" type="button" data-action="remove-extra" data-id="${escapeAttr(extra.id)}" aria-label="Eliminar ${escapeAttr(extra.source)}">x</button>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderTransactionHistory(summary = budgetSummary()) {
+  const transactions = transactionsForSummary(summary)
+    .slice()
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+
+  if (!transactions.length) {
+    return `<div class="empty-state">Todavia no hay gastos registrados en este periodo.</div>`;
+  }
+
+  return `
+    <div class="transaction-history">
+      ${transactions
+        .map(
+          (transaction) => `
+            <div class="history-row">
+              <div>
+                <strong>${escapeHtml(transaction.merchant)}</strong>
+                <span>${formatMoney(transaction.amount)} · ${escapeHtml(categoryName(transaction.category))} · ${formatDate(transaction.date)}</span>
+              </div>
+              <button class="btn ghost" type="button" data-action="remove-transaction" data-id="${escapeAttr(transaction.id)}">Eliminar</button>
             </div>
           `
         )
@@ -1619,6 +1658,7 @@ function handleAction(event) {
     "apply-student-context": applyStudentContext,
     "pay-debt": () => registerDebtPayment(id),
     "remove-job": () => removeBudgetJob(id),
+    "remove-transaction": () => removeTransaction(id),
     "remove-extra": () => removeBudgetExtra(id),
     "cancel-cooldown": () => cancelCooldown(id),
     "unlock-cooldown": () => unlockCooldown(id),
@@ -1985,6 +2025,14 @@ function removeBudgetJob(id) {
   state.lastAlert = "Categoria eliminada. Sus gastos vuelven a revision.";
 }
 
+function removeTransaction(id) {
+  const transaction = state.transactions.find((item) => item.id === id);
+  state.transactions = state.transactions.filter((item) => item.id !== id);
+  state.lastAlert = transaction
+    ? `${transaction.merchant} eliminado. La categoria se recalculo.`
+    : "Gasto eliminado.";
+}
+
 function shouldClearTemplateBudgetOnPlanSave() {
   return state.meta?.budgetPreset !== "student" && isTemplateBudgetJobs(state.budgetJobs);
 }
@@ -2078,6 +2126,13 @@ function budgetExtrasForSummary(summary = budgetSummary()) {
   });
 }
 
+function transactionsForSummary(summary = budgetSummary()) {
+  return (state.transactions || []).filter((transaction) => {
+    const date = String(transaction.date || "").slice(0, 10);
+    return date >= summary.window.start && date < summary.window.end;
+  });
+}
+
 function categoryStatus() {
   const summary = budgetSummary();
   const freeRatio = summary.freeBudget ? (summary.freeSpent / summary.freeBudget) * 100 : summary.freeSpent > 0 ? 120 : 0;
@@ -2092,6 +2147,13 @@ function categoryStatus() {
       band: freeRatio >= 95 ? "danger" : freeRatio >= 75 ? "warning" : "good"
     }
   ];
+}
+
+function categoryName(categoryId) {
+  if (categoryId === FREE_CATEGORY_ID) {
+    return "Libre / sin clasificar";
+  }
+  return state.budgetJobs.find((job) => job.id === categoryId)?.name || "Sin categoria";
 }
 
 function spendByCategory() {
