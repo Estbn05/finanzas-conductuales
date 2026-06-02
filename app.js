@@ -589,15 +589,14 @@ function renderNavItem(item) {
 
 function renderHeader(plan) {
   const summary = budgetSummary();
-  const liquidity = liquiditySummary(summary);
-  const realTotal = liquidity.total;
+  const freeLiquidity = freeLiquiditySummary(summary);
 
   return `
     <header class="money-bar ${summary.overReserved ? "danger" : ""}" role="status" aria-label="Dinero libre del periodo">
       <span>Libre ${summary.cadenceLabel}</span>
       <strong>${formatMoney(summary.freeRemaining)}</strong>
       <span>${summary.overReserved ? "sobreasignado" : "sin clasificar"}</span>
-      <span class="money-split">Real: Cuenta ${formatMoney(liquidity.account)} · Efectivo ${formatMoney(liquidity.cash)} · Total ${formatMoney(realTotal)}</span>
+      <span class="money-split">Libre real: Cuenta ${formatMoney(freeLiquidity.account)} · Efectivo ${formatMoney(freeLiquidity.cash)} · Total ${formatMoney(freeLiquidity.total)}</span>
     </header>
   `;
 }
@@ -2928,6 +2927,18 @@ function liquiditySummary(summary = budgetSummary()) {
   return {
     ...liquidity,
     total: liquidity.account + liquidity.cash
+  };
+}
+
+function freeLiquiditySummary(summary = budgetSummary()) {
+  const liquidity = liquiditySummary(summary);
+  const freeTotal = Math.min(summary.freeRemaining, liquidity.total);
+  const cash = Math.min(liquidity.cash, freeTotal);
+  const account = Math.min(liquidity.account, Math.max(0, freeTotal - cash));
+  return {
+    account,
+    cash,
+    total: account + cash
   };
 }
 
