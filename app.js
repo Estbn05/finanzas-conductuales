@@ -60,6 +60,7 @@ let authUnsubscribe = () => {};
 let snackbar = null;
 let snackbarTimer;
 let pendingExtraAllocation = null;
+let diagnosisValidation = { field: "", message: "" };
 let cloudState = {
   configured: isCloudConfigured(),
   email: "",
@@ -1636,25 +1637,30 @@ function renderDiagnosisModal() {
           <button class="icon-btn" type="button" data-action="close-diagnosis" aria-label="Cerrar">x</button>
         </div>
         <form id="diagnosis-form" class="diagnosis-form" novalidate>
+          ${diagnosisValidation.message ? `<p class="form-error diagnosis-error" role="alert">${escapeHtml(diagnosisValidation.message)}</p>` : ""}
           <fieldset>
             <legend>Datos principales</legend>
             <label>
               Nombre del plan
-              <input name="name" type="text" maxlength="32" value="${escapeAttr(profile.name)}" required>
+              <input name="name" type="text" maxlength="32" value="${escapeAttr(profile.name)}" required ${diagnosisInvalidAttr("name")}>
+              ${renderDiagnosisFieldError("name")}
             </label>
             <label>
               Cada cuanto recibes presupuesto
-              <select name="incomeCadence">
+              <select name="incomeCadence" ${diagnosisInvalidAttr("incomeCadence")}>
                 ${renderIncomeCadenceOptions(profile.incomeCadence)}
               </select>
+              ${renderDiagnosisFieldError("incomeCadence")}
             </label>
             <label>
               Presupuesto por periodo
-              <input name="incomeAmount" type="number" min="0" step="1000" value="${getPeriodIncome(profile)}" required>
+              <input name="incomeAmount" type="number" min="0" step="1000" value="${getPeriodIncome(profile)}" required ${diagnosisInvalidAttr("incomeAmount")}>
+              ${renderDiagnosisFieldError("incomeAmount")}
             </label>
             <label>
               Inicio del periodo actual
-              <input name="periodStart" type="date" value="${escapeAttr(profile.periodStart || profile.semesterStart || monthStartKey())}" required>
+              <input name="periodStart" type="date" value="${escapeAttr(profile.periodStart || profile.semesterStart || monthStartKey())}" required ${diagnosisInvalidAttr("periodStart")}>
+              ${renderDiagnosisFieldError("periodStart")}
             </label>
             <label>
               Ingreso mensual equivalente
@@ -1662,20 +1668,24 @@ function renderDiagnosisModal() {
             </label>
             <label>
               Gastos comprometidos
-              <input name="committedExpenses" type="number" min="0" step="1000" value="${profile.committedExpenses}" required>
+              <input name="committedExpenses" type="number" min="0" step="1000" value="${profile.committedExpenses}" required ${diagnosisInvalidAttr("committedExpenses")}>
+              ${renderDiagnosisFieldError("committedExpenses")}
             </label>
             <label>
               Ahorro disponible
-              <input name="emergencySavings" type="number" min="0" step="1000" value="${profile.emergencySavings}" required>
+              <input name="emergencySavings" type="number" min="0" step="1000" value="${profile.emergencySavings}" required ${diagnosisInvalidAttr("emergencySavings")}>
+              ${renderDiagnosisFieldError("emergencySavings")}
             </label>
             <label>
               Deuda total estimada
-              <input name="totalDebt" type="number" min="0" step="1000" value="${totalDebt()}" required>
+              <input name="totalDebt" type="number" min="0" step="1000" value="${totalDebt()}" required ${diagnosisInvalidAttr("totalDebt")}>
+              ${renderDiagnosisFieldError("totalDebt")}
             </label>
             <label>
               Dia de pago principal
-              <input name="payday" type="number" min="0" max="28" inputmode="numeric" value="${profile.payday}">
+              <input name="payday" type="number" min="0" max="28" inputmode="numeric" value="${profile.payday}" ${diagnosisInvalidAttr("payday")}>
               <small>Usa 0 si no tienes un dia fijo.</small>
+              ${renderDiagnosisFieldError("payday")}
             </label>
           </fieldset>
 
@@ -1687,18 +1697,20 @@ function renderDiagnosisModal() {
             <legend>Tipo de ingreso</legend>
             <label>
               Frecuencia
-              <select name="incomeType">
+              <select name="incomeType" ${diagnosisInvalidAttr("incomeType")}>
                 <option value="fixed" ${profile.incomeType === "fixed" ? "selected" : ""}>Fijo</option>
                 <option value="variable" ${profile.incomeType === "variable" ? "selected" : ""}>Variable / freelance</option>
               </select>
+              ${renderDiagnosisFieldError("incomeType")}
             </label>
             <label>
               Volatilidad
-              <select name="volatility">
+              <select name="volatility" ${diagnosisInvalidAttr("volatility")}>
                 <option value="low" ${profile.volatility === "low" ? "selected" : ""}>Baja</option>
                 <option value="medium" ${profile.volatility === "medium" ? "selected" : ""}>Media</option>
                 <option value="high" ${profile.volatility === "high" ? "selected" : ""}>Alta</option>
               </select>
+              ${renderDiagnosisFieldError("volatility")}
             </label>
             <label>
               Confianza financiera: ${profile.selfEfficacy}/10
@@ -1733,13 +1745,25 @@ function renderScriptQuestion(key, label) {
   return `
     <label>
       ${label}
-      <select name="${key}">
+      <select name="${key}" ${diagnosisInvalidAttr(key)}>
         ${[1, 2, 3, 4, 5]
           .map((score) => `<option value="${score}" ${score === Number(value) ? "selected" : ""}>${score}</option>`)
           .join("")}
       </select>
+      ${renderDiagnosisFieldError(key)}
     </label>
   `;
+}
+
+function diagnosisInvalidAttr(name) {
+  return diagnosisValidation.field === name ? `aria-invalid="true" data-invalid="true"` : "";
+}
+
+function renderDiagnosisFieldError(name) {
+  if (diagnosisValidation.field !== name) {
+    return "";
+  }
+  return `<small class="field-error">${escapeHtml(diagnosisValidation.message)}</small>`;
 }
 
 function renderCategoryBars(plan, limit) {
@@ -1985,10 +2009,12 @@ function handleAction(event) {
       menuOpen = !menuOpen;
     },
     "open-diagnosis": () => {
+      diagnosisValidation = { field: "", message: "" };
       state.showDiagnosis = true;
       menuOpen = false;
     },
     "close-diagnosis": () => {
+      diagnosisValidation = { field: "", message: "" };
       state.showDiagnosis = false;
     },
     "complete-checkin": completeCheckin,
@@ -2046,7 +2072,18 @@ function handleAction(event) {
 
 function handleDiagnosisSubmit(event) {
   event.preventDefault();
-  const data = new FormData(event.currentTarget);
+  const form = event.currentTarget;
+  const validation = validateDiagnosisForm(form);
+  if (validation) {
+    diagnosisValidation = validation;
+    state.lastAlert = validation.message;
+    render();
+    focusDiagnosisField(validation.field);
+    return;
+  }
+
+  diagnosisValidation = { field: "", message: "" };
+  const data = new FormData(form);
   const wasIncomplete = !state.profile.completed;
   const shouldClearTemplateBudget = shouldClearTemplateBudgetOnPlanSave();
   const estimatedDebt = numberFrom(data.get("totalDebt"));
@@ -2059,6 +2096,8 @@ function handleDiagnosisSubmit(event) {
   const semesterMonths = incomeCadence === "semester" ? STUDENT_SEMESTER_MONTHS : state.profile.semesterMonths || STUDENT_SEMESTER_MONTHS;
   const weeklyGas = data.has("weeklyGas") ? numberFrom(data.get("weeklyGas")) : Number(state.profile.weeklyGas || 0);
   const monthlyIncome = getMonthlyIncome({ ...state.profile, incomeCadence, incomeAmount, semesterIncome, semesterMonths });
+
+  saveLocalBackup("antes de guardar plan");
 
   state.profile = {
     ...state.profile,
@@ -2091,19 +2130,16 @@ function handleDiagnosisSubmit(event) {
   };
 
   if (wasIncomplete) {
-    state.debts =
-      estimatedDebt > 0
-        ? [{ id: uid("debt"), name: "Deuda principal", balance: estimatedDebt, apr: 24, minimum: Math.max(50_000, estimatedDebt * 0.03), updated_at: new Date().toISOString() }]
-        : [];
-    state.transactions = [];
-    state.cooldowns = [];
-    state.wins = [
-      {
-        id: uid("win"),
-        date: todayKey(),
-        text: "Guardaste tus datos reales y convertiste numeros sueltos en un plan."
-      }
-    ];
+    if (estimatedDebt > 0 && !state.debts.length) {
+      state.debts = [
+        { id: uid("debt"), name: "Deuda principal", balance: estimatedDebt, apr: 24, minimum: Math.max(50_000, estimatedDebt * 0.03), updated_at: new Date().toISOString() }
+      ];
+    }
+    state.wins.push({
+      id: uid("win"),
+      date: todayKey(),
+      text: "Guardaste tus datos reales y convertiste numeros sueltos en un plan."
+    });
   }
 
   if (shouldClearTemplateBudget) {
@@ -2117,6 +2153,79 @@ function handleDiagnosisSubmit(event) {
     : "Datos guardados. Ahora registra tus gastos desde la pantalla principal.";
   saveState();
   render();
+}
+
+function validateDiagnosisForm(form) {
+  const data = new FormData(form);
+  const allowedCadences = ["weekly", "biweekly", "monthly", "semester", "yearly"];
+  const requiredNumbers = [
+    ["incomeAmount", "El presupuesto por periodo debe ser mayor que cero.", 1],
+    ["committedExpenses", "Los gastos comprometidos no pueden estar vacios.", 0],
+    ["emergencySavings", "El ahorro disponible no puede estar vacio.", 0],
+    ["totalDebt", "La deuda total estimada no puede estar vacia.", 0]
+  ];
+
+  if (!cleanText(data.get("name"), "")) {
+    return { field: "name", message: "Escribe un nombre para tu plan." };
+  }
+
+  if (!allowedCadences.includes(data.get("incomeCadence"))) {
+    return { field: "incomeCadence", message: "Elige cada cuanto recibes presupuesto." };
+  }
+
+  for (const [field, message, min] of requiredNumbers) {
+    const value = numberValue(data.get(field));
+    if (value == null || value < min) {
+      return { field, message };
+    }
+  }
+
+  if (!cleanDate(data.get("periodStart"), "")) {
+    return { field: "periodStart", message: "El inicio del periodo actual debe ser una fecha valida." };
+  }
+
+  const paydayRaw = String(data.get("payday") ?? "").trim();
+  const payday = paydayRaw ? Number(paydayRaw) : 0;
+  if (!Number.isFinite(payday) || payday < 0 || payday > 28) {
+    return { field: "payday", message: "El dia de pago debe estar entre 0 y 28." };
+  }
+
+  if (!["fixed", "variable"].includes(data.get("incomeType"))) {
+    return { field: "incomeType", message: "Elige si tu ingreso es fijo o variable." };
+  }
+
+  if (!["low", "medium", "high"].includes(data.get("volatility"))) {
+    return { field: "volatility", message: "Elige la volatilidad de tus ingresos." };
+  }
+
+  const rangeFields = [
+    ["selfEfficacy", "La confianza financiera debe estar entre 1 y 10.", 1, 10],
+    ["financialAnxiety", "La ansiedad financiera debe estar entre 1 y 10.", 1, 10],
+    ["worship", "Revisa la pregunta de buscar mas dinero.", 1, 5],
+    ["avoidance", "Revisa la pregunta de evitar mirar dinero.", 1, 5],
+    ["status", "Revisa la pregunta de dinero como estatus.", 1, 5],
+    ["vigilance", "Revisa la pregunta de control y seguridad.", 1, 5]
+  ];
+
+  for (const [field, message, min, max] of rangeFields) {
+    const value = numberValue(data.get(field));
+    if (value == null || value < min || value > max) {
+      return { field, message };
+    }
+  }
+
+  return null;
+}
+
+function focusDiagnosisField(field) {
+  window.setTimeout(() => {
+    const input = document.querySelector(`#diagnosis-form [name="${field}"]`);
+    if (!input) {
+      return;
+    }
+    input.focus({ preventScroll: true });
+    input.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, 0);
 }
 
 function handleBudgetSubmit(event) {
@@ -2892,6 +3001,15 @@ function hashFromView(view) {
 
 function numberFrom(value) {
   return Math.max(0, Number(value) || 0);
+}
+
+function numberValue(value) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return null;
+  }
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
 }
 
 function normalizePayday(value) {

@@ -921,6 +921,20 @@ input[type="range"] {
   background: var(--coral-2);
 }
 
+.diagnosis-error {
+  grid-column: 1 / -1;
+}
+
+.field-error {
+  color: #8c2d25;
+  font-size: 0.82rem;
+}
+
+[data-invalid="true"] {
+  border-color: var(--coral);
+  background: #fff7f5;
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -1172,8 +1186,12 @@ label {
 }
 
 .quick-save-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
   justify-content: stretch;
-  padding: 2px 0 4px;
+  padding: 10px 0 4px;
+  background: linear-gradient(180deg, rgba(255, 253, 248, 0), var(--panel) 30%);
 }
 
 .quick-save-actions .btn {
