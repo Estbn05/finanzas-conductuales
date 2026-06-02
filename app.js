@@ -1701,7 +1701,7 @@ function renderDiagnosisModal() {
           </fieldset>
 
           <div class="modal-actions quick-save-actions">
-            <button class="btn primary" type="submit">Guardar plan</button>
+            <button class="btn primary" type="button" data-diagnosis-save>Guardar plan</button>
           </div>
 
           <fieldset>
@@ -1743,7 +1743,7 @@ function renderDiagnosisModal() {
 
           <div class="modal-actions">
             <button class="btn ghost" type="button" data-action="close-diagnosis">Cancelar</button>
-            <button class="btn primary" type="submit">Guardar y usar mi plan</button>
+            <button class="btn primary" type="button" data-diagnosis-save>Guardar y usar mi plan</button>
           </div>
         </form>
       </section>
@@ -1911,6 +1911,9 @@ function bindEvents() {
   if (diagnosisForm) {
     bindDiagnosisPreview(diagnosisForm);
     diagnosisForm.addEventListener("submit", handleDiagnosisSubmit);
+    document.querySelectorAll("[data-diagnosis-save]").forEach((button) => {
+      button.addEventListener("click", () => submitDiagnosisForm(diagnosisForm));
+    });
   }
 
   const budgetForm = document.querySelector("#budget-job-form");
@@ -2083,13 +2086,16 @@ function handleAction(event) {
 
 function handleDiagnosisSubmit(event) {
   event.preventDefault();
-  const form = event.currentTarget;
+  submitDiagnosisForm(event.currentTarget);
+}
+
+function submitDiagnosisForm(form) {
   const validation = validateDiagnosisForm(form);
   if (validation) {
     diagnosisValidation = validation;
     state.lastAlert = validation.message;
     render();
-    focusDiagnosisField(validation.field);
+    showDiagnosisValidation(validation);
     return;
   }
 
@@ -2255,6 +2261,18 @@ function focusDiagnosisField(field) {
     }
     input.scrollIntoView({ behavior: "smooth", block: "center" });
   }, 80);
+}
+
+function showDiagnosisValidation(validation) {
+  focusDiagnosisField(validation.field);
+  window.setTimeout(() => {
+    const error = document.querySelector(".diagnosis-error");
+    const rect = error?.getBoundingClientRect();
+    const visible = rect && rect.top >= 0 && rect.bottom <= window.innerHeight;
+    if (!visible && typeof window.alert === "function") {
+      window.alert(validation.message);
+    }
+  }, 220);
 }
 
 function handleBudgetSubmit(event) {
