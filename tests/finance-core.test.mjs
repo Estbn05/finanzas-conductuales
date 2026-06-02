@@ -171,6 +171,30 @@ test("weekly fields reserve the whole semester from the scholarship budget", () 
   assert.equal(Math.round(gas.ratio), 4);
 });
 
+test("reserved category spending fills its bar without reducing free budget again", () => {
+  const state = makeState({
+    profile: {
+      incomeCadence: "semester",
+      incomeAmount: 1_750_000,
+      periodStart: "2026-05-01"
+    },
+    budgetJobs: [{ id: "gas", name: "Gasolina", amount: 30_000, cadence: "weekly" }],
+    transactions: [
+      { date: "2026-05-03", amount: 30_000, category: "gas", labeled: true },
+      { date: "2026-05-04", amount: 40_000, category: "free", labeled: true }
+    ]
+  });
+
+  const summary = budgetSummary(state, "2026-05-20");
+  const gas = categoryStatus(state, "2026-05-20").find((category) => category.id === "gas");
+
+  assert.equal(summary.reserved, 780_000);
+  assert.equal(summary.freeBudget, 970_000);
+  assert.equal(summary.freeSpent, 40_000);
+  assert.equal(summary.freeRemaining, 930_000);
+  assert.equal(gas.spent, 30_000);
+});
+
 test("income cadence can be weekly biweekly monthly semester or yearly", () => {
   const state = makeState({
     profile: {

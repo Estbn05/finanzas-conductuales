@@ -590,14 +590,14 @@ function renderNavItem(item) {
 function renderHeader(plan) {
   const summary = budgetSummary();
   const liquidity = liquiditySummary(summary);
-  const visibleFree = liquidity.initialized ? liquidity.total : summary.freeRemaining;
+  const realTotal = liquidity.total;
 
   return `
     <header class="money-bar ${summary.overReserved ? "danger" : ""}" role="status" aria-label="Dinero libre del periodo">
       <span>Libre ${summary.cadenceLabel}</span>
-      <strong>${formatMoney(visibleFree)}</strong>
-      <span>${summary.overReserved ? "sobreasignado" : "sin asignar"}</span>
-      <span class="money-split">Cuenta ${formatMoney(liquidity.account)} · Efectivo ${formatMoney(liquidity.cash)}</span>
+      <strong>${formatMoney(summary.freeRemaining)}</strong>
+      <span>${summary.overReserved ? "sobreasignado" : "sin clasificar"}</span>
+      <span class="money-split">Real: Cuenta ${formatMoney(liquidity.account)} · Efectivo ${formatMoney(liquidity.cash)} · Total ${formatMoney(realTotal)}</span>
     </header>
   `;
 }
@@ -1182,7 +1182,7 @@ function renderSpending(plan) {
             <p class="eyebrow">Nuevo movimiento</p>
             <h2>Registrar gasto</h2>
           </div>
-          <span class="metric-badge">Disponible ${formatMoney(liquiditySummary(summary).total)}</span>
+          <span class="metric-badge">Libre ${formatMoney(summary.freeRemaining)}</span>
         </div>
         <form class="stacked-form" id="transaction-form">
           <label>
@@ -1637,8 +1637,8 @@ function renderDiagnosisModal() {
           </div>
           <button class="icon-btn" type="button" data-action="close-diagnosis" aria-label="Cerrar">x</button>
         </div>
+        ${diagnosisValidation.message ? `<p class="form-error diagnosis-error" role="alert" aria-live="assertive">${escapeHtml(diagnosisValidation.message)}</p>` : ""}
         <form id="diagnosis-form" class="diagnosis-form" novalidate>
-          ${diagnosisValidation.message ? `<p class="form-error diagnosis-error" role="alert">${escapeHtml(diagnosisValidation.message)}</p>` : ""}
           <fieldset>
             <legend>Datos principales</legend>
             <label>
@@ -1698,6 +1698,7 @@ function renderDiagnosisModal() {
               <input name="cash" type="number" min="0" step="1000" value="${available.cash}" required ${diagnosisInvalidAttr("cash")}>
               ${renderDiagnosisFieldError("cash")}
             </label>
+            <small class="balance-hint" data-liquidity-match-hint></small>
           </fieldset>
 
           <div class="modal-actions quick-save-actions">
@@ -1767,7 +1768,8 @@ function renderScriptQuestion(key, label) {
 }
 
 function diagnosisInvalidAttr(name) {
-  return diagnosisValidation.field === name ? `aria-invalid="true" data-invalid="true"` : "";
+  const invalidFields = diagnosisValidation.fields || [diagnosisValidation.field];
+  return invalidFields.includes(name) ? `aria-invalid="true" data-invalid="true"` : "";
 }
 
 function renderDiagnosisFieldError(name) {
@@ -1855,9 +1857,13 @@ function renderSnackbar() {
   }
 
   return `
-    <div class="snackbar" role="status" aria-live="polite">
+    <div class="snackbar ${snackbar.kind || ""}" role="${snackbar.kind === "error" ? "alert" : "status"}" aria-live="${snackbar.kind === "error" ? "assertive" : "polite"}">
       <span>${escapeHtml(snackbar.message)}</span>
-      <button class="btn secondary" type="button" data-action="undo-snackbar" data-id="${escapeAttr(snackbar.transactionId)}">Deshacer</button>
+      ${
+        snackbar.action === "undo"
+          ? `<button class="btn secondary" type="button" data-action="undo-snackbar" data-id="${escapeAttr(snackbar.transactionId)}">Deshacer</button>`
+          : ""
+      }
     </div>
   `;
 }
@@ -1979,15 +1985,34 @@ function bindDiagnosisPreview(form) {
       incomeAmount: numberFrom(data.get("incomeAmount"))
     });
   };
+  const updateLiquidityMatch = () => {
+    const hint = form.querySelector("[data-liquidity-match-hint]");
+    if (!hint) {
+      return;
+    }
+    const data = new FormData(form);
+    const incomeAmount = numberFrom(data.get("incomeAmount"));
+    const total = numberFrom(data.get("account")) + numberFrom(data.get("cash"));
+    const matches = total === incomeAmount;
+    hint.textContent = matches
+      ? `Cuenta + fisico coincide con ${formatMoney(incomeAmount)}.`
+      : `Cuenta + fisico suma ${formatMoney(total)}; debe sumar ${formatMoney(incomeAmount)}.`;
+    hint.classList.toggle("is-ok", matches);
+    hint.classList.toggle("is-error", !matches);
+  };
+  const updatePreview = () => {
+    updateMonthlyEquivalent();
+    updateLiquidityMatch();
+  };
 
-  ["incomeCadence", "incomeAmount"].forEach((name) => {
+  ["incomeCadence", "incomeAmount", "account", "cash"].forEach((name) => {
     const field = form.elements.namedItem(name);
     if (field) {
-      field.addEventListener("input", updateMonthlyEquivalent);
-      field.addEventListener("change", updateMonthlyEquivalent);
+      field.addEventListener("input", updatePreview);
+      field.addEventListener("change", updatePreview);
     }
   });
-  updateMonthlyEquivalent();
+  updatePreview();
 }
 
 function bindExtraAllocationPreview(form) {
@@ -2094,6 +2119,7 @@ function submitDiagnosisForm(form) {
   if (validation) {
     diagnosisValidation = validation;
     state.lastAlert = validation.message;
+    showNoticeSnackbar(validation.message, { kind: "error", renderNow: false });
     render();
     showDiagnosisValidation(validation);
     return;
@@ -2207,6 +2233,18 @@ function validateDiagnosisForm(form) {
     }
   }
 
+  const incomeAmount = numberValue(data.get("incomeAmount"));
+  const accountAmount = numberValue(data.get("account"));
+  const cashAmount = numberValue(data.get("cash"));
+  const liquidityTotal = Number(accountAmount || 0) + Number(cashAmount || 0);
+  if (Math.abs(liquidityTotal - Number(incomeAmount || 0)) > 0) {
+    return {
+      field: "account",
+      fields: ["account", "cash"],
+      message: `Cuenta + fisico debe sumar el presupuesto del periodo: ${formatMoney(liquidityTotal)} de ${formatMoney(incomeAmount)}.`
+    };
+  }
+
   if (!cleanDate(data.get("periodStart"), "")) {
     return { field: "periodStart", message: "El inicio del periodo actual debe ser una fecha valida." };
   }
@@ -2288,6 +2326,14 @@ function handleBudgetSubmit(event) {
   const name = cleanText(data.get("name"), "Nuevo campo");
   const amount = numberFrom(data.get("amount"));
   const cadence = ["weekly", "biweekly", "monthly", "semester", "yearly", "period"].includes(data.get("cadence")) ? data.get("cadence") : "monthly";
+  if (amount <= 0) {
+    state.lastAlert = "El monto del campo debe ser mayor que cero.";
+    showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
+    saveState();
+    render();
+    return;
+  }
+
   const job = {
     id: uniqueCategoryId(name),
     name,
@@ -2295,8 +2341,17 @@ function handleBudgetSubmit(event) {
     cadence,
     updated_at: new Date().toISOString()
   };
-  state.budgetJobs.push(job);
   const semesterBudget = getBudgetAmountForJob(job, state.profile);
+  const summary = budgetSummary();
+  if (semesterBudget > summary.freeRemaining) {
+    state.lastAlert = `${name} reservaria ${formatMoney(semesterBudget)}, pero solo hay ${formatMoney(summary.freeRemaining)} libre.`;
+    showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
+    saveState();
+    render();
+    return;
+  }
+
+  state.budgetJobs.push(job);
   state.lastAlert = `${name} reserva ${formatMoney(semesterBudget)} del periodo ${budgetSummary().cadenceLabel}.`;
   saveState();
   render();
@@ -2416,6 +2471,13 @@ function handleTransactionSubmit(event) {
   const budgeted = data.get("budgeted") === "on";
   const source = normalizeLocation(data.get("source"));
   const threshold = plan.expenses * LARGE_PURCHASE_RATIO;
+  const transactionError = validateTransactionDraft({ amount, category, source });
+
+  if (transactionError) {
+    state.lastAlert = transactionError;
+    showNoticeSnackbar(transactionError, { kind: "error" });
+    return;
+  }
 
   if (!budgeted && amount >= threshold) {
     state.cooldowns.push({
@@ -2438,6 +2500,24 @@ function handleTransactionSubmit(event) {
 
   saveState();
   render();
+}
+
+function validateTransactionDraft({ amount, category, source }) {
+  if (amount <= 0) {
+    return "El monto del gasto debe ser mayor que cero.";
+  }
+
+  const validCategory = category === FREE_CATEGORY_ID || state.budgetJobs.some((job) => job.id === category);
+  if (!validCategory) {
+    return "Elige un campo valido para clasificar el gasto.";
+  }
+
+  const available = liquiditySummary()[normalizeLocation(source)];
+  if (amount > available) {
+    return `${locationLabel(source)} solo tiene ${formatMoney(available)} disponible. Elige otra fuente o actualiza tus datos.`;
+  }
+
+  return "";
 }
 
 function handleSmartSubmit(event) {
@@ -2792,11 +2872,30 @@ function showUndoSnackbar(transactionId) {
   clearTimeout(snackbarTimer);
   snackbar = {
     message: "Gasto registrado. ¿Deshacer?",
+    action: "undo",
+    kind: "",
     transactionId
   };
   snackbarTimer = setTimeout(() => {
     clearSnackbar();
   }, 5000);
+}
+
+function showNoticeSnackbar(message, options = {}) {
+  const { kind = "", duration = 7000, renderNow = true } = options;
+  clearTimeout(snackbarTimer);
+  snackbar = {
+    message,
+    action: "",
+    kind,
+    transactionId: ""
+  };
+  snackbarTimer = setTimeout(() => {
+    clearSnackbar();
+  }, duration);
+  if (renderNow) {
+    render();
+  }
 }
 
 function clearSnackbar(options = {}) {

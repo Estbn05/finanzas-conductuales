@@ -987,6 +987,21 @@ input[type="range"] {
   font-size: 0.82rem;
 }
 
+.balance-hint {
+  display: block;
+  margin-top: -4px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.balance-hint.is-ok {
+  color: var(--green);
+}
+
+.balance-hint.is-error {
+  color: #8c2d25;
+}
+
 [data-invalid="true"] {
   border-color: var(--coral);
   background: #fff7f5;
@@ -1235,6 +1250,12 @@ label {
 
 .snackbar span {
   overflow-wrap: anywhere;
+}
+
+.snackbar.error {
+  border-color: rgba(240, 113, 103, 0.42);
+  color: #fffdf8;
+  background: #8c2d25;
 }
 
 .backup-tools {

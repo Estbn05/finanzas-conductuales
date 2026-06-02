@@ -17,7 +17,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
 test("service worker caches the app shell needed for offline launch", async () => {
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
-  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v26"/);
+  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v27"/);
   assert.ok(worker.includes('"./index.html"'));
   assert.ok(worker.includes('"./app.js"'));
   assert.ok(worker.includes('"./finance-core.js"'));
@@ -70,6 +70,12 @@ test("navigation opens on expense registration with a vertical collapsible menu"
   assert.ok(app.includes("submitDiagnosisForm"));
   assert.ok(app.includes("showDiagnosisValidation"));
   assert.ok(app.includes("window.alert(validation.message)"));
+  assert.ok(app.includes("showNoticeSnackbar(validation.message"));
+  assert.ok(app.includes("Cuenta + fisico debe sumar el presupuesto del periodo"));
+  assert.ok(app.includes("data-liquidity-match-hint"));
+  assert.ok(app.includes("summary.freeRemaining"));
+  assert.ok(app.includes("validateTransactionDraft"));
+  assert.ok(app.includes("solo tiene"));
   assert.ok(app.includes("focusDiagnosisField"));
   assert.ok(app.includes("diagnosisValidation"));
   assert.ok(app.includes('name="account" type="number"'));
@@ -77,6 +83,9 @@ test("navigation opens on expense registration with a vertical collapsible menu"
   assert.ok(app.includes("Dinero en cuenta"));
   assert.ok(app.includes("Dinero en fisico"));
   assert.ok(app.includes("modal.scrollTo"));
+  assert.ok(app.includes('role="${snackbar.kind === "error" ? "alert" : "status"}"'));
+  assert.ok(styles.includes(".snackbar.error"));
+  assert.ok(styles.includes(".balance-hint.is-error"));
   assert.equal(app.includes("${renderStudentContextPanel()}"), false);
   assert.ok(!app.includes("state.transactions = []"));
   assert.ok(app.includes('name="payday" type="number" min="0" max="28"'));
