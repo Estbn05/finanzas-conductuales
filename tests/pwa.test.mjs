@@ -17,7 +17,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
 test("service worker caches the app shell needed for offline launch", async () => {
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
-  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v25"/);
+  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v26"/);
   assert.ok(worker.includes('"./index.html"'));
   assert.ok(worker.includes('"./app.js"'));
   assert.ok(worker.includes('"./finance-core.js"'));
@@ -95,7 +95,14 @@ test("navigation opens on expense registration with a vertical collapsible menu"
   assert.ok(app.includes("getCategoryStatus(state, todayKey())"));
   assert.ok(!app.includes("<h1>${headerTitle()}</h1>"));
   assert.ok(!app.includes("<strong>${streak}</strong>"));
-  assert.match(styles, /\.nav-panel\s*{[\s\S]*max-height: 0/);
-  assert.match(styles, /\.nav-panel\.is-open\s*{[\s\S]*max-height: 620px/);
+  assert.match(styles, /\.menu-toggle\s*{[\s\S]*display: none/);
+  assert.match(styles, /\.nav-panel\s*{[\s\S]*max-height: none/);
+  assert.match(styles, /@media \(max-width: 1100px\)\s*{[\s\S]*\.menu-toggle\s*{[\s\S]*display: inline-flex/);
+  assert.match(styles, /@media \(max-width: 1100px\)\s*{[\s\S]*\.nav-panel\s*{[\s\S]*max-height: 0/);
+  assert.match(styles, /\.nav-panel\.is-open\s*{[\s\S]*max-height: min\(70vh, 620px\)/);
   assert.match(styles, /\.nav-list\s*{[\s\S]*grid-template-columns: 1fr/);
+  assert.match(styles, /\.spending-grid\s*{[\s\S]*grid-template-columns: repeat\(2, minmax\(320px, 1fr\)\)/);
+  assert.match(styles, /\.category-row\s*{[\s\S]*grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(styles, /\.sidebar-meter\s*{[\s\S]*display: none/);
+  assert.match(styles, /@media \(min-width: 1101px\) and \(min-height: 760px\)\s*{[\s\S]*\.sidebar-meter\s*{[\s\S]*display: grid/);
 });

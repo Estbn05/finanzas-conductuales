@@ -547,7 +547,7 @@ function render() {
         </button>
       </div>
       ${renderHeader(plan)}
-      <div class="nav-panel ${menuOpen ? "is-open" : ""}" id="main-menu" aria-hidden="${!menuOpen}">
+      <div class="nav-panel ${menuOpen ? "is-open" : ""}" id="main-menu">
         <nav class="nav-list" aria-label="Secciones principales">
           ${NAV_ITEMS.map((item) => renderNavItem(item)).join("")}
         </nav>
@@ -580,7 +580,7 @@ function renderNavItem(item) {
   const active = state.activeView === item.id ? "is-active" : "";
   const primary = item.id === DEFAULT_VIEW ? "is-primary" : "";
   return `
-    <button class="nav-item ${active} ${primary}" type="button" data-view="${item.id}" tabindex="${menuOpen ? "0" : "-1"}">
+    <button class="nav-item ${active} ${primary}" type="button" data-view="${item.id}">
       <span class="nav-number">${item.icon}</span>
       <span>${item.label}</span>
     </button>

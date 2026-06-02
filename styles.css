@@ -62,7 +62,7 @@ a {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 272px minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 280px) minmax(0, 1fr);
   width: 100%;
   max-width: 100vw;
   overflow-x: hidden;
@@ -77,6 +77,7 @@ a {
   gap: 14px;
   min-width: 0;
   height: 100vh;
+  overflow: hidden;
   padding: 22px;
   color: #fffdf8;
   background:
@@ -86,7 +87,7 @@ a {
 
 .sidebar-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 10px;
 }
@@ -118,6 +119,7 @@ a {
 
 .brand strong {
   line-height: 1.15;
+  overflow-wrap: anywhere;
 }
 
 .brand small {
@@ -133,7 +135,7 @@ a {
 }
 
 .menu-toggle {
-  display: inline-flex;
+  display: none;
   align-items: center;
   justify-content: center;
   min-height: 42px;
@@ -167,18 +169,23 @@ a {
 }
 
 .nav-panel {
-  overflow: hidden;
-  max-height: 0;
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    max-height 220ms ease,
-    opacity 180ms ease,
-    visibility 180ms ease;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  max-height: none;
+  padding-right: 2px;
+  opacity: 1;
+  visibility: visible;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.nav-panel::-webkit-scrollbar {
+  display: none;
 }
 
 .nav-panel.is-open {
-  max-height: 620px;
+  max-height: none;
   opacity: 1;
   visibility: visible;
 }
@@ -254,9 +261,10 @@ a {
 }
 
 .sidebar-meter {
-  display: grid;
+  display: none;
   gap: 8px;
-  margin-top: auto;
+  flex: 0 0 auto;
+  margin-top: 0;
   padding: 14px;
   border: 1px solid rgba(255, 253, 248, 0.2);
   border-radius: var(--radius);
@@ -269,6 +277,12 @@ a {
 
 .sidebar-meter strong {
   font-size: 1.6rem;
+}
+
+@media (min-width: 1101px) and (min-height: 760px) {
+  .sidebar-meter {
+    display: grid;
+  }
 }
 
 .mini-track,
@@ -443,6 +457,11 @@ a {
   gap: 16px;
 }
 
+.spending-grid {
+  grid-template-columns: repeat(2, minmax(320px, 1fr));
+  align-items: start;
+}
+
 .card {
   display: grid;
   align-content: start;
@@ -486,9 +505,13 @@ a {
 .budget-grid .card,
 .debt-grid .card,
 .savings-grid .card,
-.spending-grid .card,
 .profile-grid .card {
   grid-column: span 4;
+}
+
+.spending-grid .card,
+.spending-grid .wide-card {
+  grid-column: auto;
 }
 
 .wide-card,
@@ -514,6 +537,35 @@ a {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+}
+
+.spending-grid .card-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+}
+
+.spending-grid .metric-badge {
+  min-width: 0;
+  max-width: 100%;
+  justify-self: end;
+  text-align: right;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.primary-spend-card .metric-badge {
+  white-space: nowrap;
+}
+
+.spending-grid .card:not(.primary-spend-card) .card-heading {
+  grid-template-columns: 1fr;
+}
+
+.spending-grid .card:not(.primary-spend-card) .metric-badge {
+  justify-self: start;
+  text-align: left;
 }
 
 .card h2 {
@@ -782,6 +834,7 @@ input[type="range"] {
 
 .bar {
   height: 10px;
+  min-width: 0;
 }
 
 .bar span {
@@ -971,7 +1024,8 @@ label {
 }
 
 .category-row {
-  grid-template-columns: minmax(150px, 1fr) minmax(150px, 0.92fr);
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
 }
 
 .debt-item {
@@ -1215,6 +1269,10 @@ label {
     padding: 16px;
   }
 
+  .sidebar-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
   .brand {
     grid-template-columns: 42px 1fr;
   }
@@ -1222,6 +1280,31 @@ label {
   .brand-mark {
     width: 42px;
     height: 42px;
+  }
+
+  .menu-toggle {
+    display: inline-flex;
+  }
+
+  .nav-panel {
+    flex: none;
+    min-height: auto;
+    overflow: hidden;
+    max-height: 0;
+    padding-right: 0;
+    opacity: 0;
+    visibility: hidden;
+    transition:
+      max-height 220ms ease,
+      opacity 180ms ease,
+      visibility 180ms ease;
+  }
+
+  .nav-panel.is-open {
+    overflow-y: auto;
+    max-height: min(70vh, 620px);
+    opacity: 1;
+    visibility: visible;
   }
 
   .nav-list {
@@ -1244,12 +1327,20 @@ label {
   .budget-grid .card,
   .debt-grid .card,
   .savings-grid .card,
-  .spending-grid .card,
   .profile-grid .card,
   .wide-card,
   .split-card,
   .today-grid .ritual-card {
     grid-column: span 6;
+  }
+
+  .spending-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .spending-grid .card,
+  .spending-grid .wide-card {
+    grid-column: auto;
   }
 }
 
@@ -1260,6 +1351,10 @@ label {
   }
 
   .content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .spending-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1330,6 +1425,15 @@ label {
   .card-heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .spending-grid .card-heading {
+    grid-template-columns: 1fr;
+  }
+
+  .spending-grid .metric-badge {
+    justify-self: start;
+    text-align: left;
   }
 
   .metric-badge {
