@@ -1165,6 +1165,12 @@ label {
   overflow-wrap: anywhere;
 }
 
+.backup-tools {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+}
+
 .quick-save-actions {
   justify-content: stretch;
   padding: 2px 0 4px;

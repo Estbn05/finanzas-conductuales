@@ -28,6 +28,7 @@ import {
 } from "./sync-client.js";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
+const BACKUP_KEY = "finanzas-conductuales:backups:v1";
 const DEFAULT_VIEW = "spending";
 const STUDENT_SEMESTER_INCOME = 1_750_000;
 const STUDENT_SEMESTER_MONTHS = 6;
@@ -277,6 +278,16 @@ async function pullCloudAfterLogin() {
       const localTime = stateUpdatedTime(state);
       const remoteTime = cloudRecordUpdatedTime(remote);
       const localHasData = hasMeaningfulLocalData(state);
+      const remoteHasData = hasMeaningfulLocalData(remote.app_state);
+
+      if (localHasData && !remoteHasData) {
+        const saved = await saveCloudState(getCloudPayload());
+        markCloudSynced(saved?.updated_at || new Date().toISOString());
+        state.lastAlert = "La nube estaba vacia; conserve tus datos locales y los subi.";
+        cloudState.status = "synced";
+        render();
+        return;
+      }
 
       if (localTime > remoteTime && localHasData) {
         const saved = await saveCloudState(getCloudPayload());
@@ -287,7 +298,7 @@ async function pullCloudAfterLogin() {
         return;
       }
 
-      if (remoteTime > localTime || !localHasData) {
+      if ((remoteTime > localTime && remoteHasData) || (!localHasData && remoteHasData)) {
         applyRemoteState(remote.app_state, remote.updated_at, "Nube sincronizada automaticamente.");
         cloudState.status = "synced";
         render();
@@ -343,8 +354,18 @@ async function pushCloudState() {
       const localTime = stateUpdatedTime(state);
       const remoteTime = cloudRecordUpdatedTime(remote);
       const localHasData = hasMeaningfulLocalData(state);
+      const remoteHasData = hasMeaningfulLocalData(remote.app_state);
 
-      if (remoteTime > localTime || !localHasData) {
+      if (localHasData && !remoteHasData) {
+        const saved = await saveCloudState(getCloudPayload());
+        markCloudSynced(saved?.updated_at || new Date().toISOString());
+        cloudState.status = "synced";
+        cloudState.error = "";
+        render();
+        return;
+      }
+
+      if ((remoteTime > localTime && remoteHasData) || (!localHasData && remoteHasData)) {
         applyRemoteState(remote.app_state, remote.updated_at, "La nube tenia cambios mas recientes. Descargue esa version.");
         cloudState.status = "synced";
         render();
@@ -385,6 +406,7 @@ function getCloudPayload() {
 
 function applyRemoteState(remoteState, remoteUpdatedAt, alert) {
   applyingCloudState = true;
+  saveLocalBackup("antes de bajar nube");
   state = migrateState(remoteState);
   state.showDiagnosis = false;
   pendingExtraAllocation = null;
@@ -436,6 +458,59 @@ function hasMeaningfulLocalData(payload) {
       payload?.debts?.length ||
       payload?.wins?.length
   );
+}
+
+function readLocalBackups() {
+  try {
+    const raw = localStorage.getItem(BACKUP_KEY);
+    const backups = raw ? JSON.parse(raw) : [];
+    return Array.isArray(backups) ? backups : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalBackup(reason, snapshot = state) {
+  if (!hasMeaningfulLocalData(snapshot)) {
+    return;
+  }
+
+  const backup = {
+    id: uid("backup"),
+    created_at: new Date().toISOString(),
+    reason,
+    counts: {
+      fields: snapshot.budgetJobs?.length || 0,
+      transactions: snapshot.transactions?.length || 0,
+      extras: snapshot.budgetExtras?.length || 0
+    },
+    state: {
+      ...JSON.parse(JSON.stringify(snapshot)),
+      showDiagnosis: false
+    }
+  };
+  const backups = [backup, ...readLocalBackups()].slice(0, 5);
+  localStorage.setItem(BACKUP_KEY, JSON.stringify(backups));
+}
+
+function latestLocalBackup() {
+  return readLocalBackups()[0] || null;
+}
+
+function restoreLatestBackup() {
+  const backup = latestLocalBackup();
+  if (!backup?.state) {
+    state.lastAlert = "No encontre respaldos automaticos en este navegador.";
+    return;
+  }
+
+  saveLocalBackup("antes de restaurar respaldo");
+  state = migrateState(backup.state);
+  state.showDiagnosis = false;
+  pendingExtraAllocation = null;
+  clearSnackbar({ renderNow: false });
+  activateView(DEFAULT_VIEW);
+  state.lastAlert = `Respaldo restaurado: ${backup.counts?.transactions || 0} gastos y ${backup.counts?.fields || 0} campos.`;
 }
 
 function friendlyCloudError(error) {
@@ -1367,6 +1442,7 @@ function renderProfile(plan) {
           </label>
           <button class="btn danger" type="button" data-action="reset-demo">Reiniciar</button>
         </div>
+        ${renderBackupTools()}
       </article>
 
       <article class="card wide-card">
@@ -1426,6 +1502,23 @@ function renderStudentContextPanel() {
         <button class="btn secondary" type="button" data-action="apply-student-context">Aplicar mi contexto</button>
       </div>
     </article>
+  `;
+}
+
+function renderBackupTools() {
+  const backup = latestLocalBackup();
+  if (!backup) {
+    return `<p class="helper-text">Los respaldos automaticos aparecen aqui despues de importar, reiniciar o bajar nube.</p>`;
+  }
+
+  return `
+    <div class="backup-tools">
+      <p class="helper-text">
+        Ultimo respaldo: ${formatDate(String(backup.created_at).slice(0, 10))}.
+        ${backup.counts?.transactions || 0} gastos, ${backup.counts?.fields || 0} campos.
+      </p>
+      <button class="btn ghost" type="button" data-action="restore-latest-backup">Restaurar respaldo</button>
+    </div>
   `;
 }
 
@@ -1935,6 +2028,7 @@ function handleAction(event) {
     "pull-cloud-now": () => pullCloudAfterLogin(),
     "cloud-sign-out": () => handleCloudSignOut(),
     "export-data": exportData,
+    "restore-latest-backup": restoreLatestBackup,
     "reset-demo": resetDemo
   };
 
@@ -2264,6 +2358,7 @@ function handleImport(event) {
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         throw new Error("El archivo no contiene datos de la app.");
       }
+      saveLocalBackup("antes de importar JSON");
       state = migrateState(parsed);
       pendingExtraAllocation = null;
       clearSnackbar({ renderNow: false });
@@ -2458,6 +2553,9 @@ function exportData() {
 }
 
 function resetDemo() {
+  saveLocalBackup("antes de reiniciar");
+  pendingExtraAllocation = null;
+  clearSnackbar({ renderNow: false });
   localStorage.removeItem(STORAGE_KEY);
   state = createDefaultState();
   state.lastAlert = "Demo reiniciada. Usa Mis datos para personalizarla.";
