@@ -1390,7 +1390,6 @@ function renderProfile(plan) {
   return `
     <section class="content-grid profile-grid">
       ${renderCloudPanel()}
-      ${renderStudentContextPanel()}
 
       <article class="card">
         <p class="eyebrow">Tus datos</p>
@@ -1625,6 +1624,8 @@ function renderIncomeCadenceOptions(selected) {
 
 function renderDiagnosisModal() {
   const profile = state.profile;
+  const liquidity = normalizeLiquidity(state.liquidity);
+  const available = liquidity.initialized ? liquidity : { account: 0, cash: 0 };
 
   return `
     <div class="modal-backdrop" role="presentation">
@@ -1686,6 +1687,16 @@ function renderDiagnosisModal() {
               <input name="payday" type="number" min="0" max="28" inputmode="numeric" value="${profile.payday}" ${diagnosisInvalidAttr("payday")}>
               <small>Usa 0 si no tienes un dia fijo.</small>
               ${renderDiagnosisFieldError("payday")}
+            </label>
+            <label>
+              Dinero en cuenta
+              <input name="account" type="number" min="0" step="1000" value="${available.account}" required ${diagnosisInvalidAttr("account")}>
+              ${renderDiagnosisFieldError("account")}
+            </label>
+            <label>
+              Dinero en fisico
+              <input name="cash" type="number" min="0" step="1000" value="${available.cash}" required ${diagnosisInvalidAttr("cash")}>
+              ${renderDiagnosisFieldError("cash")}
             </label>
           </fieldset>
 
@@ -2091,6 +2102,8 @@ function handleDiagnosisSubmit(event) {
     ? data.get("incomeCadence")
     : "monthly";
   const incomeAmount = numberFrom(data.get("incomeAmount"));
+  const accountAmount = numberFrom(data.get("account"));
+  const cashAmount = numberFrom(data.get("cash"));
   const periodStart = cleanDate(data.get("periodStart"), monthStartKey());
   const semesterIncome = incomeCadence === "semester" ? incomeAmount : state.profile.semesterIncome || STUDENT_SEMESTER_INCOME;
   const semesterMonths = incomeCadence === "semester" ? STUDENT_SEMESTER_MONTHS : state.profile.semesterMonths || STUDENT_SEMESTER_MONTHS;
@@ -2128,6 +2141,12 @@ function handleDiagnosisSubmit(event) {
     },
     updated_at: new Date().toISOString()
   };
+  state.liquidity = {
+    account: accountAmount,
+    cash: cashAmount,
+    initialized: true,
+    updated_at: new Date().toISOString()
+  };
 
   if (wasIncomplete) {
     if (estimatedDebt > 0 && !state.debts.length) {
@@ -2162,7 +2181,9 @@ function validateDiagnosisForm(form) {
     ["incomeAmount", "El presupuesto por periodo debe ser mayor que cero.", 1],
     ["committedExpenses", "Los gastos comprometidos no pueden estar vacios.", 0],
     ["emergencySavings", "El ahorro disponible no puede estar vacio.", 0],
-    ["totalDebt", "La deuda total estimada no puede estar vacia.", 0]
+    ["totalDebt", "La deuda total estimada no puede estar vacia.", 0],
+    ["account", "El dinero en cuenta no puede estar vacio.", 0],
+    ["cash", "El dinero en fisico no puede estar vacio.", 0]
   ];
 
   if (!cleanText(data.get("name"), "")) {
@@ -2220,12 +2241,20 @@ function validateDiagnosisForm(form) {
 function focusDiagnosisField(field) {
   window.setTimeout(() => {
     const input = document.querySelector(`#diagnosis-form [name="${field}"]`);
+    const modal = document.querySelector(".modal");
     if (!input) {
       return;
     }
     input.focus({ preventScroll: true });
+    if (modal) {
+      const modalRect = modal.getBoundingClientRect();
+      const inputRect = input.getBoundingClientRect();
+      const targetTop = modal.scrollTop + inputRect.top - modalRect.top - 96;
+      modal.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+      return;
+    }
     input.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, 0);
+  }, 80);
 }
 
 function handleBudgetSubmit(event) {

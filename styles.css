@@ -922,7 +922,11 @@ input[type="range"] {
 }
 
 .diagnosis-error {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   grid-column: 1 / -1;
+  box-shadow: 0 8px 20px rgba(240, 113, 103, 0.14);
 }
 
 .field-error {
