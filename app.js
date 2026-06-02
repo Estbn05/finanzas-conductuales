@@ -802,6 +802,7 @@ function renderTransactionLabeler(transaction) {
     <div class="transaction-row">
       <div>
         <strong>${escapeHtml(transaction.merchant)}</strong>
+        ${transaction.description ? `<span>${escapeHtml(transaction.description)}</span>` : ""}
         <span>${formatMoney(transaction.amount)} · ${formatDate(transaction.date)}</span>
       </div>
       <select data-transaction-category="${transaction.id}" aria-label="Categoria para ${escapeAttr(transaction.merchant)}">
@@ -1112,6 +1113,10 @@ function renderSpending(plan) {
             Comercio
             <input name="merchant" type="text" maxlength="42" placeholder="Ej. Tienda" required>
           </label>
+          <label>
+            Descripcion opcional
+            <input name="description" type="text" maxlength="90" placeholder="Ej. Tanqueada, regalo, almuerzo">
+          </label>
           <div class="transaction-options-row">
             <label>
               Categoria
@@ -1272,6 +1277,7 @@ function renderTransactionHistory(summary = budgetSummary()) {
             <div class="history-row">
               <div>
                 <strong>${escapeHtml(transaction.merchant)}</strong>
+                ${transaction.description ? `<span>${escapeHtml(transaction.description)}</span>` : ""}
                 <span>${formatMoney(transaction.amount)} · ${escapeHtml(categoryName(transaction.category))} · ${locationLabel(transaction.source)} · ${formatDate(transaction.date)}</span>
               </div>
               <button class="btn ghost" type="button" data-action="remove-transaction" data-id="${escapeAttr(transaction.id)}">Eliminar</button>
@@ -1289,6 +1295,7 @@ function renderCooldown(cooldown) {
     <div class="cooldown-item">
       <div>
         <strong>${escapeHtml(cooldown.merchant)}</strong>
+        ${cooldown.description ? `<span>${escapeHtml(cooldown.description)}</span>` : ""}
         <span>${formatMoney(cooldown.amount)} · ${unlocked ? "Lista para decidir" : `Desbloquea ${relativeUnlock(cooldown.unlockAt)}`}</span>
       </div>
       <div class="cooldown-actions">
@@ -2154,6 +2161,7 @@ function handleTransactionSubmit(event) {
   const plan = calculatePlan();
   const amount = numberFrom(data.get("amount"));
   const merchant = cleanText(data.get("merchant"), "Compra");
+  const description = cleanText(data.get("description"), "");
   const category = String(data.get("category"));
   const budgeted = data.get("budgeted") === "on";
   const source = normalizeLocation(data.get("source"));
@@ -2163,6 +2171,7 @@ function handleTransactionSubmit(event) {
     state.cooldowns.push({
       id: uid("cool"),
       merchant,
+      description,
       amount,
       category,
       source,
@@ -2172,7 +2181,7 @@ function handleTransactionSubmit(event) {
     });
     state.lastAlert = `${merchant} quedo en pausa 24 horas antes de decidir.`;
   } else {
-    const transaction = addTransaction({ merchant, amount, category, budgeted, source });
+    const transaction = addTransaction({ merchant, description, amount, category, budgeted, source });
     state.lastAlert = createSpendAlert(category);
     showUndoSnackbar(transaction.id);
   }
@@ -2426,6 +2435,7 @@ function unlockCooldown(id) {
   }
   addTransaction({
     merchant: cooldown.merchant,
+    description: cooldown.description || "",
     amount: cooldown.amount,
     category: cooldown.category,
     budgeted: false,
@@ -2453,7 +2463,7 @@ function resetDemo() {
   state.lastAlert = "Demo reiniciada. Usa Mis datos para personalizarla.";
 }
 
-function addTransaction({ merchant, amount, category, budgeted, source = "account" }) {
+function addTransaction({ merchant, description = "", amount, category, budgeted, source = "account" }) {
   const location = normalizeLocation(source);
   const now = new Date().toISOString();
   adjustLiquidity(location, -Number(amount || 0), "expense");
@@ -2461,6 +2471,7 @@ function addTransaction({ merchant, amount, category, budgeted, source = "accoun
     id: uid("tx"),
     date: todayKey(),
     merchant,
+    description: cleanText(description, ""),
     amount,
     category,
     labeled: Boolean(category),
@@ -2827,6 +2838,7 @@ function normalizeTransactions(transactions) {
     id: transaction.id || uid("tx"),
     date: cleanDate(transaction.date, todayKey()),
     merchant: cleanText(transaction.merchant, "Compra"),
+    description: cleanText(transaction.description, ""),
     amount: Number(transaction.amount || 0),
     category: transaction.category || "",
     labeled: Boolean(transaction.category || transaction.labeled),

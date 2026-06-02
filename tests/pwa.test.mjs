@@ -17,7 +17,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
 test("service worker caches the app shell needed for offline launch", async () => {
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
-  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v20"/);
+  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v21"/);
   assert.ok(worker.includes('"./index.html"'));
   assert.ok(worker.includes('"./app.js"'));
   assert.ok(worker.includes('"./finance-core.js"'));
@@ -45,6 +45,9 @@ test("navigation opens on expense registration with a vertical collapsible menu"
   assert.ok(app.includes('id="liquidity-form"'));
   assert.ok(app.includes("Cuenta + efectivo"));
   assert.ok(app.includes("Pagado con"));
+  assert.ok(app.includes('name="description"'));
+  assert.ok(app.includes("Descripcion opcional"));
+  assert.ok(app.includes("description: cleanText"));
   assert.ok(app.includes("Gasto registrado. ¿Deshacer?"));
   assert.ok(app.includes("setTimeout(() =>"));
   assert.ok(app.includes('"undo-snackbar"'));
