@@ -356,6 +356,10 @@ a {
   background: var(--coral-2);
 }
 
+.danger-text {
+  color: #8c2d25;
+}
+
 .eyebrow {
   margin: 0 0 7px;
   color: var(--teal);

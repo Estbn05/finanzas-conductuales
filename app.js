@@ -596,10 +596,16 @@ function renderHeader(plan) {
       : "";
 
   return `
-    <header class="money-bar ${summary.overReserved ? "danger" : ""}" role="status" aria-label="Dinero libre del periodo">
+    <header class="money-bar ${summary.overReserved ? "danger" : ""}" role="status" aria-label="Dinero libre sin asignar">
       <span>Libre ${summary.cadenceLabel}</span>
       <strong>${formatMoney(summary.freeRemaining)}</strong>
-      <span>${summary.overReserved ? "sobreasignado" : "sin clasificar"}</span>
+      <span>${summary.overReserved ? "sobreasignado" : "sin asignar"}</span>
+      <span class="money-split">Apartado sin gastar: ${formatMoney(summary.reservedRemaining)} en campos</span>
+      ${
+        summary.categoryOverspent > 0
+          ? `<span class="money-split danger-text">Exceso en campos: ${formatMoney(summary.categoryOverspent)} ya baja el libre.</span>`
+          : ""
+      }
       ${periodLine}
       <span class="money-split">Real: Cuenta ${formatMoney(liquidity.account)} · Efectivo ${formatMoney(liquidity.cash)} · Total ${formatMoney(liquidity.total)}</span>
     </header>
@@ -921,7 +927,7 @@ function renderBudget(plan) {
   return `
     <section class="content-grid budget-grid">
       <article class="card split-card">
-        <div class="budget-ring" style="--debt:${Math.min(360, (summary.reserved / Math.max(1, summary.income)) * 360)}deg; --savings:${Math.min(360, ((summary.reserved + summary.freeSpent) / Math.max(1, summary.income)) * 360)}deg">
+        <div class="budget-ring" style="--debt:${Math.min(360, (summary.reserved / Math.max(1, summary.income)) * 360)}deg; --savings:${Math.min(360, ((summary.reserved + summary.freeImpactSpent) / Math.max(1, summary.income)) * 360)}deg">
           <div>
             <strong>${Math.round(assignmentRatio)}%</strong>
             <span>reservado</span>
@@ -933,8 +939,9 @@ function renderBudget(plan) {
           ${renderAllocation("Presupuesto base", summary.baseIncome, "savings")}
           ${renderAllocation("Dinero extra", summary.extraIncome, "expenses")}
           ${renderAllocation("Campos reservados", summary.reserved, "debt")}
+          ${renderAllocation("Apartado sin gastar", summary.reservedRemaining, "savings")}
           ${renderAllocation("Libre sin asignar", summary.freeBudget, "savings")}
-          ${renderAllocation("Libre ya usado", summary.freeSpent, "expenses")}
+          ${renderAllocation("Libre usado + excesos", summary.freeImpactSpent, "expenses")}
           <p class="helper-text">Periodo actual: ${formatDate(summary.window.start)} - ${formatDate(previousDay(summary.window.end))}. Equivale a ${formatMoney(getMonthlyIncome(state.profile))} / mes.</p>
         </div>
       </article>

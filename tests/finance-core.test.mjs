@@ -195,6 +195,31 @@ test("reserved category spending fills its bar without reducing free budget agai
   assert.equal(summary.freeSpent, 40_000);
   assert.equal(summary.freeRemaining, 930_000);
   assert.equal(gas.spent, 30_000);
+  assert.equal(summary.reservedRemaining, 750_000);
+  assert.equal(summary.categoryOverspent, 0);
+});
+
+test("category overspending consumes only the excess from free budget", () => {
+  const state = makeState({
+    profile: {
+      incomeCadence: "semester",
+      incomeAmount: 1_750_000,
+      periodStart: "2026-05-01"
+    },
+    budgetJobs: [{ id: "gas", name: "Gasolina", amount: 30_000, cadence: "period" }],
+    transactions: [
+      { date: "2026-05-03", amount: 40_000, category: "gas", labeled: true },
+      { date: "2026-05-04", amount: 20_000, category: "free", labeled: true }
+    ]
+  });
+
+  const summary = budgetSummary(state, "2026-05-20");
+
+  assert.equal(summary.freeBudget, 1_720_000);
+  assert.equal(summary.freeSpent, 20_000);
+  assert.equal(summary.categoryOverspent, 10_000);
+  assert.equal(summary.freeImpactSpent, 30_000);
+  assert.equal(summary.freeRemaining, 1_690_000);
 });
 
 test("unlabeled spending reduces free budget until it is classified", () => {

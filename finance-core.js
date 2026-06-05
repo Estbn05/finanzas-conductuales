@@ -131,17 +131,30 @@ export function budgetSummary(state, today) {
   const baseIncome = getPeriodIncome(state.profile);
   const extraIncome = extraIncomeForPeriod(state, today);
   const income = baseIncome + extraIncome;
-  const reserved = state.budgetJobs.reduce((sum, job) => sum + budgetAmountForJob(job, state.profile), 0);
+  const jobBudgets = state.budgetJobs.map((job) => ({
+    id: job.id,
+    budget: budgetAmountForJob(job, state.profile),
+    spent: spent[job.id] || 0
+  }));
+  const reserved = jobBudgets.reduce((sum, job) => sum + job.budget, 0);
+  const reservedSpent = jobBudgets.reduce((sum, job) => sum + Math.min(job.spent, job.budget), 0);
+  const reservedRemaining = jobBudgets.reduce((sum, job) => sum + Math.max(0, job.budget - job.spent), 0);
+  const categoryOverspent = jobBudgets.reduce((sum, job) => sum + Math.max(0, job.spent - job.budget), 0);
   const freeBudget = Math.max(0, income - reserved);
   const freeSpent = spent[FREE_CATEGORY_ID] || 0;
+  const freeImpactSpent = freeSpent + categoryOverspent;
   return {
     baseIncome,
     extraIncome,
     income,
     reserved,
+    reservedSpent,
+    reservedRemaining,
+    categoryOverspent,
     freeBudget,
     freeSpent,
-    freeRemaining: Math.max(0, freeBudget - freeSpent),
+    freeImpactSpent,
+    freeRemaining: Math.max(0, freeBudget - freeImpactSpent),
     overReserved: Math.max(0, reserved - income),
     months: getPeriodMonths(state.profile),
     weeks: getPeriodWeeks(state.profile),

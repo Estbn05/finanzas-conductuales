@@ -17,7 +17,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
 test("service worker caches the app shell needed for offline launch", async () => {
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
-  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v33"/);
+  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v34"/);
   assert.ok(worker.includes('"./index.html"'));
   assert.ok(worker.includes('"./app.js"'));
   assert.ok(worker.includes('"./finance-core.js"'));
@@ -74,6 +74,9 @@ test("navigation opens on expense registration with a vertical collapsible menu"
   assert.ok(app.includes("Cuenta + fisico debe sumar el presupuesto del periodo"));
   assert.ok(app.includes("data-liquidity-match-hint"));
   assert.ok(app.includes("summary.freeRemaining"));
+  assert.ok(app.includes("Apartado sin gastar"));
+  assert.ok(app.includes("summary.categoryOverspent"));
+  assert.ok(app.includes("summary.freeImpactSpent"));
   assert.ok(app.includes("Real: Cuenta"));
   assert.equal(app.includes("freeLiquiditySummary"), false);
   assert.ok(app.includes("Total incluye extra"));
