@@ -1257,6 +1257,7 @@ function renderSpending(plan) {
 
 function renderLiquidityCard(summary = budgetSummary()) {
   const liquidity = liquiditySummary(summary);
+  const drift = liquidityDrift(summary);
   return `
     <article class="card wide-card">
       <div class="card-heading">
@@ -1277,6 +1278,14 @@ function renderLiquidityCard(summary = budgetSummary()) {
         </label>
         <button class="btn secondary" type="submit">Actualizar disponible</button>
       </form>
+      ${
+        drift.amount
+          ? `<div class="menu-notice">
+              El saldo real esta ${drift.amount > 0 ? "por encima" : "por debajo"} de lo que explican el presupuesto y los gastos por ${formatMoney(Math.abs(drift.amount))}.
+              <button class="btn ghost" type="button" data-action="reconcile-liquidity">Ajustar saldo real</button>
+            </div>`
+          : ""
+      }
     </article>
   `;
 }
@@ -2116,6 +2125,7 @@ function handleAction(event) {
     },
     "remove-extra": () => removeBudgetExtra(id),
     "clear-period-extras": clearCurrentPeriodExtras,
+    "reconcile-liquidity": reconcileLiquidity,
     "extra-all-free": () => applyPendingExtraAllocation(0),
     "cancel-extra-allocation": () => {
       pendingExtraAllocation = null;
@@ -2814,6 +2824,38 @@ function clearCurrentPeriodExtras() {
   state.lastAlert = `Quite ${formatMoney(total)} de dinero extra del periodo.`;
 }
 
+function reconcileLiquidity() {
+  const drift = liquidityDrift();
+  if (!drift.amount) {
+    state.lastAlert = "El saldo real ya cuadra con presupuesto y gastos.";
+    return;
+  }
+
+  if (
+    typeof window.confirm === "function" &&
+    !window.confirm(`Ajustar saldo real de ${formatMoney(drift.actual)} a ${formatMoney(drift.expected)}?`)
+  ) {
+    state.lastAlert = "No ajuste el saldo real.";
+    return;
+  }
+
+  const liquidity = normalizeLiquidity(state.liquidity);
+  if (drift.amount > 0) {
+    let remaining = drift.amount;
+    const fromAccount = Math.min(liquidity.account, remaining);
+    liquidity.account -= fromAccount;
+    remaining -= fromAccount;
+    liquidity.cash = Math.max(0, liquidity.cash - remaining);
+  } else {
+    liquidity.account += Math.abs(drift.amount);
+  }
+
+  liquidity.initialized = true;
+  liquidity.updated_at = new Date().toISOString();
+  state.liquidity = liquidity;
+  state.lastAlert = `Saldo real ajustado a ${formatMoney(drift.expected)}.`;
+}
+
 function cancelCooldown(id) {
   state.cooldowns = state.cooldowns.filter((cooldown) => cooldown.id !== id);
   state.wins.push({
@@ -2993,6 +3035,23 @@ function liquiditySummary(summary = budgetSummary()) {
   return {
     ...liquidity,
     total: liquidity.account + liquidity.cash
+  };
+}
+
+function expectedLiquidityTotal(summary = budgetSummary()) {
+  const spent = transactionsForSummary(summary).reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  return Math.max(0, summary.income - spent);
+}
+
+function liquidityDrift(summary = budgetSummary()) {
+  const liquidity = liquiditySummary(summary);
+  const expected = expectedLiquidityTotal(summary);
+  const actual = liquidity.total;
+  const amount = Math.round(actual - expected);
+  return {
+    actual,
+    expected,
+    amount: Math.abs(amount) >= 1 ? amount : 0
   };
 }
 
