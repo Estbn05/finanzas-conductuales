@@ -2932,9 +2932,17 @@ function liquiditySummary(summary = budgetSummary()) {
 
 function freeLiquiditySummary(summary = budgetSummary()) {
   const liquidity = liquiditySummary(summary);
-  const freeTotal = Math.min(summary.freeRemaining, liquidity.total);
-  const cash = Math.min(liquidity.cash, freeTotal);
-  const account = Math.min(liquidity.account, Math.max(0, freeTotal - cash));
+  const budgetedCategoryIds = new Set(state.budgetJobs.map((job) => job.id));
+  const reservedRemaining = getCategoryStatus(state, todayKey()).reduce(
+    (sum, category) => sum + Math.max(0, Number(category.budget || 0) - Number(category.spent || 0)),
+    0
+  );
+  const budgetedCashSpent = transactionsForSummary(summary)
+    .filter((transaction) => budgetedCategoryIds.has(transaction.category) && normalizeLocation(transaction.source) === "cash")
+    .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  const accountProtected = Math.min(liquidity.account, reservedRemaining + budgetedCashSpent);
+  const account = Math.max(0, liquidity.account - accountProtected);
+  const cash = Math.min(liquidity.cash, Math.max(0, summary.freeRemaining - account));
   return {
     account,
     cash,
