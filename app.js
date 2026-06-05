@@ -590,12 +590,17 @@ function renderNavItem(item) {
 function renderHeader(plan) {
   const summary = budgetSummary();
   const liquidity = liquiditySummary(summary);
+  const periodLine =
+    summary.extraIncome > 0
+      ? `<span class="money-split">Presupuesto actual: Base ${formatMoney(summary.baseIncome)} · Extra ${formatMoney(summary.extraIncome)} · Total ${formatMoney(summary.income)}</span>`
+      : "";
 
   return `
     <header class="money-bar ${summary.overReserved ? "danger" : ""}" role="status" aria-label="Dinero libre del periodo">
       <span>Libre ${summary.cadenceLabel}</span>
       <strong>${formatMoney(summary.freeRemaining)}</strong>
       <span>${summary.overReserved ? "sobreasignado" : "sin clasificar"}</span>
+      ${periodLine}
       <span class="money-split">Real: Cuenta ${formatMoney(liquidity.account)} · Efectivo ${formatMoney(liquidity.cash)} · Total ${formatMoney(liquidity.total)}</span>
     </header>
   `;
@@ -882,6 +887,7 @@ function renderTransactionLabeler(transaction) {
       </div>
       <select data-transaction-category="${transaction.id}" aria-label="Categoria para ${escapeAttr(transaction.merchant)}">
         <option value="">Elegir categoria</option>
+        <option value="${FREE_CATEGORY_ID}" ${transaction.category === FREE_CATEGORY_ID ? "selected" : ""}>Libre / sin clasificar</option>
         ${state.budgetJobs
           .map(
             (job) =>
@@ -1992,6 +1998,13 @@ function bindDiagnosisPreview(form) {
     const data = new FormData(form);
     const incomeAmount = numberFrom(data.get("incomeAmount"));
     const total = numberFrom(data.get("account")) + numberFrom(data.get("cash"));
+    const requireMatch = shouldRequireOpeningBalanceMatch();
+    if (!requireMatch) {
+      hint.textContent = `Saldo real actual: ${formatMoney(total)}. Puede ser distinto del presupuesto base si ya registraste gastos o dinero extra.`;
+      hint.classList.remove("is-error");
+      hint.classList.add("is-ok");
+      return;
+    }
     const matches = total === incomeAmount;
     hint.textContent = matches
       ? `Cuenta + fisico coincide con ${formatMoney(incomeAmount)}.`
@@ -2236,7 +2249,7 @@ function validateDiagnosisForm(form) {
   const accountAmount = numberValue(data.get("account"));
   const cashAmount = numberValue(data.get("cash"));
   const liquidityTotal = Number(accountAmount || 0) + Number(cashAmount || 0);
-  if (Math.abs(liquidityTotal - Number(incomeAmount || 0)) > 0) {
+  if (shouldRequireOpeningBalanceMatch() && Math.abs(liquidityTotal - Number(incomeAmount || 0)) > 0) {
     return {
       field: "account",
       fields: ["account", "cash"],
@@ -2279,6 +2292,10 @@ function validateDiagnosisForm(form) {
   }
 
   return null;
+}
+
+function shouldRequireOpeningBalanceMatch() {
+  return !state.profile.completed && !state.transactions.length && !state.budgetExtras.length && !state.budgetJobs.length;
 }
 
 function focusDiagnosisField(field) {

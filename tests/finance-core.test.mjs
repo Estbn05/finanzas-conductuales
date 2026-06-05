@@ -139,11 +139,13 @@ test("category status only counts labeled transactions in the current budget per
   const categories = categoryStatus(state, "2026-05-27");
   const food = categories.find((category) => category.id === "food");
   const transport = categories.find((category) => category.id === "transport");
+  const summary = budgetSummary(state, "2026-05-27");
 
   assert.equal(food.spent, 450_000);
   assert.equal(food.band, "warning");
   assert.equal(transport.spent, 0);
   assert.equal(transport.band, "good");
+  assert.equal(summary.freeSpent, 120_000);
 });
 
 test("weekly fields reserve the whole semester from the scholarship budget", () => {
@@ -193,6 +195,27 @@ test("reserved category spending fills its bar without reducing free budget agai
   assert.equal(summary.freeSpent, 40_000);
   assert.equal(summary.freeRemaining, 930_000);
   assert.equal(gas.spent, 30_000);
+});
+
+test("unlabeled spending reduces free budget until it is classified", () => {
+  const pending = makeState({
+    profile: {
+      incomeCadence: "semester",
+      incomeAmount: 1_690_000,
+      periodStart: "2026-06-01"
+    },
+    budgetJobs: [{ id: "gas", name: "Gasolina", amount: 30_000, cadence: "period" }],
+    transactions: [{ date: "2026-06-05", amount: 30_000, category: "", labeled: false }]
+  });
+  const classified = {
+    ...pending,
+    transactions: [{ date: "2026-06-05", amount: 30_000, category: "gas", labeled: true }]
+  };
+
+  assert.equal(budgetSummary(pending, "2026-06-05").freeSpent, 30_000);
+  assert.equal(budgetSummary(pending, "2026-06-05").freeRemaining, 1_630_000);
+  assert.equal(budgetSummary(classified, "2026-06-05").freeSpent, 0);
+  assert.equal(categoryStatus(classified, "2026-06-05").find((category) => category.id === "gas").spent, 30_000);
 });
 
 test("income cadence can be weekly biweekly monthly semester or yearly", () => {

@@ -182,9 +182,10 @@ export function categoryStatus(state, today) {
 
 export function spendByCategory(state, today) {
   return state.transactions
-    .filter((transaction) => transaction.labeled && isInBudgetWindow(transaction.date, state.profile, today))
+    .filter((transaction) => isInBudgetWindow(transaction.date, state.profile, today))
     .reduce((acc, transaction) => {
-      acc[transaction.category] = (acc[transaction.category] || 0) + Number(transaction.amount || 0);
+      const category = transaction.labeled && transaction.category ? transaction.category : FREE_CATEGORY_ID;
+      acc[category] = (acc[category] || 0) + Number(transaction.amount || 0);
       return acc;
     }, {});
 }
