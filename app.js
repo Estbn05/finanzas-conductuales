@@ -592,7 +592,7 @@ function renderHeader(plan) {
   const liquidity = liquiditySummary(summary);
   const periodLine =
     summary.extraIncome > 0
-      ? `<span class="money-split">Presupuesto actual: Base ${formatMoney(summary.baseIncome)} · Extra ${formatMoney(summary.extraIncome)} · Total ${formatMoney(summary.income)}</span>`
+      ? `<span class="money-split">Total incluye extra: ${periodExtraSourceLabel(summary)}. Base ${formatMoney(summary.baseIncome)} · Total ${formatMoney(summary.income)}</span>`
       : "";
 
   return `
@@ -604,6 +604,20 @@ function renderHeader(plan) {
       <span class="money-split">Real: Cuenta ${formatMoney(liquidity.account)} · Efectivo ${formatMoney(liquidity.cash)} · Total ${formatMoney(liquidity.total)}</span>
     </header>
   `;
+}
+
+function periodExtraSourceLabel(summary = budgetSummary()) {
+  const extras = budgetExtrasForSummary(summary);
+  if (!extras.length) {
+    return formatMoney(summary.extraIncome);
+  }
+
+  const labels = extras
+    .slice(0, 2)
+    .map((extra) => `${escapeHtml(extra.source)} ${formatMoney(extra.amount)}`)
+    .join(" · ");
+  const hiddenCount = extras.length - 2;
+  return hiddenCount > 0 ? `${labels} · +${hiddenCount} mas` : labels;
 }
 
 function renderCloudStatus() {
@@ -1300,6 +1314,13 @@ function renderExtraBudgetCard(summary = budgetSummary()) {
         <button class="btn secondary" type="submit">Sumar dinero</button>
       </form>
       ${renderBudgetExtras(summary)}
+      ${
+        summary.extraIncome > 0
+          ? `<div class="card-actions">
+              <button class="btn danger" type="button" data-action="clear-period-extras">Quitar extra del periodo</button>
+            </div>`
+          : ""
+      }
     </article>
   `;
 }
@@ -2094,6 +2115,7 @@ function handleAction(event) {
       clearSnackbar({ renderNow: false });
     },
     "remove-extra": () => removeBudgetExtra(id),
+    "clear-period-extras": clearCurrentPeriodExtras,
     "extra-all-free": () => applyPendingExtraAllocation(0),
     "cancel-extra-allocation": () => {
       pendingExtraAllocation = null;
@@ -2763,6 +2785,33 @@ function removeBudgetExtra(id) {
     reduceSavingsAllocation(extra.allocation.savingsJobId, Number(extra.allocation.savingsAmount || 0));
   }
   state.lastAlert = extra ? `${extra.source} ya no suma al presupuesto.` : "Dinero extra eliminado.";
+}
+
+function clearCurrentPeriodExtras() {
+  const summary = budgetSummary();
+  const extras = budgetExtrasForSummary(summary);
+  if (!extras.length) {
+    state.lastAlert = "No hay dinero extra en este periodo.";
+    return;
+  }
+
+  const total = extras.reduce((sum, extra) => sum + Number(extra.amount || 0), 0);
+  if (typeof window.confirm === "function" && !window.confirm(`Quitar ${formatMoney(total)} de dinero extra del periodo actual?`)) {
+    state.lastAlert = "No quite ningun extra.";
+    return;
+  }
+
+  const ids = new Set(extras.map((extra) => extra.id));
+  extras.forEach((extra) => {
+    if (state.liquidity?.initialized) {
+      adjustLiquidity(extra.location, -Number(extra.amount || 0), "remove-extra");
+    }
+    if (extra?.allocation?.savingsJobId && Number(extra.allocation.savingsAmount || 0) > 0) {
+      reduceSavingsAllocation(extra.allocation.savingsJobId, Number(extra.allocation.savingsAmount || 0));
+    }
+  });
+  state.budgetExtras = state.budgetExtras.filter((extra) => !ids.has(extra.id));
+  state.lastAlert = `Quite ${formatMoney(total)} de dinero extra del periodo.`;
 }
 
 function cancelCooldown(id) {
