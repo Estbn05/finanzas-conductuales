@@ -589,14 +589,14 @@ function renderNavItem(item) {
 
 function renderHeader(plan) {
   const summary = budgetSummary();
-  const freeLiquidity = freeLiquiditySummary(summary);
+  const liquidity = liquiditySummary(summary);
 
   return `
     <header class="money-bar ${summary.overReserved ? "danger" : ""}" role="status" aria-label="Dinero libre del periodo">
       <span>Libre ${summary.cadenceLabel}</span>
       <strong>${formatMoney(summary.freeRemaining)}</strong>
       <span>${summary.overReserved ? "sobreasignado" : "sin clasificar"}</span>
-      <span class="money-split">Libre real: Cuenta ${formatMoney(freeLiquidity.account)} · Efectivo ${formatMoney(freeLiquidity.cash)} · Total ${formatMoney(freeLiquidity.total)}</span>
+      <span class="money-split">Real: Cuenta ${formatMoney(liquidity.account)} · Efectivo ${formatMoney(liquidity.cash)} · Total ${formatMoney(liquidity.total)}</span>
     </header>
   `;
 }
@@ -2927,26 +2927,6 @@ function liquiditySummary(summary = budgetSummary()) {
   return {
     ...liquidity,
     total: liquidity.account + liquidity.cash
-  };
-}
-
-function freeLiquiditySummary(summary = budgetSummary()) {
-  const liquidity = liquiditySummary(summary);
-  const budgetedCategoryIds = new Set(state.budgetJobs.map((job) => job.id));
-  const reservedRemaining = getCategoryStatus(state, todayKey()).reduce(
-    (sum, category) => sum + Math.max(0, Number(category.budget || 0) - Number(category.spent || 0)),
-    0
-  );
-  const budgetedCashSpent = transactionsForSummary(summary)
-    .filter((transaction) => budgetedCategoryIds.has(transaction.category) && normalizeLocation(transaction.source) === "cash")
-    .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
-  const accountProtected = Math.min(liquidity.account, reservedRemaining + budgetedCashSpent);
-  const account = Math.max(0, liquidity.account - accountProtected);
-  const cash = Math.min(liquidity.cash, Math.max(0, summary.freeRemaining - account));
-  return {
-    account,
-    cash,
-    total: account + cash
   };
 }
 
