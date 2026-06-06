@@ -599,11 +599,12 @@ function renderHeader(plan) {
     <header class="money-bar ${summary.overReserved ? "danger" : ""}" role="status" aria-label="Dinero libre sin asignar">
       <span>Libre ${summary.cadenceLabel}</span>
       <strong>${formatMoney(summary.freeRemaining)}</strong>
-      <span>${summary.overReserved ? "sobreasignado" : "sin asignar"}</span>
+      <span>${summary.overReserved ? "sobreasignado" : "para nuevos gastos"}</span>
+      <span class="money-split">Gastos registrados: ${formatMoney(summary.totalSpent)}</span>
       <span class="money-split">Apartado sin gastar: ${formatMoney(summary.reservedRemaining)} en campos</span>
       ${
         summary.categoryOverspent > 0
-          ? `<span class="money-split danger-text">Exceso en campos: ${formatMoney(summary.categoryOverspent)} ya baja el libre.</span>`
+          ? `<span class="money-split danger-text">Exceso sobre topes: ${formatMoney(summary.categoryOverspent)}</span>`
           : ""
       }
       ${periodLine}
@@ -940,8 +941,8 @@ function renderBudget(plan) {
           ${renderAllocation("Dinero extra", summary.extraIncome, "expenses")}
           ${renderAllocation("Campos reservados", summary.reserved, "debt")}
           ${renderAllocation("Apartado sin gastar", summary.reservedRemaining, "savings")}
-          ${renderAllocation("Libre sin asignar", summary.freeBudget, "savings")}
-          ${renderAllocation("Libre usado + excesos", summary.freeImpactSpent, "expenses")}
+          ${renderAllocation("Libre antes de gastos", summary.freeBudget, "savings")}
+          ${renderAllocation("Todos los gastos registrados", summary.totalSpent, "expenses")}
           <p class="helper-text">Periodo actual: ${formatDate(summary.window.start)} - ${formatDate(previousDay(summary.window.end))}. Equivale a ${formatMoney(getMonthlyIncome(state.profile))} / mes.</p>
         </div>
       </article>

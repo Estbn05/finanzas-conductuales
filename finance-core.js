@@ -142,7 +142,8 @@ export function budgetSummary(state, today) {
   const categoryOverspent = jobBudgets.reduce((sum, job) => sum + Math.max(0, job.spent - job.budget), 0);
   const freeBudget = Math.max(0, income - reserved);
   const freeSpent = spent[FREE_CATEGORY_ID] || 0;
-  const freeImpactSpent = freeSpent + categoryOverspent;
+  const totalSpent = Object.values(spent).reduce((sum, amount) => sum + Number(amount || 0), 0);
+  const freeImpactSpent = totalSpent;
   return {
     baseIncome,
     extraIncome,
@@ -153,6 +154,7 @@ export function budgetSummary(state, today) {
     categoryOverspent,
     freeBudget,
     freeSpent,
+    totalSpent,
     freeImpactSpent,
     freeRemaining: Math.max(0, freeBudget - freeImpactSpent),
     overReserved: Math.max(0, reserved - income),
