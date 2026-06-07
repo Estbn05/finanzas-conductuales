@@ -600,8 +600,6 @@ function renderHeader(plan) {
       <span>Libre ${summary.cadenceLabel}</span>
       <strong>${formatMoney(summary.freeRemaining)}</strong>
       <span>${summary.overReserved ? "sobreasignado" : "para nuevos gastos"}</span>
-      <span class="money-split">Gastos registrados: ${formatMoney(summary.totalSpent)}</span>
-      <span class="money-split">Apartado sin gastar: ${formatMoney(summary.reservedRemaining)} en campos</span>
       ${
         summary.categoryOverspent > 0
           ? `<span class="money-split danger-text">Exceso sobre topes: ${formatMoney(summary.categoryOverspent)}</span>`
