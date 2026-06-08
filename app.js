@@ -29,7 +29,7 @@ import {
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
-const DEFAULT_VIEW = "spending";
+const DEFAULT_VIEW = "today";
 const STUDENT_SEMESTER_INCOME = 1_750_000;
 const STUDENT_SEMESTER_MONTHS = 6;
 const STUDENT_WEEKLY_GAS = 30_000;
@@ -42,18 +42,18 @@ const STUDENT_BUDGET_JOBS = [
 ];
 
 const NAV_ITEMS = [
-  { id: "spending", label: "Registrar gasto", icon: "01" },
-  { id: "today", label: "Inicio", icon: "02" },
-  { id: "budget", label: "Plan", icon: "03" },
-  { id: "savings", label: "Ahorro", icon: "04" },
-  { id: "debt", label: "Deudas", icon: "05" },
-  { id: "profile", label: "Datos", icon: "06" }
+  { id: "today", label: "Inicio", icon: "01" },
+  { id: "budget", label: "Plan", icon: "02" },
+  { id: "savings", label: "Ahorro", icon: "03" },
+  { id: "debt", label: "Deudas", icon: "04" },
+  { id: "profile", label: "Datos", icon: "05" }
 ];
 
 const app = document.querySelector("#app");
 let state = loadState();
 state.activeView = viewFromHash(DEFAULT_VIEW);
 let menuOpen = false;
+let quickExpenseOpen = false;
 let applyingCloudState = false;
 let cloudSaveTimer;
 let authUnsubscribe = () => {};
@@ -531,24 +531,26 @@ function friendlyCloudError(error) {
 function render() {
   const plan = calculatePlan();
   app.classList.toggle("is-menu-open", menuOpen);
+  app.classList.toggle("is-expense-open", quickExpenseOpen);
   app.innerHTML = `
-    <aside class="sidebar">
+    <button class="drawer-scrim" type="button" data-action="close-menu" aria-label="Cerrar menu"></button>
+    <aside class="sidebar" aria-label="Menu principal">
       <div class="sidebar-head">
-        <a class="brand" href="#" data-action="go-spending" aria-label="Ir a registrar gasto">
+        <a class="brand" href="#" data-view="today" aria-label="Ir al inicio">
           <span class="brand-mark">FC</span>
           <span>
             <strong>Finanzas Conductuales</strong>
-            <small>Tu dinero en 5 minutos</small>
+            <small>${capitalize(budgetSummary().cadenceLabel)} · ${formatMoney(budgetSummary().freeRemaining)} libre</small>
           </span>
         </a>
-        <button class="menu-toggle" type="button" data-action="toggle-menu" aria-expanded="${menuOpen}" aria-controls="main-menu">
-          <span class="menu-bars" aria-hidden="true"></span>
-          <span>Menu</span>
-        </button>
+        <button class="drawer-close" type="button" data-action="close-menu" aria-label="Cerrar menu">x</button>
       </div>
-      ${renderHeader(plan)}
-      <div class="nav-panel ${menuOpen ? "is-open" : ""}" id="main-menu">
+      <div class="nav-panel is-open" id="main-menu">
         <nav class="nav-list" aria-label="Secciones principales">
+          <button class="nav-item is-primary" type="button" data-action="open-expense">
+            <span class="nav-number">+</span>
+            <span>Registrar gasto</span>
+          </button>
           ${NAV_ITEMS.map((item) => renderNavItem(item)).join("")}
         </nav>
         <div class="menu-tools">
@@ -557,18 +559,15 @@ function render() {
           ${state.lastAlert ? `<div class="menu-notice" role="status">${escapeHtml(state.lastAlert)}</div>` : ""}
         </div>
       </div>
-      <div class="sidebar-meter">
-        <span>Buffer base</span>
-        <strong>${Math.round(plan.emergencyProgress)}%</strong>
-        <div class="mini-track">
-          <span style="width:${clamp(plan.emergencyProgress, 0, 100)}%"></span>
-        </div>
-      </div>
     </aside>
     <main class="main-panel">
+      ${renderHeader(plan)}
       ${renderView(plan)}
     </main>
-    ${state.showDiagnosis ? renderDiagnosisModal() : ""}
+    ${renderBottomNavigation()}
+    <button class="expense-fab" type="button" data-action="open-expense" aria-label="Registrar gasto">+</button>
+    ${quickExpenseOpen ? renderQuickExpensePanel() : ""}
+    ${!state.profile.completed || state.showDiagnosis ? renderDiagnosisModal() : ""}
     ${pendingExtraAllocation ? renderExtraAllocationModal() : ""}
     ${renderSnackbar()}
   `;
@@ -578,12 +577,34 @@ function render() {
 
 function renderNavItem(item) {
   const active = state.activeView === item.id ? "is-active" : "";
-  const primary = item.id === DEFAULT_VIEW ? "is-primary" : "";
   return `
-    <button class="nav-item ${active} ${primary}" type="button" data-view="${item.id}">
+    <button class="nav-item ${active}" type="button" data-view="${item.id}">
       <span class="nav-number">${item.icon}</span>
       <span>${item.label}</span>
     </button>
+  `;
+}
+
+function renderBottomNavigation() {
+  return `
+    <nav class="bottom-nav" aria-label="Navegacion rapida">
+      <button class="bottom-nav-item" type="button" data-action="toggle-menu">
+        <span class="bottom-nav-icon menu-icon" aria-hidden="true"></span>
+        <span>Menu</span>
+      </button>
+      <button class="bottom-nav-item ${state.activeView === "today" ? "is-active" : ""}" type="button" data-view="today">
+        <span class="bottom-nav-icon home-icon" aria-hidden="true"></span>
+        <span>Inicio</span>
+      </button>
+      <button class="bottom-nav-item is-register" type="button" data-action="open-expense">
+        <span class="bottom-nav-icon plus-icon" aria-hidden="true">+</span>
+        <span>Registrar</span>
+      </button>
+      <button class="bottom-nav-item ${state.activeView === "budget" ? "is-active" : ""}" type="button" data-view="budget">
+        <span class="bottom-nav-icon plan-icon" aria-hidden="true"></span>
+        <span>Plan</span>
+      </button>
+    </nav>
   `;
 }
 
@@ -597,16 +618,19 @@ function renderHeader(plan) {
 
   return `
     <header class="money-bar ${summary.overReserved ? "danger" : ""}" role="status" aria-label="Dinero libre sin asignar">
-      <span>Libre ${summary.cadenceLabel}</span>
+      <span class="money-label">Libre ${summary.cadenceLabel}</span>
       <strong>${formatMoney(summary.freeRemaining)}</strong>
-      <span>${summary.overReserved ? "sobreasignado" : "para nuevos gastos"}</span>
+      <span class="money-caption">${summary.overReserved ? "sobreasignado" : "para nuevos gastos"}</span>
       ${
         summary.categoryOverspent > 0
           ? `<span class="money-split danger-text">Exceso sobre topes: ${formatMoney(summary.categoryOverspent)}</span>`
           : ""
       }
-      ${periodLine}
-      <span class="money-split">Real: Cuenta ${formatMoney(liquidity.account)} · Efectivo ${formatMoney(liquidity.cash)} · Total ${formatMoney(liquidity.total)}</span>
+      <div class="money-location-chips">
+        <div><span>Cuenta</span><strong>${formatMoney(liquidity.account)}</strong></div>
+        <div><span>Efectivo</span><strong>${formatMoney(liquidity.cash)}</strong></div>
+        <div><span>Total real</span><strong>${formatMoney(liquidity.total)}</strong></div>
+      </div>
     </header>
   `;
 }
@@ -738,6 +762,25 @@ function renderPrimaryActionButton(action) {
 }
 
 function renderToday(plan) {
+  const visibleCategoryCount = Math.max(1, Math.min(6, state.budgetJobs.length + 1));
+  return `
+    <section class="home-view" aria-label="Resumen del periodo">
+      <div class="home-section-heading">
+        <div>
+          <p class="eyebrow">Categorias del periodo</p>
+          <h2>Lo que vas usando</h2>
+        </div>
+        <button class="home-plan-link" type="button" data-view="budget">Editar limites</button>
+      </div>
+      ${renderCategoryBars(plan, visibleCategoryCount)}
+      ${
+        state.budgetJobs.length
+          ? ""
+          : `<div class="empty-state home-empty">Crea campos como gasolina, comida o ahorro para ver sus limites aqui.</div>`
+      }
+    </section>
+  `;
+
   const today = todayKey();
   const unlabeled = state.transactions.filter((transaction) => !transaction.labeled);
   const unlabeledToday = state.transactions.filter((transaction) => transaction.date === today && !transaction.labeled);
@@ -1020,7 +1063,7 @@ function renderBudgetJob(job) {
   const spent = spendByCategory()[job.id] || 0;
   const budget = getBudgetAmountForJob(job, state.profile);
   const ratio = budget ? (spent / budget) * 100 : 0;
-  const band = ratio >= 95 ? "danger" : ratio >= 75 ? "warning" : "good";
+  const band = ratio > 90 ? "danger" : ratio > 65 ? "warning" : "good";
 
   return `
     <div class="job-row">
@@ -1192,6 +1235,75 @@ function renderSavings(plan) {
         <p>El ahorro se entiende mejor cuando se traduce en tiempo y margen de decision.</p>
       </article>
     </section>
+  `;
+}
+
+function renderQuickExpensePanel() {
+  const summary = budgetSummary();
+  return `
+    <div class="quick-expense-backdrop" role="presentation">
+      <section class="quick-expense-panel" role="dialog" aria-modal="true" aria-labelledby="quick-expense-title">
+        <div class="quick-expense-header">
+          <button class="icon-btn muted" type="button" data-action="close-expense" aria-label="Volver">←</button>
+          <div>
+            <p class="eyebrow">Nuevo movimiento</p>
+            <h2 id="quick-expense-title">Registrar gasto</h2>
+          </div>
+          <span class="metric-badge">Libre ${formatMoney(summary.freeRemaining)}</span>
+        </div>
+        <form class="quick-expense-form" id="transaction-form">
+          <label>
+            Comercio
+            <input name="merchant" type="text" maxlength="42" placeholder="Ej. Tienda, Terpel" required autofocus>
+          </label>
+          <label>
+            Descripcion opcional
+            <input name="description" type="text" maxlength="90" placeholder="Ej. Tanqueada, regalo, almuerzo">
+          </label>
+          <div class="quick-field">
+            <span class="quick-label">Categoria</span>
+            ${renderChoicePills("category", categoryChoiceOptions(), FREE_CATEGORY_ID)}
+          </div>
+          <div class="quick-field">
+            <span class="quick-label">Pagado con</span>
+            ${renderChoicePills("source", [
+              { value: "account", label: "Cuenta" },
+              { value: "cash", label: "Efectivo" }
+            ], "account")}
+          </div>
+          <label class="quick-amount">
+            <span>Monto</span>
+            <input name="amount" type="number" min="1000" step="1000" inputmode="numeric" placeholder="$0" required>
+          </label>
+          <input name="budgeted" type="hidden" value="on">
+          <button class="btn primary quick-submit" type="submit">Registrar gasto</button>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function categoryChoiceOptions() {
+  return [
+    { value: FREE_CATEGORY_ID, label: "Libre" },
+    ...state.budgetJobs.map((job) => ({ value: job.id, label: job.name }))
+  ];
+}
+
+function renderChoicePills(name, options, selected) {
+  return `
+    <div class="choice-pills" data-choice-group="${escapeAttr(name)}">
+      <input type="hidden" name="${escapeAttr(name)}" value="${escapeAttr(selected)}">
+      ${options
+        .map(
+          (option) => `
+            <button class="choice-pill ${option.value === selected ? "is-active" : ""}" type="button" data-choice-name="${escapeAttr(name)}" data-choice-value="${escapeAttr(option.value)}">
+              ${escapeHtml(option.label)}
+            </button>
+          `
+        )
+        .join("")}
+    </div>
   `;
 }
 
@@ -1471,6 +1583,17 @@ function renderProfile(plan) {
         ${renderAllocation("Gastos", plan.expenses, "expenses")}
       </article>
 
+      <article class="card wide-card">
+        <div class="card-heading">
+          <div>
+            <p class="eyebrow">Historial</p>
+            <h2>Movimientos del periodo</h2>
+          </div>
+          <span class="metric-badge">${transactionsForSummary(budgetSummary()).length} gastos</span>
+        </div>
+        ${renderTransactionHistory()}
+      </article>
+
       <article class="card">
         <p class="eyebrow">Respaldo</p>
         <h2>Tus datos locales</h2>
@@ -1663,7 +1786,98 @@ function renderIncomeCadenceOptions(selected) {
     .join("");
 }
 
+function renderOnboardingModal() {
+  const profile = state.profile;
+  const liquidity = normalizeLiquidity(state.liquidity);
+  const suggestions = [
+    ["Transporte", "weekly"],
+    ["Comida", "monthly"],
+    ["Ahorro", "monthly"],
+    ["Salidas", "monthly"]
+  ];
+
+  return `
+    <div class="modal-backdrop onboarding-backdrop" role="presentation">
+      <section class="modal onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" data-onboarding-step="1">
+        <div class="onboarding-progress" aria-label="Paso 1 de 3">
+          <span class="is-active"></span><span></span><span></span>
+        </div>
+        <form id="onboarding-form" class="onboarding-form" novalidate>
+          <section class="onboarding-step is-active" data-step="1">
+            <p class="eyebrow">Paso 1 de 3</p>
+            <h2 id="onboarding-title">¿Cuanto recibes y cada cuanto?</h2>
+            <p>Con esto calculamos el dinero libre del periodo.</p>
+            <label>
+              Frecuencia
+              <select name="incomeCadence">
+                ${renderIncomeCadenceOptions(profile.incomeCadence)}
+              </select>
+            </label>
+            <label>
+              Presupuesto por periodo
+              <input name="incomeAmount" type="number" min="1" step="1000" inputmode="numeric" value="${getPeriodIncome(profile)}" required>
+            </label>
+            <input name="periodStart" type="hidden" value="${escapeAttr(profile.periodStart || monthStartKey())}">
+          </section>
+
+          <section class="onboarding-step" data-step="2">
+            <p class="eyebrow">Paso 2 de 3</p>
+            <h2>¿Donde tienes ese dinero?</h2>
+            <p>Cuenta y efectivo deben sumar el presupuesto del periodo.</p>
+            <div class="onboarding-balance-grid">
+              <label>
+                En cuenta
+                <input name="account" type="number" min="0" step="1000" inputmode="numeric" value="${liquidity.account}" required>
+              </label>
+              <label>
+                En efectivo
+                <input name="cash" type="number" min="0" step="1000" inputmode="numeric" value="${liquidity.cash}" required>
+              </label>
+            </div>
+            <small class="balance-hint" data-onboarding-balance></small>
+          </section>
+
+          <section class="onboarding-step" data-step="3">
+            <p class="eyebrow">Paso 3 de 3</p>
+            <h2>¿Para que separas plata normalmente?</h2>
+            <p>Agrega montos solo a los campos que quieras usar. Puedes editarlos despues.</p>
+            <div class="onboarding-categories">
+              ${suggestions
+                .map(
+                  ([name, cadence], index) => `
+                    <div class="onboarding-category-row">
+                      <input name="categoryName${index}" type="text" maxlength="32" value="${name}" aria-label="Nombre del campo ${index + 1}">
+                      <input name="categoryAmount${index}" type="number" min="0" step="1000" inputmode="numeric" placeholder="$0" aria-label="Monto para ${name}">
+                      <select name="categoryCadence${index}" aria-label="Frecuencia para ${name}">
+                        <option value="weekly" ${cadence === "weekly" ? "selected" : ""}>Semanal</option>
+                        <option value="biweekly">Quincenal</option>
+                        <option value="monthly" ${cadence === "monthly" ? "selected" : ""}>Mensual</option>
+                        <option value="period">Una vez</option>
+                      </select>
+                    </div>
+                  `
+                )
+                .join("")}
+            </div>
+          </section>
+
+          <p class="form-error onboarding-error" role="alert" aria-live="assertive"></p>
+          <div class="onboarding-actions">
+            <button class="btn ghost onboarding-back" type="button" data-onboarding-back hidden>Atras</button>
+            <button class="btn primary onboarding-next" type="button" data-onboarding-next>Continuar</button>
+            <button class="btn primary onboarding-finish" type="submit" hidden>Ver mi dinero libre</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
 function renderDiagnosisModal() {
+  if (!state.profile.completed) {
+    return renderOnboardingModal();
+  }
+
   const profile = state.profile;
   const liquidity = normalizeLiquidity(state.liquidity);
   const available = liquidity.initialized ? liquidity : { account: 0, cash: 0 };
@@ -1831,9 +2045,9 @@ function renderCategoryBars(plan, limit) {
         .map(
           (category) => `
             <div class="category-row">
-              <div>
+              <div class="category-top">
                 <strong>${escapeHtml(category.name)}</strong>
-                <span>${formatMoney(category.spent)} de ${formatMoney(category.budget)}</span>
+                <span class="category-numbers">${formatMoney(category.spent)} / ${formatMoney(category.budget)}</span>
               </div>
               <div class="bar ${category.band}">
                 <span style="width:${clamp(category.ratio, 0, 120)}%"></span>
@@ -1928,6 +2142,7 @@ function bindEvents() {
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
       activateView(button.dataset.view);
+      quickExpenseOpen = false;
       saveState();
       render();
     });
@@ -1935,6 +2150,18 @@ function bindEvents() {
 
   document.querySelectorAll("[data-action]").forEach((button) => {
     button.addEventListener("click", handleAction);
+  });
+
+  document.querySelectorAll("[data-choice-value]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const group = button.closest("[data-choice-group]");
+      const input = group?.querySelector(`input[name="${button.dataset.choiceName}"]`);
+      if (!group || !input) {
+        return;
+      }
+      input.value = button.dataset.choiceValue;
+      group.querySelectorAll("[data-choice-value]").forEach((choice) => choice.classList.toggle("is-active", choice === button));
+    });
   });
 
   document.querySelectorAll("[data-transaction-category]").forEach((select) => {
@@ -1953,6 +2180,12 @@ function bindEvents() {
       render();
     });
   });
+
+  const onboardingForm = document.querySelector("#onboarding-form");
+  if (onboardingForm) {
+    bindOnboardingFlow(onboardingForm);
+    onboardingForm.addEventListener("submit", handleOnboardingSubmit);
+  }
 
   const diagnosisForm = document.querySelector("#diagnosis-form");
   if (diagnosisForm) {
@@ -2008,6 +2241,147 @@ function bindEvents() {
   if (importFile) {
     importFile.addEventListener("change", handleImport);
   }
+}
+
+function bindOnboardingFlow(form) {
+  const modal = form.closest("[data-onboarding-step]");
+  const error = form.querySelector(".onboarding-error");
+  const nextButton = form.querySelector("[data-onboarding-next]");
+  const backButton = form.querySelector("[data-onboarding-back]");
+  const finishButton = form.querySelector(".onboarding-finish");
+  const balanceHint = form.querySelector("[data-onboarding-balance]");
+
+  const updateBalanceHint = () => {
+    const data = new FormData(form);
+    const budget = numberFrom(data.get("incomeAmount"));
+    const total = numberFrom(data.get("account")) + numberFrom(data.get("cash"));
+    const matches = budget > 0 && total === budget;
+    balanceHint.textContent = matches
+      ? `Cuenta + efectivo coincide con ${formatMoney(budget)}.`
+      : `Cuenta + efectivo suma ${formatMoney(total)} de ${formatMoney(budget)}.`;
+    balanceHint.classList.toggle("is-ok", matches);
+    balanceHint.classList.toggle("is-error", !matches);
+  };
+
+  const showStep = (step) => {
+    modal.dataset.onboardingStep = String(step);
+    form.querySelectorAll("[data-step]").forEach((section) => section.classList.toggle("is-active", Number(section.dataset.step) === step));
+    modal.querySelectorAll(".onboarding-progress span").forEach((dot, index) => dot.classList.toggle("is-active", index < step));
+    backButton.hidden = step === 1;
+    nextButton.hidden = step === 3;
+    finishButton.hidden = step !== 3;
+    error.textContent = "";
+    if (step === 2) {
+      updateBalanceHint();
+    }
+  };
+
+  nextButton.addEventListener("click", () => {
+    const step = Number(modal.dataset.onboardingStep || 1);
+    const message = validateOnboardingStep(form, step);
+    if (message) {
+      error.textContent = message;
+      return;
+    }
+    showStep(Math.min(3, step + 1));
+  });
+
+  backButton.addEventListener("click", () => {
+    const step = Number(modal.dataset.onboardingStep || 1);
+    showStep(Math.max(1, step - 1));
+  });
+
+  ["incomeAmount", "account", "cash"].forEach((name) => {
+    form.elements.namedItem(name)?.addEventListener("input", updateBalanceHint);
+  });
+}
+
+function validateOnboardingStep(form, step) {
+  const data = new FormData(form);
+  if (step === 1 && numberFrom(data.get("incomeAmount")) <= 0) {
+    return "Escribe un presupuesto mayor que cero.";
+  }
+  if (step === 2) {
+    const budget = numberFrom(data.get("incomeAmount"));
+    const total = numberFrom(data.get("account")) + numberFrom(data.get("cash"));
+    if (total !== budget) {
+      return `Cuenta + efectivo debe sumar ${formatMoney(budget)}.`;
+    }
+  }
+  return "";
+}
+
+function handleOnboardingSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const error = form.querySelector(".onboarding-error");
+  const stepOneError = validateOnboardingStep(form, 1);
+  const stepTwoError = validateOnboardingStep(form, 2);
+  if (stepOneError || stepTwoError) {
+    error.textContent = stepOneError || stepTwoError;
+    return;
+  }
+
+  const data = new FormData(form);
+  const incomeCadence = ["weekly", "biweekly", "monthly", "semester", "yearly"].includes(data.get("incomeCadence"))
+    ? data.get("incomeCadence")
+    : "monthly";
+  const incomeAmount = numberFrom(data.get("incomeAmount"));
+  const periodStart = cleanDate(data.get("periodStart"), monthStartKey());
+  const now = new Date().toISOString();
+  const profileDraft = {
+    ...state.profile,
+    completed: true,
+    name: "Mi plan",
+    incomeCadence,
+    incomeAmount,
+    periodStart,
+    semesterStart: periodStart,
+    monthlyIncome: getMonthlyIncome({ ...state.profile, incomeCadence, incomeAmount }),
+    committedExpenses: 0,
+    updated_at: now
+  };
+  const jobs = onboardingCategories(data, profileDraft, now);
+  const reserved = jobs.reduce((sum, job) => sum + getBudgetAmountForJob(job, profileDraft), 0);
+  if (reserved > incomeAmount) {
+    error.textContent = `Los campos separan ${formatMoney(reserved)}, mas que tu presupuesto de ${formatMoney(incomeAmount)}.`;
+    return;
+  }
+
+  state.profile = profileDraft;
+  state.liquidity = {
+    account: numberFrom(data.get("account")),
+    cash: numberFrom(data.get("cash")),
+    initialized: true,
+    updated_at: now
+  };
+  state.budgetJobs = jobs;
+  state.wins.push({
+    id: uid("win"),
+    date: todayKey(),
+    text: "Creaste tu primer plan y viste cuanto puedes gastar."
+  });
+  state.lastAlert = "Plan listo. Registra tu primer gasto cuando ocurra.";
+  activateView(DEFAULT_VIEW);
+  saveState();
+  render();
+}
+
+function onboardingCategories(data, profile, updatedAt) {
+  return [0, 1, 2, 3]
+    .map((index) => ({
+      name: cleanText(data.get(`categoryName${index}`), ""),
+      amount: numberFrom(data.get(`categoryAmount${index}`)),
+      cadence: ["weekly", "biweekly", "monthly", "period"].includes(data.get(`categoryCadence${index}`))
+        ? data.get(`categoryCadence${index}`)
+        : "monthly"
+    }))
+    .filter((job) => job.name && job.amount > 0)
+    .map((job) => ({
+      ...job,
+      id: uniqueCategoryId(job.name),
+      updated_at: updatedAt
+    }));
 }
 
 function bindDiagnosisPreview(form) {
@@ -2090,10 +2464,22 @@ function handleAction(event) {
 
   const actions = {
     "go-spending": () => {
-      activateView(DEFAULT_VIEW);
+      quickExpenseOpen = true;
+      menuOpen = false;
     },
     "toggle-menu": () => {
       menuOpen = !menuOpen;
+      quickExpenseOpen = false;
+    },
+    "close-menu": () => {
+      menuOpen = false;
+    },
+    "open-expense": () => {
+      quickExpenseOpen = true;
+      menuOpen = false;
+    },
+    "close-expense": () => {
+      quickExpenseOpen = false;
     },
     "open-diagnosis": () => {
       diagnosisValidation = { field: "", message: "" };
@@ -2552,6 +2938,7 @@ function handleTransactionSubmit(event) {
     showUndoSnackbar(transaction.id);
   }
 
+  quickExpenseOpen = false;
   saveState();
   render();
 }
@@ -3104,7 +3491,7 @@ function categoryStatus() {
       budget: summary.freeBudget,
       spent: summary.freeSpent,
       ratio: freeRatio,
-      band: freeRatio >= 95 ? "danger" : freeRatio >= 75 ? "warning" : "good"
+      band: freeRatio > 90 ? "danger" : freeRatio > 65 ? "warning" : "good"
     }
   ];
 }
@@ -3416,6 +3803,11 @@ function cleanText(value, fallback) {
 
 function cleanDate(value, fallback) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) ? String(value) : fallback;
+}
+
+function capitalize(value) {
+  const text = String(value || "");
+  return text ? `${text.charAt(0).toUpperCase()}${text.slice(1)}` : "";
 }
 
 function uid(prefix) {

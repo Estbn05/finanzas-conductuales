@@ -190,7 +190,7 @@ export function categoryStatus(state, today) {
       budget,
       spent: used,
       ratio,
-      band: ratio >= 95 ? "danger" : ratio >= 75 ? "warning" : "good"
+      band: ratio > 90 ? "danger" : ratio > 65 ? "warning" : "good"
     };
   });
 }

@@ -14,11 +14,13 @@ Aplicacion personal de finanzas basada en economia conductual. El objetivo no es
 ## Funcionalidades principales
 
 - **Mis datos:** ingreso, gastos comprometidos, ahorro disponible, deuda, ansiedad financiera, confianza y patrones de dinero.
-- **Registrar como pantalla principal:** la app abre en el registro de gastos para que el habito diario sea inmediato.
-- **Menu vertical desplegable:** guarda Plan, Deudas, Ahorro, Inicio, Datos, nube y avisos sin ocupar la pantalla principal.
-- **Barra de dinero disponible:** muestra lo libre del periodo actual y no tapa el contenido.
+- **Inicio minimo y accionable:** la app abre mostrando el dinero libre, cuenta/efectivo y las barras de categorias, sin historial ni graficas que distraigan.
+- **Registro inmediato con FAB:** el boton flotante abre un panel rapido con categoria, origen y monto para guardar un gasto en pocos segundos.
+- **Drawer + navegacion inferior:** Inicio, Registrar y Plan quedan siempre a un toque; Ahorro, Deudas, Datos y nube viven en el menu lateral.
+- **Jerarquia de dinero clara:** el libre del periodo es el numero protagonista; cuenta, efectivo y total real aparecen como datos secundarios.
 - **Cuenta y efectivo:** separa el disponible entre dinero en cuenta y dinero fisico sin perder el total.
-- **Registro primero:** el formulario para guardar un gasto aparece antes de los resumenes por categoria.
+- **Onboarding en tres pasos:** presupuesto y frecuencia, cuenta/efectivo y campos habituales; no exige crear cuenta antes de mostrar valor.
+- **Tema automatico:** adapta la interfaz clara u oscura segun el sistema.
 - **Correccion de errores:** los gastos registrados se pueden eliminar desde el historial o deshacer directamente desde su categoria.
 - **Dinero extra:** permite sumar regalos, bonos o ayudas al presupuesto del periodo sin cambiar el presupuesto base recurrente.
 - **Sobres por periodo:** el presupuesto puede ser semanal, quincenal, mensual, semestral o anual; cada campo semanal, quincenal, mensual, semestral, anual o por periodo reserva automaticamente su parte.

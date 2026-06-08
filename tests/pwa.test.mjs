@@ -17,7 +17,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
 test("service worker caches the app shell needed for offline launch", async () => {
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
-  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v36"/);
+  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v37"/);
   assert.ok(worker.includes('"./index.html"'));
   assert.ok(worker.includes('"./app.js"'));
   assert.ok(worker.includes('"./finance-core.js"'));
@@ -26,30 +26,61 @@ test("service worker caches the app shell needed for offline launch", async () =
   assert.ok(worker.includes('"./assets/icon-512.png"'));
 });
 
-test("navigation opens on expense registration with a vertical collapsible menu", async () => {
+test("mobile-first shell prioritizes free money and fast expense registration", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
 
-  assert.match(app, /const DEFAULT_VIEW = "spending"/);
-  assert.ok(app.indexOf('id: "spending", label: "Registrar gasto"') < app.indexOf('id: "today", label: "Inicio"'));
-  assert.ok(app.includes('data-action="toggle-menu"'));
-  assert.ok(app.includes('class="money-bar '));
-  assert.ok(app.includes('class="menu-tools"'));
-  const spendingView = app.slice(app.indexOf("function renderSpending"), app.indexOf("function renderLiquidityCard"));
-  assert.ok(spendingView.indexOf("<h2>Registrar gasto</h2>") < spendingView.indexOf("<h2>Lo que va usado</h2>"));
-  assert.equal(spendingView.includes("<h2>Movimientos del periodo</h2>"), false);
-  assert.equal(spendingView.includes("<h2>Reservar del periodo</h2>"), false);
-  assert.equal(spendingView.includes("<h2>Sumar al presupuesto</h2>"), false);
-  assert.ok(app.includes('id="extra-budget-form"'));
-  assert.ok(app.includes('id="extra-allocation-form"'));
-  assert.ok(app.includes('id="liquidity-form"'));
-  assert.ok(app.includes("Cuenta + efectivo"));
-  assert.ok(app.includes("Pagado con"));
-  assert.ok(app.includes('name="description"'));
-  assert.ok(app.includes("Descripcion opcional"));
-  assert.ok(app.includes("description: cleanText"));
-  assert.ok(app.includes("Gasto registrado. ¿Deshacer?"));
-  assert.ok(app.includes("setTimeout(() =>"));
+  assert.match(app, /const DEFAULT_VIEW = "today"/);
+  assert.ok(app.includes('class="expense-fab"'));
+  assert.ok(app.includes('class="bottom-nav"'));
+  assert.ok(app.includes('class="drawer-scrim"'));
+  assert.ok(app.includes('data-action="open-expense"'));
+  assert.ok(app.includes('data-action="close-expense"'));
+  assert.ok(app.includes('class="quick-expense-panel"'));
+  assert.ok(app.includes('id="transaction-form"'));
+  assert.ok(app.includes('data-choice-value="${escapeAttr(option.value)}"'));
+  assert.ok(app.includes("money-location-chips"));
+  assert.ok(app.includes("Cuenta"));
+  assert.ok(app.includes("Efectivo"));
+  assert.ok(app.includes("Total real"));
+
+  const todayView = app
+    .slice(app.indexOf("function renderToday"), app.indexOf("function renderTransactionLabeler"))
+    .split("const today = todayKey();")[0];
+  assert.ok(todayView.includes("Categorias del periodo"));
+  assert.equal(todayView.includes("Movimientos del periodo"), false);
+  assert.equal(todayView.includes("Fondo inicial"), false);
+  assert.equal(todayView.includes("Pago recomendado"), false);
+
+  assert.ok(styles.includes(".expense-fab"));
+  assert.ok(styles.includes(".bottom-nav"));
+  assert.ok(styles.includes(".quick-expense-panel"));
+  assert.ok(styles.includes(".money-location-chips"));
+  assert.match(styles, /\.money-bar strong\s*{[\s\S]*font-size: 2\.38rem/);
+  assert.match(styles, /\.bar\s*{[\s\S]*height: 4px/);
+  assert.ok(styles.includes("@media (prefers-color-scheme: dark)"));
+});
+
+test("new users get a three-step onboarding without account registration", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+
+  assert.ok(app.includes('id="onboarding-form"'));
+  assert.ok(app.includes("Paso 1 de 3"));
+  assert.ok(app.includes("Paso 2 de 3"));
+  assert.ok(app.includes("Paso 3 de 3"));
+  assert.ok(app.includes("¿Cuanto recibes y cada cuanto?"));
+  assert.ok(app.includes("¿Donde tienes ese dinero?"));
+  assert.ok(app.includes("¿Para que separas plata normalmente?"));
+  assert.ok(app.includes("Cuenta + efectivo debe sumar"));
+  assert.ok(app.includes("handleOnboardingSubmit"));
+  assert.ok(app.includes("onboardingCategories"));
+});
+
+test("behavioral finance, cloud sync, undo and backup features remain available", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+
+  assert.ok(app.includes("Gasto registrado."));
+  assert.ok(app.includes("Deshacer?"));
   assert.ok(app.includes('"undo-snackbar"'));
   assert.ok(app.includes("savingsPercent"));
   assert.ok(app.includes("finanzas-${todayKey()}.json"));
@@ -57,81 +88,16 @@ test("navigation opens on expense registration with a vertical collapsible menu"
   assert.ok(app.includes("stateUpdatedTime"));
   assert.ok(app.includes("cloudRecordUpdatedTime"));
   assert.ok(app.includes("hasMeaningfulLocalData"));
-  assert.ok(app.includes("remoteHasData"));
   assert.ok(app.includes("BACKUP_KEY"));
   assert.ok(app.includes("saveLocalBackup"));
   assert.ok(app.includes('"restore-latest-backup"'));
   assert.ok(app.includes("Nube</strong> pendiente"));
   assert.ok(app.includes("liquiditySummary"));
   assert.ok(app.includes("adjustLiquidity"));
-  assert.ok(app.includes('id="diagnosis-form" class="diagnosis-form" novalidate'));
-  assert.ok(app.includes('<button class="btn primary" type="button" data-diagnosis-save>Guardar plan</button>'));
-  assert.ok(app.includes("validateDiagnosisForm"));
-  assert.ok(app.includes("submitDiagnosisForm"));
-  assert.ok(app.includes("showDiagnosisValidation"));
-  assert.ok(app.includes("window.alert(validation.message)"));
-  assert.ok(app.includes("showNoticeSnackbar(validation.message"));
-  assert.ok(app.includes("Cuenta + fisico debe sumar el presupuesto del periodo"));
-  assert.ok(app.includes("data-liquidity-match-hint"));
-  assert.ok(app.includes("summary.freeRemaining"));
-  assert.ok(app.includes("Apartado sin gastar"));
-  assert.ok(app.includes("summary.totalSpent"));
-  assert.ok(app.includes("summary.categoryOverspent"));
-  assert.ok(app.includes("summary.freeImpactSpent"));
-  assert.ok(app.includes("Real: Cuenta"));
-  const headerView = app.slice(app.indexOf("function renderHeader"), app.indexOf("function periodExtraSourceLabel"));
-  assert.equal(headerView.includes("Gastos registrados:"), false);
-  assert.equal(headerView.includes("Apartado sin gastar:"), false);
-  assert.equal(app.includes("freeLiquiditySummary"), false);
-  assert.ok(app.includes("Total incluye extra"));
-  assert.ok(app.includes("periodExtraSourceLabel"));
-  assert.ok(app.includes("clearCurrentPeriodExtras"));
-  assert.ok(app.includes("Quitar extra del periodo"));
-  assert.ok(app.includes("liquidityDrift"));
-  assert.ok(app.includes("expectedLiquidityTotal"));
-  assert.ok(app.includes("reconcileLiquidity"));
-  assert.ok(app.includes("Ajustar saldo real"));
-  assert.ok(app.includes("shouldRequireOpeningBalanceMatch"));
-  assert.ok(app.includes("Saldo real actual"));
-  assert.ok(app.includes('value="${FREE_CATEGORY_ID}"'));
   assert.ok(app.includes("validateTransactionDraft"));
-  assert.ok(app.includes("solo tiene"));
-  assert.ok(app.includes("focusDiagnosisField"));
-  assert.ok(app.includes("diagnosisValidation"));
-  assert.ok(app.includes('name="account" type="number"'));
-  assert.ok(app.includes('name="cash" type="number"'));
-  assert.ok(app.includes("Dinero en cuenta"));
-  assert.ok(app.includes("Dinero en fisico"));
-  assert.ok(app.includes("modal.scrollTo"));
-  assert.ok(app.includes('role="${snackbar.kind === "error" ? "alert" : "status"}"'));
-  assert.ok(styles.includes(".snackbar.error"));
-  assert.ok(styles.includes(".balance-hint.is-error"));
-  assert.equal(app.includes("${renderStudentContextPanel()}"), false);
+  assert.ok(app.includes("remove-transaction"));
+  assert.ok(app.includes("clearCurrentPeriodExtras"));
+  assert.ok(app.includes("reconcileLiquidity"));
+  assert.ok(app.includes("renderTransactionHistory"));
   assert.ok(!app.includes("state.transactions = []"));
-  assert.ok(app.includes('name="payday" type="number" min="0" max="28"'));
-  assert.ok(app.includes("Usa 0 si no tienes un dia fijo."));
-  assert.ok(app.includes("budgetJobs: []"));
-  assert.ok(app.includes('data-action="remove-transaction"'));
-  assert.equal(app.includes("Deshacer ultimo"), false);
-  assert.equal(app.includes("lastTransactionForCategory"), false);
-  assert.ok(app.includes("transactionsForSummary"));
-  assert.ok(app.includes("shouldClearTemplateBudgetOnPlanSave"));
-  assert.ok(app.includes("Quite los campos de plantilla"));
-  assert.ok(app.includes('budgetPreset: "student"'));
-  assert.ok(app.includes('name="cadence"'));
-  assert.ok(app.includes("Libre / sin clasificar"));
-  assert.ok(!app.includes("const TODAY"));
-  assert.ok(app.includes("getCategoryStatus(state, todayKey())"));
-  assert.ok(!app.includes("<h1>${headerTitle()}</h1>"));
-  assert.ok(!app.includes("<strong>${streak}</strong>"));
-  assert.match(styles, /\.menu-toggle\s*{[\s\S]*display: none/);
-  assert.match(styles, /\.nav-panel\s*{[\s\S]*max-height: none/);
-  assert.match(styles, /@media \(max-width: 1100px\)\s*{[\s\S]*\.menu-toggle\s*{[\s\S]*display: inline-flex/);
-  assert.match(styles, /@media \(max-width: 1100px\)\s*{[\s\S]*\.nav-panel\s*{[\s\S]*max-height: 0/);
-  assert.match(styles, /\.nav-panel\.is-open\s*{[\s\S]*max-height: min\(70vh, 620px\)/);
-  assert.match(styles, /\.nav-list\s*{[\s\S]*grid-template-columns: 1fr/);
-  assert.match(styles, /\.spending-grid\s*{[\s\S]*grid-template-columns: repeat\(2, minmax\(320px, 1fr\)\)/);
-  assert.match(styles, /\.category-row\s*{[\s\S]*grid-template-columns: minmax\(0, 1fr\)/);
-  assert.match(styles, /\.sidebar-meter\s*{[\s\S]*display: none/);
-  assert.match(styles, /@media \(min-width: 1101px\) and \(min-height: 760px\)\s*{[\s\S]*\.sidebar-meter\s*{[\s\S]*display: grid/);
 });
