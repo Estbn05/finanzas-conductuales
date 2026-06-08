@@ -2106,29 +2106,45 @@ body {
 
 .onboarding-form input,
 .onboarding-form select {
+  -webkit-appearance: none;
+  appearance: none;
   width: 100%;
   min-height: 46px;
-  border: 1px solid var(--line);
+  border: 1px solid #cfdad3 !important;
   border-radius: 10px;
   padding: 10px 12px;
-  color: var(--ink);
-  background: var(--panel);
+  color: #101614 !important;
+  background-color: #ffffff !important;
   font-size: 1rem;
   font-weight: 750;
   caret-color: var(--teal);
+  color-scheme: light;
+  forced-color-adjust: none;
   opacity: 1;
-  -webkit-text-fill-color: var(--ink);
+  -webkit-text-fill-color: #101614 !important;
 }
 
 .onboarding-form input::placeholder {
-  color: var(--muted);
+  color: #68726d !important;
   opacity: 0.78;
-  -webkit-text-fill-color: var(--muted);
+  -webkit-text-fill-color: #68726d !important;
+}
+
+.onboarding-form select {
+  padding-right: 38px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #68726d 50%),
+    linear-gradient(135deg, #68726d 50%, transparent 50%);
+  background-position:
+    calc(100% - 17px) 50%,
+    calc(100% - 12px) 50%;
+  background-repeat: no-repeat;
+  background-size: 5px 5px, 5px 5px;
 }
 
 .onboarding-form select option {
-  color: var(--ink);
-  background: var(--panel);
+  color: #101614 !important;
+  background-color: #ffffff !important;
 }
 
 .onboarding-balance-grid {
@@ -2243,5 +2259,30 @@ body {
   .drawer-scrim,
   .quick-expense-backdrop {
     background: rgba(0, 0, 0, 0.56);
+  }
+
+  .onboarding-form input,
+  .onboarding-form select {
+    border-color: rgba(255, 255, 255, 0.18) !important;
+    color: #e8f5ee !important;
+    background-color: #171c1a !important;
+    color-scheme: dark;
+    -webkit-text-fill-color: #e8f5ee !important;
+  }
+
+  .onboarding-form input::placeholder {
+    color: #8d9a94 !important;
+    -webkit-text-fill-color: #8d9a94 !important;
+  }
+
+  .onboarding-form select {
+    background-image:
+      linear-gradient(45deg, transparent 50%, #8d9a94 50%),
+      linear-gradient(135deg, #8d9a94 50%, transparent 50%);
+  }
+
+  .onboarding-form select option {
+    color: #e8f5ee !important;
+    background-color: #171c1a !important;
   }
 }
