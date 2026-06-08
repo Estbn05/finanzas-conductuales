@@ -2096,6 +2096,41 @@ body {
   color: var(--muted);
 }
 
+.onboarding-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.onboarding-form input,
+.onboarding-form select {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--ink);
+  background: var(--panel);
+  font-size: 1rem;
+  font-weight: 750;
+  caret-color: var(--teal);
+  opacity: 1;
+  -webkit-text-fill-color: var(--ink);
+}
+
+.onboarding-form input::placeholder {
+  color: var(--muted);
+  opacity: 0.78;
+  -webkit-text-fill-color: var(--muted);
+}
+
+.onboarding-form select option {
+  color: var(--ink);
+  background: var(--panel);
+}
+
 .onboarding-balance-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -17,7 +17,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
 test("service worker caches the app shell needed for offline launch", async () => {
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
-  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v37"/);
+  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v38"/);
   assert.ok(worker.includes('"./index.html"'));
   assert.ok(worker.includes('"./app.js"'));
   assert.ok(worker.includes('"./finance-core.js"'));
@@ -63,6 +63,7 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
 
 test("new users get a three-step onboarding without account registration", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
 
   assert.ok(app.includes('id="onboarding-form"'));
   assert.ok(app.includes("Paso 1 de 3"));
@@ -74,6 +75,8 @@ test("new users get a three-step onboarding without account registration", async
   assert.ok(app.includes("Cuenta + efectivo debe sumar"));
   assert.ok(app.includes("handleOnboardingSubmit"));
   assert.ok(app.includes("onboardingCategories"));
+  assert.match(styles, /\.onboarding-form input,[\s\S]*\.onboarding-form select\s*{[\s\S]*color: var\(--ink\)/);
+  assert.ok(styles.includes("-webkit-text-fill-color: var(--ink)"));
 });
 
 test("behavioral finance, cloud sync, undo and backup features remain available", async () => {
