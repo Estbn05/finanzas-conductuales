@@ -17,7 +17,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
 test("service worker caches the app shell needed for offline launch", async () => {
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
-  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v40"/);
+  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v42"/);
   assert.ok(worker.includes('"./index.html"'));
   assert.ok(worker.includes('"./app.js"'));
   assert.ok(worker.includes('"./finance-core.js"'));
@@ -91,6 +91,21 @@ test("money inputs format thousands while preserving numeric calculations", asyn
   assert.ok(app.includes("parseNumberText"));
   assert.ok(app.includes('new Intl.NumberFormat("es-CO"'));
   assert.ok(styles.includes('.quick-amount input[data-money-input="true"]'));
+});
+
+test("every form keeps readable controls in Android PWA themes", async () => {
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  assert.ok(styles.includes("--field-bg: #ffffff"));
+  assert.ok(styles.includes("--field-bg: #1d2421"));
+  assert.ok(styles.includes("--field-text: #101614"));
+  assert.ok(styles.includes("--field-text: #e8f5ee"));
+  assert.match(styles, /input:not\(\[type="checkbox"\]\)[\s\S]*select,[\s\S]*textarea\s*{/);
+  assert.ok(styles.includes("-webkit-text-fill-color: var(--field-text) !important"));
+  assert.ok(styles.includes('input[type="date"]::-webkit-datetime-edit'));
+  assert.ok(styles.includes("var(--field-arrow)"));
+  assert.ok(styles.includes("input:-webkit-autofill"));
+  assert.match(styles, /\.quick-amount input\[data-money-input="true"\]\s*{[\s\S]*background: transparent !important/);
 });
 
 test("behavioral finance, cloud sync, undo and backup features remain available", async () => {

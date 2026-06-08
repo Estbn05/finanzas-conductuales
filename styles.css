@@ -1515,6 +1515,11 @@ label {
   --coral: #b84a3a;
   --coral-2: #ffe4df;
   --shadow: 0 18px 42px rgba(16, 22, 20, 0.1);
+  --field-bg: #ffffff;
+  --field-text: #101614;
+  --field-placeholder: #68726d;
+  --field-arrow: #68726d;
+  --field-icon-filter: none;
 }
 
 html,
@@ -2246,6 +2251,11 @@ body {
     --line: rgba(255, 255, 255, 0.1);
     --teal-2: rgba(45, 155, 111, 0.18);
     --shadow: 0 18px 42px rgba(0, 0, 0, 0.22);
+    --field-bg: #1d2421;
+    --field-text: #e8f5ee;
+    --field-placeholder: #9aa8a1;
+    --field-arrow: #9aa8a1;
+    --field-icon-filter: invert(1) opacity(0.82);
   }
 
   .money-location-chips div,
@@ -2287,4 +2297,76 @@ body {
     color: #e8f5ee !important;
     background-color: #171c1a !important;
   }
+}
+
+/*
+ * Keep native form controls readable in every form and Android PWA theme.
+ * Some WebViews force a light control background while preserving dark-mode
+ * text, which otherwise produces white text on white fields.
+ */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]),
+select,
+textarea {
+  color: var(--field-text) !important;
+  background-color: var(--field-bg) !important;
+  caret-color: var(--teal);
+  opacity: 1;
+  -webkit-text-fill-color: var(--field-text) !important;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"])::placeholder,
+textarea::placeholder {
+  color: var(--field-placeholder) !important;
+  opacity: 1;
+  -webkit-text-fill-color: var(--field-placeholder) !important;
+}
+
+select option {
+  color: var(--field-text) !important;
+  background-color: var(--field-bg) !important;
+}
+
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 36px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--field-arrow) 50%),
+    linear-gradient(135deg, var(--field-arrow) 50%, transparent 50%) !important;
+  background-position:
+    calc(100% - 17px) 50%,
+    calc(100% - 12px) 50%;
+  background-repeat: no-repeat;
+  background-size: 5px 5px, 5px 5px;
+}
+
+input[type="date"]::-webkit-datetime-edit,
+input[type="date"]::-webkit-datetime-edit-fields-wrapper,
+input[type="date"]::-webkit-datetime-edit-text,
+input[type="date"]::-webkit-datetime-edit-day-field,
+input[type="date"]::-webkit-datetime-edit-month-field,
+input[type="date"]::-webkit-datetime-edit-year-field {
+  color: var(--field-text) !important;
+  -webkit-text-fill-color: var(--field-text) !important;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 0.82;
+  filter: var(--field-icon-filter);
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  color: var(--field-text) !important;
+  -webkit-box-shadow: 0 0 0 1000px var(--field-bg) inset;
+  -webkit-text-fill-color: var(--field-text) !important;
+}
+
+.quick-amount input[data-money-input="true"] {
+  color: var(--ink) !important;
+  background: transparent !important;
+  -webkit-text-fill-color: var(--ink) !important;
 }
