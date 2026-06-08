@@ -2139,6 +2139,8 @@ function renderProgress(value, label) {
 }
 
 function bindEvents() {
+  bindMoneyInputs();
+
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
       activateView(button.dataset.view);
@@ -3662,8 +3664,83 @@ function hashFromView(view) {
   return hashes[view] || view;
 }
 
+function bindMoneyInputs() {
+  document.querySelectorAll('input[type="number"][step="1000"], input[data-money-input="true"]').forEach((input) => {
+    input.dataset.moneyInput = "true";
+    input.inputMode = "numeric";
+    input.autocomplete = "off";
+    try {
+      input.type = "text";
+    } catch {
+      // Some older browsers do not allow changing input type after creation.
+    }
+    input.value = formatMoneyInputValue(input.value);
+    input.addEventListener("input", () => formatMoneyInput(input));
+  });
+}
+
+function formatMoneyInput(input) {
+  const cursor = input.selectionStart ?? input.value.length;
+  const digitCountBeforeCursor = input.value.slice(0, cursor).replace(/\D/g, "").length;
+  const formatted = formatMoneyInputValue(input.value);
+  input.value = formatted;
+  const nextCursor = positionAfterDigitCount(formatted, digitCountBeforeCursor);
+  try {
+    input.setSelectionRange(nextCursor, nextCursor);
+  } catch {
+    input.selectionStart = nextCursor;
+    input.selectionEnd = nextCursor;
+  }
+}
+
+function formatMoneyInputValue(value) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (!digits) {
+    return "";
+  }
+  return new Intl.NumberFormat("es-CO", {
+    maximumFractionDigits: 0
+  }).format(Number(digits));
+}
+
+function positionAfterDigitCount(value, digitCount) {
+  if (digitCount <= 0) {
+    return 0;
+  }
+
+  let seen = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    if (/\d/.test(value[index])) {
+      seen += 1;
+    }
+    if (seen >= digitCount) {
+      return index + 1;
+    }
+  }
+  return value.length;
+}
+
+function parseNumberText(value) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return Number.NaN;
+  }
+  const clean = text.replace(/\s/g, "").replace(/[^\d,.-]/g, "");
+  if (!clean || clean === "-" || clean === "." || clean === ",") {
+    return Number.NaN;
+  }
+  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(clean)) {
+    return Number(clean.replace(/\./g, "").replace(",", "."));
+  }
+  if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(clean)) {
+    return Number(clean.replace(/,/g, ""));
+  }
+  return Number(clean.replace(",", "."));
+}
+
 function numberFrom(value) {
-  return Math.max(0, Number(value) || 0);
+  const number = parseNumberText(value);
+  return Math.max(0, Number.isFinite(number) ? number : 0);
 }
 
 function numberValue(value) {
@@ -3671,7 +3748,7 @@ function numberValue(value) {
   if (!text) {
     return null;
   }
-  const number = Number(text);
+  const number = parseNumberText(text);
   return Number.isFinite(number) ? number : null;
 }
 

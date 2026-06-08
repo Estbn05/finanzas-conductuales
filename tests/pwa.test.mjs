@@ -17,7 +17,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
 test("service worker caches the app shell needed for offline launch", async () => {
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
-  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v39"/);
+  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v40"/);
   assert.ok(worker.includes('"./index.html"'));
   assert.ok(worker.includes('"./app.js"'));
   assert.ok(worker.includes('"./finance-core.js"'));
@@ -78,6 +78,19 @@ test("new users get a three-step onboarding without account registration", async
   assert.match(styles, /\.onboarding-form input,[\s\S]*\.onboarding-form select\s*{[\s\S]*-webkit-appearance: none/);
   assert.ok(styles.includes("-webkit-text-fill-color: #101614 !important"));
   assert.ok(styles.includes("-webkit-text-fill-color: #e8f5ee !important"));
+});
+
+test("money inputs format thousands while preserving numeric calculations", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  assert.ok(app.includes("bindMoneyInputs();"));
+  assert.ok(app.includes('input[type="number"][step="1000"], input[data-money-input="true"]'));
+  assert.ok(app.includes('input.dataset.moneyInput = "true"'));
+  assert.ok(app.includes("formatMoneyInputValue"));
+  assert.ok(app.includes("parseNumberText"));
+  assert.ok(app.includes('new Intl.NumberFormat("es-CO"'));
+  assert.ok(styles.includes('.quick-amount input[data-money-input="true"]'));
 });
 
 test("behavioral finance, cloud sync, undo and backup features remain available", async () => {

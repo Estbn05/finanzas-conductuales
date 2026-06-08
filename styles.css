@@ -1979,7 +1979,8 @@ body {
 }
 
 .quick-expense-form input[type="text"],
-.quick-expense-form input[type="number"] {
+.quick-expense-form input[type="number"],
+.quick-expense-form input[data-money-input="true"] {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -2018,7 +2019,7 @@ body {
   margin-top: 2px;
 }
 
-.quick-amount input[type="number"] {
+.quick-amount input[data-money-input="true"] {
   border-width: 0 0 1px;
   border-radius: 0;
   padding: 4px 0 8px;
@@ -2252,6 +2253,7 @@ body {
   .bottom-nav,
   .quick-expense-form input[type="text"],
   .quick-expense-form input[type="number"],
+  .quick-expense-form input[data-money-input="true"],
   .choice-pill {
     background: rgba(255, 255, 255, 0.05);
   }
