@@ -2161,18 +2161,50 @@ body {
 
 .onboarding-categories {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .onboarding-category-row {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(100px, 0.72fr) minmax(105px, 0.7fr);
   gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(45, 155, 111, 0.04);
+}
+
+.onboarding-category-row.is-removable {
+  padding-right: 52px;
 }
 
 .onboarding-category-row input,
 .onboarding-category-row select {
   min-width: 0;
+}
+
+.onboarding-category-remove {
+  position: absolute;
+  top: 16px;
+  right: 10px;
+}
+
+.onboarding-add-category {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.onboarding-category-add {
+  color: #fff;
+  background: var(--teal);
+  font-size: 1.35rem;
+  line-height: 1;
 }
 
 .onboarding-error:empty {
@@ -2271,6 +2303,12 @@ body {
   .drawer-scrim,
   .quick-expense-backdrop {
     background: rgba(0, 0, 0, 0.56);
+  }
+
+  .btn.ghost {
+    border-color: rgba(255, 255, 255, 0.16);
+    color: #e8f5ee;
+    background: rgba(255, 255, 255, 0.06);
   }
 
   .onboarding-form input,

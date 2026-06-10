@@ -1796,12 +1796,6 @@ function renderIncomeCadenceOptions(selected) {
 function renderOnboardingModal() {
   const profile = state.profile;
   const liquidity = normalizeLiquidity(state.liquidity);
-  const suggestions = [
-    ["Transporte", "weekly"],
-    ["Comida", "monthly"],
-    ["Ahorro", "monthly"],
-    ["Salidas", "monthly"]
-  ];
 
   return `
     <div class="modal-backdrop onboarding-backdrop" role="presentation">
@@ -1849,22 +1843,11 @@ function renderOnboardingModal() {
             <h2>¿Para que separas plata normalmente?</h2>
             <p>Agrega montos solo a los campos que quieras usar. Puedes editarlos despues.</p>
             <div class="onboarding-categories">
-              ${suggestions
-                .map(
-                  ([name, cadence], index) => `
-                    <div class="onboarding-category-row">
-                      <input name="categoryName${index}" type="text" maxlength="32" value="${name}" aria-label="Nombre del campo ${index + 1}">
-                      <input name="categoryAmount${index}" type="number" min="0" step="1000" inputmode="numeric" placeholder="$0" aria-label="Monto para ${name}">
-                      <select name="categoryCadence${index}" aria-label="Frecuencia para ${name}">
-                        <option value="weekly" ${cadence === "weekly" ? "selected" : ""}>Semanal</option>
-                        <option value="biweekly">Quincenal</option>
-                        <option value="monthly" ${cadence === "monthly" ? "selected" : ""}>Mensual</option>
-                        <option value="period">Una vez</option>
-                      </select>
-                    </div>
-                  `
-                )
-                .join("")}
+              ${renderOnboardingCategoryRow(0, { example: true })}
+            </div>
+            <div class="onboarding-add-category">
+              <span>Añadir otro campo</span>
+              <button class="icon-btn onboarding-category-add" type="button" data-add-onboarding-category aria-label="Añadir otro campo" title="Añadir otro campo">+</button>
             </div>
           </section>
 
@@ -1876,6 +1859,26 @@ function renderOnboardingModal() {
           </div>
         </form>
       </section>
+    </div>
+  `;
+}
+
+function renderOnboardingCategoryRow(index, options = {}) {
+  const { example = false, removable = false } = options;
+  const namePlaceholder = example ? "Ej. Gasolina" : "Ej. Comida";
+  const amountPlaceholder = example ? "Ej. $30.000" : "Ej. $50.000";
+
+  return `
+    <div class="onboarding-category-row ${removable ? "is-removable" : ""}" data-onboarding-category-row data-category-index="${index}">
+      <input name="categoryName${index}" type="text" maxlength="32" placeholder="${namePlaceholder}" aria-label="Nombre del campo ${index + 1}">
+      <input name="categoryAmount${index}" type="number" min="0" step="1000" inputmode="numeric" placeholder="${amountPlaceholder}" aria-label="Monto del campo ${index + 1}">
+      <select name="categoryCadence${index}" aria-label="Frecuencia del campo ${index + 1}">
+        <option value="weekly">Semanal</option>
+        <option value="biweekly">Quincenal</option>
+        <option value="monthly">Mensual</option>
+        <option value="period">Una vez</option>
+      </select>
+      ${removable ? `<button class="icon-btn muted onboarding-category-remove" type="button" data-remove-onboarding-category aria-label="Quitar este campo" title="Quitar este campo">x</button>` : ""}
     </div>
   `;
 }
@@ -2259,6 +2262,8 @@ function bindOnboardingFlow(form) {
   const backButton = form.querySelector("[data-onboarding-back]");
   const finishButton = form.querySelector(".onboarding-finish");
   const balanceHint = form.querySelector("[data-onboarding-balance]");
+  const categoryList = form.querySelector(".onboarding-categories");
+  const addCategoryButton = form.querySelector("[data-add-onboarding-category]");
 
   const updateBalanceHint = () => {
     const data = new FormData(form);
@@ -2303,6 +2308,41 @@ function bindOnboardingFlow(form) {
   ["incomeAmount", "account", "cash"].forEach((name) => {
     form.elements.namedItem(name)?.addEventListener("input", updateBalanceHint);
   });
+
+  const updateCategoryControls = () => {
+    const rowCount = categoryList?.querySelectorAll("[data-onboarding-category-row]").length || 0;
+    if (addCategoryButton) {
+      addCategoryButton.disabled = rowCount >= 10;
+      addCategoryButton.title = rowCount >= 10 ? "Máximo 10 campos" : "Añadir otro campo";
+    }
+  };
+
+  addCategoryButton?.addEventListener("click", () => {
+    if (!categoryList) {
+      return;
+    }
+    const indexes = [...categoryList.querySelectorAll("[data-category-index]")].map((row) => Number(row.dataset.categoryIndex) || 0);
+    const nextIndex = Math.max(...indexes, -1) + 1;
+    if (indexes.length >= 10) {
+      return;
+    }
+    categoryList.insertAdjacentHTML("beforeend", renderOnboardingCategoryRow(nextIndex, { removable: true }));
+    const row = categoryList.querySelector(`[data-category-index="${nextIndex}"]`);
+    bindMoneyInputs(row);
+    row?.querySelector(`input[name="categoryName${nextIndex}"]`)?.focus();
+    updateCategoryControls();
+  });
+
+  categoryList?.addEventListener("click", (event) => {
+    const removeButton = event.target.closest("[data-remove-onboarding-category]");
+    if (!removeButton) {
+      return;
+    }
+    removeButton.closest("[data-onboarding-category-row]")?.remove();
+    updateCategoryControls();
+  });
+
+  updateCategoryControls();
 }
 
 function validateOnboardingStep(form, step) {
@@ -2377,7 +2417,13 @@ function handleOnboardingSubmit(event) {
 }
 
 function onboardingCategories(data, profile, updatedAt) {
-  return [0, 1, 2, 3]
+  const indexes = [...data.keys()]
+    .filter((name) => /^categoryName\d+$/.test(name))
+    .map((name) => Number(name.replace("categoryName", "")))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+
+  return indexes
     .map((index) => ({
       name: cleanText(data.get(`categoryName${index}`), ""),
       amount: numberFrom(data.get(`categoryAmount${index}`)),
@@ -3682,8 +3728,12 @@ function hashFromView(view) {
   return hashes[view] || view;
 }
 
-function bindMoneyInputs() {
-  document.querySelectorAll('input[type="number"][step="1000"], input[data-money-input="true"]').forEach((input) => {
+function bindMoneyInputs(root = document) {
+  root?.querySelectorAll('input[type="number"][step="1000"], input[data-money-input="true"]').forEach((input) => {
+    if (input.dataset.moneyInputBound === "true") {
+      return;
+    }
+    input.dataset.moneyInputBound = "true";
     input.dataset.moneyInput = "true";
     input.inputMode = "numeric";
     input.autocomplete = "off";
