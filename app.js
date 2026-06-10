@@ -30,7 +30,7 @@ import {
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
 const DEFAULT_VIEW = "today";
-const QUICK_EXPENSE_HISTORY_STATE = "quick-expense";
+const QUICK_EXPENSE_HASH = "registrar-gasto";
 const STUDENT_SEMESTER_INCOME = 1_750_000;
 const STUDENT_SEMESTER_MONTHS = 6;
 const STUDENT_WEEKLY_GAS = 30_000;
@@ -54,7 +54,10 @@ const app = document.querySelector("#app");
 let state = loadState();
 state.activeView = viewFromHash(DEFAULT_VIEW);
 let menuOpen = false;
-let quickExpenseOpen = window.history.state?.overlay === QUICK_EXPENSE_HISTORY_STATE;
+let quickExpenseOpen = isQuickExpenseLocation();
+if (quickExpenseOpen) {
+  seedQuickExpenseBackEntry();
+}
 let applyingCloudState = false;
 let cloudSaveTimer;
 let authUnsubscribe = () => {};
@@ -74,15 +77,22 @@ let cloudState = {
 render();
 initializeCloudSync();
 window.addEventListener("hashchange", () => {
-  const nextView = viewFromHash(DEFAULT_VIEW);
+  const nextView = viewFromHash(state.activeView || DEFAULT_VIEW);
+  let shouldRender = false;
   if (nextView !== state.activeView) {
     state.activeView = nextView;
     menuOpen = false;
     saveState({ sync: false, touch: false });
+    shouldRender = true;
+  }
+  if (syncQuickExpenseWithLocation({ renderNow: false })) {
+    shouldRender = true;
+  }
+  if (shouldRender) {
     render();
   }
 });
-window.addEventListener("popstate", syncQuickExpenseWithHistory);
+window.addEventListener("popstate", syncQuickExpenseWithLocation);
 
 if ("serviceWorker" in navigator && window.location.protocol !== "file:") {
   navigator.serviceWorker.register("./service-worker.js").catch(() => {});
@@ -540,32 +550,40 @@ function renderCloudStatusChange() {
 function openQuickExpense() {
   quickExpenseOpen = true;
   menuOpen = false;
-  if (window.history.state?.overlay !== QUICK_EXPENSE_HISTORY_STATE) {
-    window.history.pushState(
-      {
-        ...(window.history.state || {}),
-        overlay: QUICK_EXPENSE_HISTORY_STATE
-      },
-      ""
-    );
+  if (!isQuickExpenseLocation()) {
+    window.location.hash = QUICK_EXPENSE_HASH;
   }
+}
+
+function seedQuickExpenseBackEntry() {
+  const historyState = window.history.state || {};
+  window.history.replaceState(historyState, "", `#${hashFromView(state.activeView || DEFAULT_VIEW)}`);
+  window.history.pushState(historyState, "", `#${QUICK_EXPENSE_HASH}`);
 }
 
 function closeQuickExpense() {
   quickExpenseOpen = false;
-  if (window.history.state?.overlay === QUICK_EXPENSE_HISTORY_STATE) {
+  if (isQuickExpenseLocation()) {
     window.history.back();
   }
 }
 
-function syncQuickExpenseWithHistory() {
-  const shouldBeOpen = window.history.state?.overlay === QUICK_EXPENSE_HISTORY_STATE;
+function isQuickExpenseLocation() {
+  return window.location.hash.replace("#", "") === QUICK_EXPENSE_HASH;
+}
+
+function syncQuickExpenseWithLocation(options = {}) {
+  const { renderNow = true } = options;
+  const shouldBeOpen = isQuickExpenseLocation();
   if (quickExpenseOpen === shouldBeOpen) {
-    return;
+    return false;
   }
   quickExpenseOpen = shouldBeOpen;
   menuOpen = false;
-  render();
+  if (renderNow) {
+    render();
+  }
+  return true;
 }
 
 function render() {

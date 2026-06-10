@@ -17,7 +17,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
 test("service worker caches the app shell needed for offline launch", async () => {
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
-  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v46"/);
+  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v47"/);
   assert.ok(worker.includes('"./index.html"'));
   assert.ok(worker.includes('"./app.js"'));
   assert.ok(worker.includes('"./finance-core.js"'));
@@ -115,12 +115,15 @@ test("opening an expense form does not trigger cloud sync or replace active form
 test("Android back navigation closes the quick expense form before leaving the app", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
 
-  assert.ok(app.includes('const QUICK_EXPENSE_HISTORY_STATE = "quick-expense"'));
-  assert.ok(app.includes('window.addEventListener("popstate", syncQuickExpenseWithHistory)'));
-  assert.ok(app.includes("window.history.pushState("));
+  assert.ok(app.includes('const QUICK_EXPENSE_HASH = "registrar-gasto"'));
+  assert.ok(app.includes('window.addEventListener("popstate", syncQuickExpenseWithLocation)'));
+  assert.ok(app.includes("window.location.hash = QUICK_EXPENSE_HASH"));
   assert.ok(app.includes("window.history.back();"));
   assert.ok(app.includes("function openQuickExpense()"));
   assert.ok(app.includes("function closeQuickExpense()"));
+  assert.ok(app.includes("function isQuickExpenseLocation()"));
+  assert.ok(app.includes("function seedQuickExpenseBackEntry()"));
+  assert.ok(app.includes("window.history.replaceState(historyState"));
   assert.equal(app.includes("required autofocus"), false);
 });
 
