@@ -26,6 +26,7 @@ const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
 const DEFAULT_VIEW = "today";
 const QUICK_EXPENSE_HASH = "registrar-gasto";
+const AUTH_STARTUP_TIMEOUT_MS = 5_000;
 const STUDENT_SEMESTER_INCOME = 1_750_000;
 const STUDENT_SEMESTER_MONTHS = 6;
 const STUDENT_WEEKLY_GAS = 30_000;
@@ -70,6 +71,7 @@ let cloudState = {
 };
 
 render();
+window.setTimeout(recoverAuthStartup, AUTH_STARTUP_TIMEOUT_MS);
 initializeCloudSync();
 window.addEventListener("hashchange", () => {
   const nextView = viewFromHash(state.activeView || DEFAULT_VIEW);
@@ -90,7 +92,7 @@ window.addEventListener("hashchange", () => {
 window.addEventListener("popstate", syncQuickExpenseWithLocation);
 
 if ("serviceWorker" in navigator && window.location.protocol !== "file:") {
-  navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+  navigator.serviceWorker.register("./service-worker.js").then((registration) => registration.update()).catch(() => {});
 }
 
 function createDefaultState() {
@@ -717,7 +719,13 @@ function renderAuthGate() {
         </div>
         ${
           checkingSession
-            ? `<p>Estamos cargando tu cuenta y tus datos antes de mostrar el formulario inicial.</p>`
+            ? `
+                <p>Estamos cargando tu cuenta y tus datos antes de mostrar el formulario inicial.</p>
+                <div class="auth-recovery-actions">
+                  <button class="btn primary" type="button" data-action="recover-auth">Continuar al acceso</button>
+                  <button class="btn ghost" type="button" data-action="reload-app">Recargar aplicacion</button>
+                </div>
+              `
             : unavailable
               ? `<p>La autenticacion no esta disponible. Revisa la configuracion de Supabase y vuelve a cargar la aplicacion.</p>`
               : `
@@ -2570,6 +2578,8 @@ function handleAction(event) {
     "open-diagnosis",
     "close-diagnosis",
     "cancel-extra-allocation",
+    "recover-auth",
+    "reload-app",
     "export-data"
   ]);
 
@@ -2593,6 +2603,8 @@ function handleAction(event) {
       diagnosisValidation = { field: "", message: "" };
       state.showDiagnosis = false;
     },
+    "recover-auth": recoverAuthStartup,
+    "reload-app": () => window.location.reload(),
     "complete-checkin": completeCheckin,
     "simulate-alert": simulateSpendingAlert,
     "add-process-win": addProcessWin,
@@ -2631,6 +2643,21 @@ function handleAction(event) {
       render();
     }
   }
+}
+
+function recoverAuthStartup() {
+  if (cloudState.sessionReady) {
+    return;
+  }
+  cloudState.sessionReady = true;
+  if (cloudState.signedIn) {
+    cloudState.status = "error";
+    cloudState.error = "La sincronizacion esta tardando. Puedes usar tus datos locales mientras vuelve la conexion.";
+  } else {
+    cloudState.status = "signed-out";
+    cloudState.error = "No pude comprobar una sesion guardada. Inicia sesion de nuevo.";
+  }
+  render();
 }
 
 function handleDiagnosisSubmit(event) {

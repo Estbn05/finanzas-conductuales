@@ -19,7 +19,15 @@
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
-    <div id="app" class="app-shell" aria-live="polite"></div>
+    <div id="app" class="app-shell" aria-live="polite">
+      <main class="startup-fallback">
+        <section class="startup-fallback-card">
+          <h1>Iniciando Finanzas Conductuales</h1>
+          <p>Si esta pantalla no cambia, recarga la aplicacion.</p>
+          <button class="btn primary" type="button" onclick="window.location.reload()">Recargar aplicacion</button>
+        </section>
+      </main>
+    </div>
     <noscript>
       Esta aplicacion necesita JavaScript para guardar tu diagnostico y mostrar el tablero.
     </noscript>

@@ -17,7 +17,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
 test("service worker caches the app shell needed for offline launch", async () => {
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
-  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v50"/);
+  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v51"/);
   assert.ok(worker.includes('"./index.html"'));
   assert.ok(worker.includes('"./app.js"'));
   assert.ok(worker.includes('"./finance-core.js"'));
@@ -97,6 +97,10 @@ test("authentication gates onboarding and signed-in users can close their sessio
 
   assert.ok(app.includes("function shouldShowAuthGate()"));
   assert.ok(app.includes("function renderAuthGate()"));
+  assert.ok(app.includes("AUTH_STARTUP_TIMEOUT_MS = 5_000"));
+  assert.ok(app.includes("function recoverAuthStartup()"));
+  assert.ok(app.includes('data-action="recover-auth">Continuar al acceso'));
+  assert.ok(app.includes('data-action="reload-app">Recargar aplicacion'));
   assert.ok(app.indexOf("if (shouldShowAuthGate())") < app.indexOf("const plan = calculatePlan();"));
   assert.ok(app.includes('data-cloud-mode="signup">Crear cuenta'));
   assert.ok(app.includes('data-cloud-mode="signin">Ya tengo cuenta: iniciar sesion'));
@@ -111,6 +115,16 @@ test("authentication gates onboarding and signed-in users can close their sessio
   assert.ok(syncClient.includes("Comprobar la sesion"));
   assert.ok(styles.includes(".auth-gate"));
   assert.ok(styles.includes(".auth-card"));
+  assert.ok(styles.includes(".auth-recovery-actions"));
+});
+
+test("static startup fallback remains usable if the app module cannot render", async () => {
+  const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  assert.ok(html.includes('class="startup-fallback"'));
+  assert.ok(html.includes('onclick="window.location.reload()"'));
+  assert.ok(styles.includes(".startup-fallback-card"));
 });
 
 test("money inputs format thousands while preserving numeric calculations", async () => {
