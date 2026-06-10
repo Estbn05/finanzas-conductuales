@@ -17,7 +17,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
 test("service worker caches the app shell needed for offline launch", async () => {
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
-  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v43"/);
+  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v44"/);
   assert.ok(worker.includes('"./index.html"'));
   assert.ok(worker.includes('"./app.js"'));
   assert.ok(worker.includes('"./finance-core.js"'));
@@ -91,6 +91,17 @@ test("money inputs format thousands while preserving numeric calculations", asyn
   assert.ok(app.includes("parseNumberText"));
   assert.ok(app.includes('new Intl.NumberFormat("es-CO"'));
   assert.ok(styles.includes('.quick-amount input[data-money-input="true"]'));
+});
+
+test("opening an expense form does not trigger cloud sync or replace active forms", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+
+  assert.ok(app.includes('const interfaceOnlyActions = new Set(['));
+  assert.ok(app.includes('"open-expense"'));
+  assert.ok(app.includes("!interfaceOnlyActions.has(action)"));
+  assert.ok(app.includes("function renderCloudStatusChange()"));
+  assert.ok(app.includes("quickExpenseOpen || state.showDiagnosis || pendingExtraAllocation"));
+  assert.ok(app.includes("saveState({ sync: false, touch: false });"));
 });
 
 test("every form keeps readable controls in Android PWA themes", async () => {

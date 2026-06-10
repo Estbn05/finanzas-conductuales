@@ -77,7 +77,7 @@ window.addEventListener("hashchange", () => {
   if (nextView !== state.activeView) {
     state.activeView = nextView;
     menuOpen = false;
-    saveState({ sync: false });
+    saveState({ sync: false, touch: false });
     render();
   }
 });
@@ -215,14 +215,14 @@ async function initializeCloudSync() {
   if (!cloudState.configured) {
     cloudState.status = "local";
     cloudState.error = "Configura Supabase para activar sincronizacion.";
-    render();
+    renderCloudStatusChange();
     return;
   }
 
   if (!cloudState.libraryLoaded) {
     cloudState.status = "local";
     cloudState.error = "No se pudo cargar la libreria de nube. La app sigue en modo local.";
-    render();
+    renderCloudStatusChange();
     return;
   }
 
@@ -235,7 +235,7 @@ async function initializeCloudSync() {
         pullCloudAfterLogin();
       } else {
         cloudState.status = "signed-out";
-        render();
+        renderCloudStatusChange();
       }
     });
 
@@ -243,12 +243,12 @@ async function initializeCloudSync() {
       await pullCloudAfterLogin();
     } else {
       cloudState.status = "signed-out";
-      render();
+      renderCloudStatusChange();
     }
   } catch (error) {
     cloudState.status = "error";
     cloudState.error = friendlyCloudError(error);
-    render();
+    renderCloudStatusChange();
   }
 }
 
@@ -271,7 +271,7 @@ async function pullCloudAfterLogin() {
 
   cloudState.status = "syncing";
   cloudState.error = "";
-  render();
+  renderCloudStatusChange();
 
   try {
     const remote = await loadCloudState();
@@ -286,7 +286,7 @@ async function pullCloudAfterLogin() {
         markCloudSynced(saved?.updated_at || new Date().toISOString());
         state.lastAlert = "La nube estaba vacia; conserve tus datos locales y los subi.";
         cloudState.status = "synced";
-        render();
+        renderCloudStatusChange();
         return;
       }
 
@@ -295,21 +295,21 @@ async function pullCloudAfterLogin() {
         markCloudSynced(saved?.updated_at || new Date().toISOString());
         state.lastAlert = "Tus cambios locales eran mas recientes y se subieron a la nube.";
         cloudState.status = "synced";
-        render();
+        renderCloudStatusChange();
         return;
       }
 
       if ((remoteTime > localTime && remoteHasData) || (!localHasData && remoteHasData)) {
         applyRemoteState(remote.app_state, remote.updated_at, "Nube sincronizada automaticamente.");
         cloudState.status = "synced";
-        render();
+        renderCloudStatusChange();
         return;
       }
 
       markCloudSynced(remote.updated_at || new Date().toISOString());
       cloudState.status = "synced";
       state.lastAlert = "Nube al dia.";
-      render();
+      renderCloudStatusChange();
       return;
     }
 
@@ -322,12 +322,12 @@ async function pullCloudAfterLogin() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     cloudState.status = "synced";
     state.lastAlert = "Primera copia subida a la nube.";
-    render();
+    renderCloudStatusChange();
   } catch (error) {
     applyingCloudState = false;
     cloudState.status = "error";
     cloudState.error = friendlyCloudError(error);
-    render();
+    renderCloudStatusChange();
   }
 }
 
@@ -347,7 +347,7 @@ async function pushCloudState() {
   }
 
   cloudState.status = "syncing";
-  render();
+  renderCloudStatusChange();
 
   try {
     const remote = await loadCloudState();
@@ -362,14 +362,14 @@ async function pushCloudState() {
         markCloudSynced(saved?.updated_at || new Date().toISOString());
         cloudState.status = "synced";
         cloudState.error = "";
-        render();
+        renderCloudStatusChange();
         return;
       }
 
       if ((remoteTime > localTime && remoteHasData) || (!localHasData && remoteHasData)) {
         applyRemoteState(remote.app_state, remote.updated_at, "La nube tenia cambios mas recientes. Descargue esa version.");
         cloudState.status = "synced";
-        render();
+        renderCloudStatusChange();
         return;
       }
 
@@ -377,7 +377,7 @@ async function pushCloudState() {
         markCloudSynced(remote.updated_at || new Date().toISOString());
         cloudState.status = "synced";
         cloudState.error = "";
-        render();
+        renderCloudStatusChange();
         return;
       }
     }
@@ -386,11 +386,11 @@ async function pushCloudState() {
     markCloudSynced(saved?.updated_at || new Date().toISOString());
     cloudState.status = "synced";
     cloudState.error = "";
-    render();
+    renderCloudStatusChange();
   } catch (error) {
     cloudState.status = "error";
     cloudState.error = friendlyCloudError(error);
-    render();
+    renderCloudStatusChange();
   }
 }
 
@@ -526,6 +526,13 @@ function friendlyCloudError(error) {
     return "No pude cargar Supabase. Revisa internet y recarga la pagina.";
   }
   return message;
+}
+
+function renderCloudStatusChange() {
+  if (quickExpenseOpen || state.showDiagnosis || pendingExtraAllocation) {
+    return;
+  }
+  render();
 }
 
 function render() {
@@ -2145,7 +2152,7 @@ function bindEvents() {
     button.addEventListener("click", () => {
       activateView(button.dataset.view);
       quickExpenseOpen = false;
-      saveState();
+      saveState({ sync: false, touch: false });
       render();
     });
   });
@@ -2463,6 +2470,17 @@ function handleAction(event) {
   event.preventDefault();
   const action = event.currentTarget.dataset.action;
   const id = event.currentTarget.dataset.id;
+  const interfaceOnlyActions = new Set([
+    "go-spending",
+    "toggle-menu",
+    "close-menu",
+    "open-expense",
+    "close-expense",
+    "open-diagnosis",
+    "close-diagnosis",
+    "cancel-extra-allocation",
+    "export-data"
+  ]);
 
   const actions = {
     "go-spending": () => {
@@ -2538,7 +2556,7 @@ function handleAction(event) {
   if (actions[action]) {
     actions[action]();
     const asyncCloudAction = ["push-cloud-now", "pull-cloud-now", "cloud-sign-out"].includes(action);
-    if (!asyncCloudAction && action !== "toggle-menu") {
+    if (!asyncCloudAction && !interfaceOnlyActions.has(action)) {
       saveState();
     }
     if (!asyncCloudAction) {
