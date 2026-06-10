@@ -1,16 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  EMERGENCY_BASELINE,
   budgetAmountForJob,
   budgetSummary,
   calculatePlan,
   categoryStatus,
   extraIncomeForPeriod,
-  isLargeUnbudgetedPurchase,
-  minimumDebtPayments,
-  shouldUseDebtExposureMode,
-  sortedDebts
+  getEmergencyTarget,
+  isLargeUnbudgetedPurchase
 } from "../finance-core.js";
 
 function makeState(overrides = {}) {
@@ -27,31 +24,23 @@ function makeState(overrides = {}) {
       },
       ...overrides.profile
     },
-    settings: {
-      emergencyAutoDefault: true,
-      ...overrides.settings
-    },
     budgetJobs: overrides.budgetJobs || [
       { id: "food", name: "Mercado", budget: 600_000 },
       { id: "transport", name: "Transporte", budget: 300_000 }
-    ],
-    debts: overrides.debts || [
-      { id: "card", name: "Tarjeta", balance: 1_200_000, minimum: 120_000 },
-      { id: "loan", name: "Prestamo", balance: 3_800_000, minimum: 260_000 }
     ],
     budgetExtras: overrides.budgetExtras || [],
     transactions: overrides.transactions || []
   };
 }
 
-test("fixed income with active debt follows the 1/3 allocation", () => {
+test("savings advisor recommends a feasible amount for the current period", () => {
   const plan = calculatePlan(makeState());
 
-  assert.equal(plan.debt, 2_000_000);
-  assert.equal(plan.savings, 2_000_000);
-  assert.equal(plan.expenses, 2_000_000);
-  assert.equal(plan.emergencyGap, EMERGENCY_BASELINE - 2_000_000);
-  assert.equal(plan.dayFiveSweep, 1_000_000);
+  assert.equal(plan.savingsRate, 20);
+  assert.equal(plan.idealPeriodSavings, 1_200_000);
+  assert.equal(plan.suggestedPeriodSavings, 1_200_000);
+  assert.equal(plan.freeAfterSuggestion, 3_900_000);
+  assert.equal(plan.emergencyTarget, 6_000_000);
 });
 
 test("variable high-volatility income increases precautionary savings", () => {
@@ -61,11 +50,13 @@ test("variable high-volatility income increases precautionary savings", () => {
         incomeType: "variable",
         volatility: "high"
       }
-    })
+    }),
+    "2026-06-10"
   );
 
-  assert.ok(plan.savings > 2_000_000);
-  assert.match(plan.incomeNote, /alpha 1\.32/);
+  assert.equal(plan.savingsRate, 35);
+  assert.equal(plan.idealPeriodSavings, 2_100_000);
+  assert.match(plan.incomeNote, /volatilidad high/);
 });
 
 test("semester scholarship income is normalized and protects weekly fixed costs", () => {
@@ -76,45 +67,52 @@ test("semester scholarship income is normalized and protects weekly fixed costs"
         semesterIncome: 1_750_000,
         semesterMonths: 6,
         monthlyIncome: 0,
+        incomeType: "variable",
         committedExpenses: 130_000
       },
-      debts: []
+      budgetJobs: []
     })
   );
 
   assert.equal(plan.income, 291_667);
   assert.ok(plan.expenses >= 130_000);
   assert.ok(plan.savings > 70_000);
-  assert.match(plan.incomeNote, /Ingreso semestral/);
+  assert.equal(plan.idealPeriodSavings, 437_500);
 });
 
-test("when debt is gone, the debt third is redirected to savings and expenses", () => {
+test("remaining money in savings fields reduces the additional recommendation", () => {
   const plan = calculatePlan(
     makeState({
-      debts: []
-    })
+      budgetJobs: [
+        { id: "food", name: "Mercado", amount: 600_000, cadence: "period" },
+        { id: "savings", name: "Ahorro", amount: 300_000, cadence: "period" }
+      ],
+      transactions: [{ date: "2026-06-01", amount: 100_000, category: "savings", labeled: true }]
+    }),
+    "2026-06-10"
   );
 
-  assert.equal(plan.debt, 0);
-  assert.ok(plan.savings > 2_000_000);
-  assert.ok(plan.expenses > 2_000_000);
+  assert.equal(plan.savingsReserved, 200_000);
+  assert.equal(plan.suggestedPeriodSavings, 1_000_000);
+  assert.equal(plan.projectedPeriodSavings, 1_200_000);
 });
 
-test("debt snowball orders accounts by smallest balance first", () => {
-  const debts = sortedDebts(
+test("advisor reports when the ideal amount does not fit the current budget", () => {
+  const plan = calculatePlan(
     makeState({
-      debts: [
-        { id: "large", name: "Large", balance: 4_000_000, minimum: 200_000 },
-        { id: "small", name: "Small", balance: 250_000, minimum: 50_000 },
-        { id: "closed", name: "Closed", balance: 0, minimum: 0 }
-      ]
+      profile: {
+        monthlyIncome: 1_000_000,
+        committedExpenses: 900_000,
+        emergencySavings: 0
+      },
+      budgetJobs: []
     })
   );
 
-  assert.deepEqual(
-    debts.map((debt) => debt.id),
-    ["small", "large"]
-  );
+  assert.equal(plan.idealPeriodSavings, 200_000);
+  assert.equal(plan.suggestedPeriodSavings, 100_000);
+  assert.equal(plan.savingsCapacityGap, 100_000);
+  assert.equal(getEmergencyTarget(makeState().profile), 6_000_000);
 });
 
 test("category status only counts labeled transactions in the current budget period", () => {
@@ -311,34 +309,7 @@ test("extra money increases only the current period budget", () => {
   assert.equal(summary.freeBudget, 1_050_000);
 });
 
-test("high anxiety or avoidance enables gradual debt exposure", () => {
-  assert.equal(shouldUseDebtExposureMode(makeState()), false);
-  assert.equal(
-    shouldUseDebtExposureMode(
-      makeState({
-        profile: {
-          financialAnxiety: 8
-        }
-      })
-    ),
-    true
-  );
-  assert.equal(
-    shouldUseDebtExposureMode(
-      makeState({
-        profile: {
-          moneyScripts: {
-            avoidance: 4
-          }
-        }
-      })
-    ),
-    true
-  );
-});
-
 test("large unbudgeted purchases use the 8 percent cooling-off threshold", () => {
   assert.equal(isLargeUnbudgetedPurchase(159_000, 2_000_000), false);
   assert.equal(isLargeUnbudgetedPurchase(160_000, 2_000_000), true);
-  assert.equal(minimumDebtPayments(makeState()), 380_000);
 });

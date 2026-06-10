@@ -1,4 +1,4 @@
-const CACHE_NAME = "finanzas-conductuales-v47";
+const CACHE_NAME = "finanzas-conductuales-v49";
 const CORE_ASSETS = [
   "./",
   "./index.html",
@@ -35,16 +35,30 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
   event.respondWith(
-    caches.match(event.request).then(
-      (cached) =>
-        cached ||
-        fetch(event.request).catch(() => {
+    fetch(event.request)
+      .then((response) => {
+        if (response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        }
+        return response;
+      })
+      .catch(() =>
+        caches.match(event.request).then((cached) => {
+          if (cached) {
+            return cached;
+          }
           if (event.request.mode === "navigate") {
             return caches.match("./index.html");
           }
           return Response.error();
         })
-    )
+      )
   );
 });

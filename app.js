@@ -1,5 +1,4 @@
 import {
-  EMERGENCY_BASELINE,
   FREE_CATEGORY_ID,
   LARGE_PURCHASE_RATIO,
   budgetAmountForJob as getBudgetAmountForJob,
@@ -7,13 +6,9 @@ import {
   calculatePlan as calculateFinancePlan,
   categoryStatus as getCategoryStatus,
   getPeriodIncome,
-  minimumDebtPayments as getMinimumDebtPayments,
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
-  shouldUseDebtExposureMode as getShouldUseDebtExposureMode,
-  sortedDebts as getSortedDebts,
-  spendByCategory as getSpendByCategory,
-  totalDebt as getTotalDebt
+  spendByCategory as getSpendByCategory
 } from "./finance-core.js";
 import {
   getCloudSession,
@@ -46,8 +41,7 @@ const NAV_ITEMS = [
   { id: "today", label: "Inicio", icon: "01" },
   { id: "budget", label: "Plan", icon: "02" },
   { id: "savings", label: "Ahorro", icon: "03" },
-  { id: "debt", label: "Deudas", icon: "04" },
-  { id: "profile", label: "Datos", icon: "05" }
+  { id: "profile", label: "Datos", icon: "04" }
 ];
 
 const app = document.querySelector("#app");
@@ -70,6 +64,7 @@ let cloudState = {
   email: "",
   error: "",
   libraryLoaded: isCloudLibraryLoaded(),
+  sessionReady: false,
   signedIn: false,
   status: isCloudConfigured() ? "checking" : "local"
 };
@@ -144,9 +139,6 @@ function createDefaultState() {
       updated_at: now
     },
     settings: {
-      emergencyAutoDefault: true,
-      smartEscalator: true,
-      revealDebtTotal: false,
       monthlyRaisePct: 8,
       escalationPct: 50,
       updated_at: now
@@ -159,7 +151,6 @@ function createDefaultState() {
       updated_at: now
     },
     budgetJobs: [],
-    debts: [],
     transactions: [],
     cooldowns: [],
     checkins: [],
@@ -183,11 +174,17 @@ function migrateState(savedState) {
   const defaults = createDefaultState();
   const migrated = {
     ...defaults,
-    ...savedState,
+    activeView: savedState.activeView || defaults.activeView,
+    showDiagnosis: Boolean(savedState.showDiagnosis),
+    lastAlert: savedState.lastAlert || defaults.lastAlert,
+    updated_at: savedState.updated_at || defaults.updated_at,
     meta: { ...defaults.meta, ...(savedState.meta || {}) },
     profile: { ...defaults.profile, ...(savedState.profile || {}) },
-    settings: { ...defaults.settings, ...(savedState.settings || {}) },
-    debts: normalizeDebts(savedState.debts || defaults.debts),
+    settings: {
+      monthlyRaisePct: Number(savedState.settings?.monthlyRaisePct ?? defaults.settings.monthlyRaisePct),
+      escalationPct: Number(savedState.settings?.escalationPct ?? defaults.settings.escalationPct),
+      updated_at: savedState.settings?.updated_at || defaults.settings.updated_at
+    },
     transactions: normalizeTransactions(savedState.transactions || defaults.transactions),
     budgetExtras: normalizeBudgetExtras(savedState.budgetExtras || defaults.budgetExtras),
     liquidity: normalizeLiquidity(savedState.liquidity || defaults.liquidity),
@@ -227,13 +224,15 @@ async function initializeCloudSync() {
   if (!cloudState.configured) {
     cloudState.status = "local";
     cloudState.error = "Configura Supabase para activar sincronizacion.";
+    cloudState.sessionReady = true;
     renderCloudStatusChange();
     return;
   }
 
   if (!cloudState.libraryLoaded) {
     cloudState.status = "local";
-    cloudState.error = "No se pudo cargar la libreria de nube. La app sigue en modo local.";
+    cloudState.error = "No se pudo cargar la libreria de autenticacion. Revisa internet y vuelve a cargar.";
+    cloudState.sessionReady = true;
     renderCloudStatusChange();
     return;
   }
@@ -241,11 +240,21 @@ async function initializeCloudSync() {
   try {
     const session = await getCloudSession();
     applyCloudSession(session);
+    if (session) {
+      cloudState.status = "syncing";
+    }
     authUnsubscribe = onCloudAuthChange((nextSession) => {
+      const wasSignedIn = cloudState.signedIn;
       applyCloudSession(nextSession);
       if (nextSession) {
-        pullCloudAfterLogin();
+        if (cloudState.status !== "syncing") {
+          pullCloudAfterLogin();
+        }
       } else {
+        if (wasSignedIn) {
+          clearLocalUserState();
+        }
+        cloudState.sessionReady = true;
         cloudState.status = "signed-out";
         renderCloudStatusChange();
       }
@@ -254,10 +263,12 @@ async function initializeCloudSync() {
     if (session) {
       await pullCloudAfterLogin();
     } else {
+      cloudState.sessionReady = true;
       cloudState.status = "signed-out";
       renderCloudStatusChange();
     }
   } catch (error) {
+    cloudState.sessionReady = true;
     cloudState.status = "error";
     cloudState.error = friendlyCloudError(error);
     renderCloudStatusChange();
@@ -265,8 +276,13 @@ async function initializeCloudSync() {
 }
 
 function applyCloudSession(session) {
+  const nextEmail = session?.user?.email || "";
+  const previousEmail = state.meta?.cloudUserEmail || "";
+  if (session && previousEmail && previousEmail !== nextEmail) {
+    clearLocalUserState();
+  }
   cloudState.signedIn = Boolean(session);
-  cloudState.email = session?.user?.email || "";
+  cloudState.email = nextEmail;
   cloudState.error = "";
   if (session) {
     state.meta = {
@@ -282,6 +298,7 @@ async function pullCloudAfterLogin() {
   }
 
   cloudState.status = "syncing";
+  cloudState.sessionReady = false;
   cloudState.error = "";
   renderCloudStatusChange();
 
@@ -339,6 +356,8 @@ async function pullCloudAfterLogin() {
     applyingCloudState = false;
     cloudState.status = "error";
     cloudState.error = friendlyCloudError(error);
+  } finally {
+    cloudState.sessionReady = true;
     renderCloudStatusChange();
   }
 }
@@ -468,7 +487,6 @@ function hasMeaningfulLocalData(payload) {
       payload?.transactions?.length ||
       payload?.budgetExtras?.length ||
       payload?.budgetJobs?.length ||
-      payload?.debts?.length ||
       payload?.wins?.length
   );
 }
@@ -541,6 +559,10 @@ function friendlyCloudError(error) {
 }
 
 function renderCloudStatusChange() {
+  if (shouldShowAuthGate()) {
+    render();
+    return;
+  }
   if (quickExpenseOpen || state.showDiagnosis || pendingExtraAllocation) {
     return;
   }
@@ -587,6 +609,13 @@ function syncQuickExpenseWithLocation(options = {}) {
 }
 
 function render() {
+  if (shouldShowAuthGate()) {
+    app.classList.remove("is-menu-open", "is-expense-open");
+    app.innerHTML = renderAuthGate();
+    bindEvents();
+    return;
+  }
+
   const plan = calculatePlan();
   app.classList.toggle("is-menu-open", menuOpen);
   app.classList.toggle("is-expense-open", quickExpenseOpen);
@@ -614,6 +643,7 @@ function render() {
         <div class="menu-tools">
           ${renderCloudStatus()}
           <button class="btn primary" type="button" data-action="open-diagnosis">Mis datos</button>
+          <button class="btn ghost" type="button" data-action="cloud-sign-out">Cerrar sesion</button>
           ${state.lastAlert ? `<div class="menu-notice" role="status">${escapeHtml(state.lastAlert)}</div>` : ""}
         </div>
       </div>
@@ -663,6 +693,51 @@ function renderBottomNavigation() {
         <span>Plan</span>
       </button>
     </nav>
+  `;
+}
+
+function shouldShowAuthGate() {
+  return !cloudState.signedIn || !cloudState.sessionReady;
+}
+
+function renderAuthGate() {
+  const checkingSession = ["checking", "syncing"].includes(cloudState.status) || (cloudState.signedIn && !cloudState.sessionReady);
+  const unavailable = !cloudState.configured || !cloudState.libraryLoaded;
+
+  return `
+    <main class="auth-gate">
+      <section class="auth-card" aria-labelledby="auth-title">
+        <div class="auth-brand">
+          <span class="brand-mark">FC</span>
+          <div>
+            <p class="eyebrow">Finanzas Conductuales</p>
+            <h1 id="auth-title">${checkingSession ? "Comprobando tu sesion" : "Crea tu cuenta para empezar"}</h1>
+          </div>
+        </div>
+        ${
+          checkingSession
+            ? `<p>Estamos cargando tu cuenta y tus datos antes de mostrar el formulario inicial.</p>`
+            : unavailable
+              ? `<p>La autenticacion no esta disponible. Revisa la configuracion de Supabase y vuelve a cargar la aplicacion.</p>`
+              : `
+                <p>Primero crea una cuenta o inicia sesion. Despues configuraras tu presupuesto y tus campos habituales.</p>
+                <form class="stacked-form auth-form" id="cloud-login-form">
+                  <label>
+                    Correo
+                    <input name="email" type="email" autocomplete="email" placeholder="tu@email.com" required>
+                  </label>
+                  <label>
+                    Contrasena
+                    <input name="password" type="password" autocomplete="current-password" minlength="6" placeholder="Minimo 6 caracteres" required>
+                  </label>
+                  <button class="btn primary" type="submit" data-cloud-mode="signup">Crear cuenta</button>
+                  <button class="btn ghost" type="submit" data-cloud-mode="signin">Ya tengo cuenta: iniciar sesion</button>
+                </form>
+              `
+        }
+        ${cloudState.error ? `<p class="form-error" role="alert">${escapeHtml(cloudState.error)}</p>` : ""}
+      </section>
+    </main>
   `;
 }
 
@@ -733,7 +808,6 @@ function renderView(plan) {
   const views = {
     today: renderToday,
     budget: renderBudget,
-    debt: renderDebt,
     savings: renderSavings,
     spending: renderSpending,
     profile: renderProfile
@@ -745,7 +819,7 @@ function getPrimaryAction(plan, unlabeled, checkinDone) {
   if (!state.profile.completed) {
     return {
       title: "Pon tus datos reales",
-      copy: "La app esta usando un ejemplo. Con tus ingresos, deudas y ahorro cambia todo el plan.",
+      copy: "La app esta usando un ejemplo. Con tu presupuesto y tus gastos cambia toda la recomendacion.",
       badge: "Primer paso",
       button: "Empezar",
       action: "open-diagnosis"
@@ -782,24 +856,23 @@ function getPrimaryAction(plan, unlabeled, checkinDone) {
     };
   }
 
-  if (plan.emergencyGap > 0) {
+  if (plan.suggestedPeriodSavings > 0) {
     return {
-      title: "Sube tu fondo inicial",
-      copy: `Faltan ${formatMoney(plan.emergencyGap)} para completar la primera meta de emergencia.`,
+      title: "Revisa tu recomendacion de ahorro",
+      copy: `El simulador sugiere apartar ${formatMoney(plan.suggestedPeriodSavings)} durante este periodo.`,
       badge: "Ahorro",
-      button: "Ver ahorro",
+      button: "Abrir simulador",
       view: "savings"
     };
   }
 
-  const debt = sortedDebts()[0];
-  if (debt) {
+  if (plan.savingsCapacityGap > 0) {
     return {
-      title: `Paga ${debt.name}`,
-      copy: `La cuenta mas pequena va primero. Pago minimo: ${formatMoney(debt.minimum)}.`,
-      badge: "Deuda",
-      button: "Ver deudas",
-      view: "debt"
+      title: "Ajusta el plan antes de ahorrar",
+      copy: `La meta ideal supera el dinero libre por ${formatMoney(plan.savingsCapacityGap)}.`,
+      badge: "Simulador",
+      button: "Ver recomendacion",
+      view: "savings"
     };
   }
 
@@ -927,21 +1000,21 @@ function renderToday(plan) {
         </div>
         ${renderProgress(plan.emergencyProgress, "Meta inicial de emergencia")}
         <p class="helper-text">
-          Reserva sugerida dia ${dayFiveSweepDay()}: ${formatMoney(plan.dayFiveSweep)}.
+          Referencia del simulador; no modifica tu dinero disponible.
         </p>
       </article>
 
       <article class="card">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">Pago recomendado</p>
-            <h2>${nextDebtAction().title}</h2>
+            <p class="eyebrow">Ahorro recomendado</p>
+            <h2>${formatMoney(plan.suggestedPeriodSavings)}</h2>
           </div>
-          <span class="metric-badge">Paso pequeno</span>
+          <span class="metric-badge">Este periodo</span>
         </div>
-        <p>${nextDebtAction().copy}</p>
+        <p>Calculado con tu presupuesto, campos reservados, gastos comprometidos y tipo de ingreso.</p>
         <div class="card-actions">
-          <button class="btn secondary" type="button" data-view="debt">Abrir deudas</button>
+          <button class="btn secondary" type="button" data-view="savings">Abrir simulador</button>
         </div>
       </article>
 
@@ -1027,7 +1100,7 @@ function renderBudget(plan) {
   return `
     <section class="content-grid budget-grid">
       <article class="card split-card">
-        <div class="budget-ring" style="--debt:${Math.min(360, (summary.reserved / Math.max(1, summary.income)) * 360)}deg; --savings:${Math.min(360, ((summary.reserved + summary.freeImpactSpent) / Math.max(1, summary.income)) * 360)}deg">
+        <div class="budget-ring" style="--reserved:${Math.min(360, (summary.reserved / Math.max(1, summary.income)) * 360)}deg; --spent:${Math.min(360, ((summary.reserved + summary.freeImpactSpent) / Math.max(1, summary.income)) * 360)}deg">
           <div>
             <strong>${Math.round(assignmentRatio)}%</strong>
             <span>reservado</span>
@@ -1038,7 +1111,7 @@ function renderBudget(plan) {
           <h2>${formatMoney(summary.income)} por periodo</h2>
           ${renderAllocation("Presupuesto base", summary.baseIncome, "savings")}
           ${renderAllocation("Dinero extra", summary.extraIncome, "expenses")}
-          ${renderAllocation("Campos reservados", summary.reserved, "debt")}
+          ${renderAllocation("Campos reservados", summary.reserved, "reserved")}
           ${renderAllocation("Apartado sin gastar", summary.reservedRemaining, "savings")}
           ${renderAllocation("Libre antes de gastos", summary.freeBudget, "savings")}
           ${renderAllocation("Todos los gastos registrados", summary.totalSpent, "expenses")}
@@ -1137,103 +1210,11 @@ function renderBudgetJob(job) {
   `;
 }
 
-function renderDebt(plan) {
-  const sorted = sortedDebts();
-  const exposureMode = shouldUseDebtExposureMode();
-  const visibleDebts = exposureMode && !state.settings.revealDebtTotal ? sorted.slice(0, 1) : sorted;
-  const totalDebt = sorted.reduce((sum, debt) => sum + debt.balance, 0);
-
-  return `
-    <section class="content-grid debt-grid">
-      <article class="card wide-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Orden de pago</p>
-            <h2>${visibleDebts.length === 1 && sorted.length > 1 ? "Solo el siguiente paso" : "Cuentas por cerrar"}</h2>
-          </div>
-          <span class="metric-badge">${sorted.length} cuentas</span>
-        </div>
-        ${
-          exposureMode && !state.settings.revealDebtTotal
-            ? `<p class="helper-text">Mostramos primero la cuenta mas facil de cerrar.</p>`
-            : `<p class="helper-text">Total visible: ${formatMoney(totalDebt)}. La cuenta mas pequena va primero.</p>`
-        }
-        <div class="molehill-track">
-          ${sorted.map((debt, index) => `<span class="${index === 0 ? "next" : ""}">${index + 1}</span>`).join("")}
-        </div>
-        <div class="debt-list">
-          ${visibleDebts.map((debt, index) => renderDebtItem(debt, index)).join("")}
-        </div>
-        <div class="card-actions">
-          ${
-            exposureMode
-              ? `<button class="btn ghost" type="button" data-action="${state.settings.revealDebtTotal ? "hide-debt" : "reveal-debt"}">${state.settings.revealDebtTotal ? "Volver a paso pequeno" : "Mostrar panorama completo"}</button>`
-              : ""
-          }
-        </div>
-      </article>
-
-      <article class="card">
-        <p class="eyebrow">Pago sugerido</p>
-        <h2>${formatMoney(Math.max(plan.debt, minimumDebtPayments()))}</h2>
-        <p>Primero cubre minimos. Lo extra va a la cuenta mas pequena hasta cerrarla.</p>
-        <div class="micro-task">
-          <strong>Victoria pequena</strong>
-          <span>${nextDebtAction().copy}</span>
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Agregar cuenta</p>
-            <h2>Nueva deuda</h2>
-          </div>
-        </div>
-        <form class="stacked-form" id="debt-form">
-          <label>
-            Nombre
-            <input name="name" type="text" maxlength="36" placeholder="Tarjeta, prestamo..." required>
-          </label>
-          <label>
-            Saldo
-            <input name="balance" type="number" min="0" step="1000" required>
-          </label>
-          <label>
-            Interes anual %
-            <input name="apr" type="number" min="0" max="120" step="0.1" value="24">
-          </label>
-          <label>
-            Pago minimo
-            <input name="minimum" type="number" min="0" step="1000" required>
-          </label>
-          <button class="btn secondary" type="submit">Agregar deuda</button>
-        </form>
-      </article>
-    </section>
-  `;
-}
-
-function renderDebtItem(debt, index) {
-  const isNext = index === 0;
-  return `
-    <div class="debt-item ${isNext ? "is-next" : ""}">
-      <div>
-        <span class="eyebrow">${isNext ? "Siguiente cierre" : "Luego"}</span>
-        <h3>${escapeHtml(debt.name)}</h3>
-        <p>${formatMoney(debt.balance)} · ${debt.apr}% EA · minimo ${formatMoney(debt.minimum)}</p>
-      </div>
-      <button class="btn ${isNext ? "primary" : "ghost"}" type="button" data-action="pay-debt" data-id="${escapeAttr(debt.id)}">
-        Registrar pago
-      </button>
-    </div>
-  `;
-}
-
 function renderSavings(plan) {
-  const phase = state.profile.emergencySavings < EMERGENCY_BASELINE ? "Fase 1" : "Fase 2";
-  const monthsCovered = state.profile.committedExpenses
-    ? state.profile.emergencySavings / state.profile.committedExpenses
+  const summary = budgetSummary();
+  const targetCovered = plan.emergencyGap <= 0;
+  const periodsToTarget = plan.projectedPeriodSavings > 0
+    ? Math.ceil(plan.emergencyGap / plan.projectedPeriodSavings)
     : 0;
   const futureRaise = getMonthlyIncome(state.profile) * (state.settings.monthlyRaisePct / 100);
   const escalatedSavings = futureRaise * (state.settings.escalationPct / 100);
@@ -1243,54 +1224,76 @@ function renderSavings(plan) {
       <article class="card wide-card">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">${phase} · Pagarte primero</p>
-            <h2>Buffer que protege ancho de banda</h2>
+            <p class="eyebrow">Simulador · ${capitalize(summary.cadenceLabel)}</p>
+            <h2>${formatMoney(plan.suggestedPeriodSavings)} sugeridos para apartar</h2>
           </div>
-          <span class="metric-badge">${Math.round(monthsCovered * 10) / 10} meses</span>
+          <span class="metric-badge">${Math.round(plan.savingsRate)}% orientativo</span>
         </div>
-        ${renderProgress(plan.emergencyProgress, "Progreso al buffer base")}
+        <p>Esta cifra es una recomendacion. No mueve dinero, no cambia saldos y no crea campos en tu plan.</p>
         <div class="phase-grid">
           <div>
-            <strong>Meta base</strong>
-            <span>${formatMoney(EMERGENCY_BASELINE)}</span>
+            <strong>Meta ideal del periodo</strong>
+            <span>${formatMoney(plan.idealPeriodSavings)}</span>
           </div>
           <div>
-            <strong>Barrido dia 5</strong>
-            <span>${formatMoney(plan.dayFiveSweep)}</span>
+            <strong>Ya reservado como ahorro</strong>
+            <span>${formatMoney(plan.savingsReserved)}</span>
           </div>
           <div>
-            <strong>Automatizacion</strong>
-            <span>${state.settings.emergencyAutoDefault ? "Activa por defecto" : "Pausada"}</span>
+            <strong>Libre despues de la sugerencia</strong>
+            <span>${formatMoney(plan.freeAfterSuggestion)}</span>
+          </div>
+          <div>
+            <strong>Momento sugerido</strong>
+            <span>${suggestedSavingsMoment()}</span>
           </div>
         </div>
-        <div class="card-actions">
-          <button class="btn secondary" type="button" data-action="toggle-setting" data-setting="emergencyAutoDefault">
-            ${state.settings.emergencyAutoDefault ? "Pausar auto-buffer" : "Activar auto-buffer"}
-          </button>
+        ${
+          plan.savingsCapacityGap > 0
+            ? `<p class="helper-text danger-text">La meta ideal no cabe completa: faltaria liberar ${formatMoney(plan.savingsCapacityGap)} del presupuesto.</p>`
+            : `<p class="helper-text">La recomendacion cabe en el dinero libre actual del periodo.</p>`
+        }
+      </article>
+
+      <article class="card">
+        <p class="eyebrow">Como se calcula</p>
+        <h2>${formatMoney(plan.projectedPeriodSavings)} proyectados</h2>
+        <p>${plan.incomeNote}</p>
+        <div class="phase-grid">
+          <div><strong>Presupuesto</strong><span>${formatMoney(plan.periodIncome)}</span></div>
+          <div><strong>Gastos comprometidos</strong><span>${formatMoney(plan.committedForPeriod)}</span></div>
+          <div><strong>Campos de gasto</strong><span>${formatMoney(summary.expenseReserved)}</span></div>
         </div>
       </article>
 
       <article class="card">
-        <p class="eyebrow">Save More Tomorrow</p>
-        <h2>${formatMoney(escalatedSavings)} extra</h2>
-        <p>Si tus ingresos suben ${state.settings.monthlyRaisePct}%, el ${state.settings.escalationPct}% del aumento se mueve al ahorro antes de volverse gasto.</p>
+        <p class="eyebrow">Fondo de referencia</p>
+        <h2>${targetCovered ? "Meta cubierta" : `${periodsToTarget || "Sin"} periodos estimados`}</h2>
+        ${renderProgress(plan.emergencyProgress, "Avance simulado con el ahorro actual")}
+        <p>Referencia: ${formatMoney(plan.emergencyTarget)}. Ahorro actual informado: ${formatMoney(state.profile.emergencySavings)}.</p>
+      </article>
+
+      <article class="card">
+        <p class="eyebrow">Simular un aumento</p>
+        <h2>${formatMoney(escalatedSavings)} adicionales / mes</h2>
+        <p>Si tus ingresos subieran ${state.settings.monthlyRaisePct}%, podrias orientar el ${state.settings.escalationPct}% del aumento al ahorro.</p>
         <form class="stacked-form" id="smart-form">
           <label>
-            Aumento futuro %
+            Aumento hipotetico %
             <input name="monthlyRaisePct" type="number" min="0" max="100" value="${state.settings.monthlyRaisePct}">
           </label>
           <label>
-            Porcion al ahorro %
+            Porcion hipotetica al ahorro %
             <input name="escalationPct" type="number" min="0" max="100" value="${state.settings.escalationPct}">
           </label>
-          <button class="btn secondary" type="submit">Actualizar escalador</button>
+          <button class="btn secondary" type="submit">Actualizar simulacion</button>
         </form>
       </article>
 
       <article class="card">
-        <p class="eyebrow">Interes como libertad</p>
+        <p class="eyebrow">Proyeccion orientativa</p>
         <h2>${futureFreedom(plan)}</h2>
-        <p>El ahorro se entiende mejor cuando se traduce en tiempo y margen de decision.</p>
+        <p>Estimacion basada en repetir el ahorro proyectado; no representa un rendimiento garantizado.</p>
       </article>
     </section>
   `;
@@ -1634,11 +1637,11 @@ function renderProfile(plan) {
       </article>
 
       <article class="card">
-        <p class="eyebrow">Resumen mensual</p>
+        <p class="eyebrow">Orientacion mensual</p>
         <h2>${formatMoney(monthlyIncome)} / mes</h2>
-        ${renderAllocation("Deuda", plan.debt, "debt")}
-        ${renderAllocation("Ahorro", plan.savings, "savings")}
-        ${renderAllocation("Gastos", plan.expenses, "expenses")}
+        ${renderAllocation("Ahorro proyectado", plan.savings, "savings")}
+        ${renderAllocation("Resto para gastos", plan.expenses, "expenses")}
+        <p class="helper-text">Es una simulacion; no modifica tu presupuesto ni tus saldos.</p>
       </article>
 
       <article class="card wide-card">
@@ -1989,14 +1992,9 @@ function renderDiagnosisModal() {
               ${renderDiagnosisFieldError("committedExpenses")}
             </label>
             <label>
-              Ahorro disponible
+              Ahorro actual para simular
               <input name="emergencySavings" type="number" min="0" step="1000" value="${profile.emergencySavings}" required ${diagnosisInvalidAttr("emergencySavings")}>
               ${renderDiagnosisFieldError("emergencySavings")}
-            </label>
-            <label>
-              Deuda total estimada
-              <input name="totalDebt" type="number" min="0" step="1000" value="${totalDebt()}" required ${diagnosisInvalidAttr("totalDebt")}>
-              ${renderDiagnosisFieldError("totalDebt")}
             </label>
             <label>
               Dia de pago principal
@@ -2272,11 +2270,6 @@ function bindEvents() {
   const liquidityForm = document.querySelector("#liquidity-form");
   if (liquidityForm) {
     liquidityForm.addEventListener("submit", handleLiquiditySubmit);
-  }
-
-  const debtForm = document.querySelector("#debt-form");
-  if (debtForm) {
-    debtForm.addEventListener("submit", handleDebtSubmit);
   }
 
   const transactionForm = document.querySelector("#transaction-form");
@@ -2602,22 +2595,7 @@ function handleAction(event) {
     "complete-checkin": completeCheckin,
     "simulate-alert": simulateSpendingAlert,
     "add-process-win": addProcessWin,
-    "reveal-debt": () => {
-      state.settings.revealDebtTotal = true;
-      state.settings.updated_at = new Date().toISOString();
-    },
-    "hide-debt": () => {
-      state.settings.revealDebtTotal = false;
-      state.settings.updated_at = new Date().toISOString();
-    },
-    "toggle-setting": () => {
-      const setting = event.currentTarget.dataset.setting;
-      state.settings[setting] = !state.settings[setting];
-      state.settings.updated_at = new Date().toISOString();
-      state.lastAlert = state.settings[setting] ? "Automatizacion activada por defecto." : "Automatizacion pausada manualmente.";
-    },
     "apply-student-context": applyStudentContext,
-    "pay-debt": () => registerDebtPayment(id),
     "remove-job": () => removeBudgetJob(id),
     "remove-transaction": () => removeTransaction(id),
     "undo-snackbar": () => {
@@ -2674,7 +2652,6 @@ function submitDiagnosisForm(form) {
   const data = new FormData(form);
   const wasIncomplete = !state.profile.completed;
   const shouldClearTemplateBudget = shouldClearTemplateBudgetOnPlanSave();
-  const estimatedDebt = numberFrom(data.get("totalDebt"));
   const incomeCadence = ["weekly", "biweekly", "monthly", "semester", "yearly"].includes(data.get("incomeCadence"))
     ? data.get("incomeCadence")
     : "monthly";
@@ -2726,11 +2703,6 @@ function submitDiagnosisForm(form) {
   };
 
   if (wasIncomplete) {
-    if (estimatedDebt > 0 && !state.debts.length) {
-      state.debts = [
-        { id: uid("debt"), name: "Deuda principal", balance: estimatedDebt, apr: 24, minimum: Math.max(50_000, estimatedDebt * 0.03), updated_at: new Date().toISOString() }
-      ];
-    }
     state.wins.push({
       id: uid("win"),
       date: todayKey(),
@@ -2757,8 +2729,7 @@ function validateDiagnosisForm(form) {
   const requiredNumbers = [
     ["incomeAmount", "El presupuesto por periodo debe ser mayor que cero.", 1],
     ["committedExpenses", "Los gastos comprometidos no pueden estar vacios.", 0],
-    ["emergencySavings", "El ahorro disponible no puede estar vacio.", 0],
-    ["totalDebt", "La deuda total estimada no puede estar vacia.", 0],
+    ["emergencySavings", "El ahorro actual para la simulacion no puede estar vacio.", 0],
     ["account", "El dinero en cuenta no puede estar vacio.", 0],
     ["cash", "El dinero en fisico no puede estar vacio.", 0]
   ];
@@ -2993,22 +2964,6 @@ function handleLiquiditySubmit(event) {
   render();
 }
 
-function handleDebtSubmit(event) {
-  event.preventDefault();
-  const data = new FormData(event.currentTarget);
-  state.debts.push({
-    id: uid("debt"),
-    name: cleanText(data.get("name"), "Deuda"),
-    balance: numberFrom(data.get("balance")),
-    apr: numberFrom(data.get("apr")),
-    minimum: numberFrom(data.get("minimum")),
-    updated_at: new Date().toISOString()
-  });
-  state.lastAlert = "Nueva deuda agregada. La cuenta mas pequena queda primero.";
-  saveState();
-  render();
-}
-
 function handleTransactionSubmit(event) {
   event.preventDefault();
   const data = new FormData(event.currentTarget);
@@ -3076,7 +3031,7 @@ function handleSmartSubmit(event) {
   state.settings.monthlyRaisePct = clamp(numberFrom(data.get("monthlyRaisePct")), 0, 100);
   state.settings.escalationPct = clamp(numberFrom(data.get("escalationPct")), 0, 100);
   state.settings.updated_at = new Date().toISOString();
-  state.lastAlert = "Aumento futuro actualizado.";
+  state.lastAlert = "Simulacion de aumento actualizada.";
   saveState();
   render();
 }
@@ -3089,12 +3044,14 @@ async function handleCloudLoginSubmit(event) {
   const mode = event.submitter?.dataset.cloudMode || "signin";
 
   cloudState.status = "syncing";
+  cloudState.sessionReady = false;
   cloudState.error = "";
   render();
 
   try {
     const session = mode === "signup" ? await signUpToCloud(email, password) : await signInToCloud(email, password);
     if (!session) {
+      cloudState.sessionReady = true;
       cloudState.status = "signed-out";
       cloudState.error = "Cuenta creada. Revisa tu correo si Supabase pide confirmacion.";
       render();
@@ -3104,6 +3061,7 @@ async function handleCloudLoginSubmit(event) {
     state.lastAlert = mode === "signup" ? "Cuenta creada. Sincronizando nube..." : "Sesion iniciada. Bajando nube...";
     await pullCloudAfterLogin();
   } catch (error) {
+    cloudState.sessionReady = true;
     cloudState.status = "signed-out";
     cloudState.error = friendlyCloudError(error);
     render();
@@ -3112,18 +3070,35 @@ async function handleCloudLoginSubmit(event) {
 
 async function handleCloudSignOut() {
   cloudState.status = "syncing";
+  cloudState.sessionReady = false;
+  clearTimeout(cloudSaveTimer);
   render();
   try {
+    await saveCloudState(getCloudPayload());
     await signOutFromCloud();
+    clearLocalUserState();
     cloudState.signedIn = false;
     cloudState.email = "";
+    cloudState.sessionReady = true;
     cloudState.status = "signed-out";
-    state.lastAlert = "Sesion cerrada. Este dispositivo queda en modo local.";
   } catch (error) {
+    cloudState.sessionReady = true;
     cloudState.status = "error";
     cloudState.error = friendlyCloudError(error);
   }
   render();
+}
+
+function clearLocalUserState() {
+  clearTimeout(cloudSaveTimer);
+  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(BACKUP_KEY);
+  state = createDefaultState();
+  state.activeView = DEFAULT_VIEW;
+  menuOpen = false;
+  quickExpenseOpen = false;
+  pendingExtraAllocation = null;
+  clearSnackbar({ renderNow: false });
 }
 
 function handleImport(event) {
@@ -3224,28 +3199,6 @@ function applyStudentContext() {
     date: todayKey(),
     text: "Personalizaste la app a tu vida de estudiante becado."
   });
-}
-
-function registerDebtPayment(id) {
-  const debt = state.debts.find((item) => item.id === id);
-  if (!debt) {
-    return;
-  }
-  const payment = Math.min(debt.balance, Math.max(debt.minimum, 100_000));
-  debt.balance = Math.max(0, debt.balance - payment);
-  debt.updated_at = new Date().toISOString();
-
-  if (debt.balance === 0) {
-    state.debts = state.debts.filter((item) => item.id !== id);
-    state.wins.push({
-      id: uid("win"),
-      date: todayKey(),
-      text: `Cerraste ${debt.name}. Una cuenta menos pesa mas que un numero perfecto.`
-    });
-    state.lastAlert = `${debt.name} cerrada. Una cuenta menos.`;
-  } else {
-    state.lastAlert = `Pago de ${formatMoney(payment)} registrado en ${debt.name}.`;
-  }
 }
 
 function removeBudgetJob(id) {
@@ -3517,7 +3470,7 @@ function clearSnackbar(options = {}) {
 }
 
 function calculatePlan() {
-  return calculateFinancePlan(state);
+  return calculateFinancePlan(state, todayKey());
 }
 
 function budgetSummary() {
@@ -3620,32 +3573,6 @@ function monthlyLabeledSpend() {
   return getMonthlyLabeledSpend(state, todayKey());
 }
 
-function sortedDebts() {
-  return getSortedDebts(state);
-}
-
-function totalDebt() {
-  return getTotalDebt(state);
-}
-
-function minimumDebtPayments() {
-  return getMinimumDebtPayments(state);
-}
-
-function nextDebtAction() {
-  const debt = sortedDebts()[0];
-  if (!debt) {
-    return {
-      title: "Sin deudas activas",
-      copy: "Redirige el tercio de deuda hacia ahorro e inversion automatizada."
-    };
-  }
-  return {
-    title: debt.name,
-    copy: `Paga al menos ${formatMoney(debt.minimum)}. Lo extra va aqui hasta cerrar esta cuenta.`
-  };
-}
-
 function dominantMoneyScript() {
   const labels = {
     worship: {
@@ -3669,10 +3596,6 @@ function dominantMoneyScript() {
   return labels[key];
 }
 
-function shouldUseDebtExposureMode() {
-  return getShouldUseDebtExposureMode(state);
-}
-
 function graduatedPresenceTask() {
   if (state.profile.financialAnxiety >= 7) {
     return "Clasifica un gasto y cierra la revision.";
@@ -3692,9 +3615,9 @@ function futureFreedom(plan) {
   return `${hours.toFixed(1)} horas libres/mes`;
 }
 
-function dayFiveSweepDay() {
+function suggestedSavingsMoment() {
   const payday = Number(state.profile.payday || 0);
-  return payday > 0 ? clamp(payday + 4, 5, 28) : 5;
+  return payday > 0 ? `Dia ${clamp(payday + 1, 1, 28)} del periodo` : "Al recibir el presupuesto";
 }
 
 function createSpendAlert(categoryId) {
@@ -3735,7 +3658,6 @@ function viewFromHash(fallback) {
     hoy: "today",
     plan: "budget",
     presupuesto: "budget",
-    deudas: "debt",
     ahorro: "savings",
     registrar: "spending",
     gastos: "spending",
@@ -3763,7 +3685,6 @@ function hashFromView(view) {
   const hashes = {
     today: "inicio",
     budget: "plan",
-    debt: "deudas",
     savings: "ahorro",
     spending: "registrar",
     profile: "datos"
@@ -3912,18 +3833,6 @@ function normalizeTransactions(transactions) {
     budgeted: Boolean(transaction.budgeted),
     source: normalizeLocation(transaction.source),
     updated_at: transaction.updated_at || transaction.createdAt || transaction.date || ""
-  }));
-}
-
-function normalizeDebts(debts) {
-  return debts.map((debt) => ({
-    ...debt,
-    id: debt.id || uid("debt"),
-    name: cleanText(debt.name, "Deuda"),
-    balance: Number(debt.balance || 0),
-    apr: Number(debt.apr || 0),
-    minimum: Number(debt.minimum || 0),
-    updated_at: debt.updated_at || ""
   }));
 }
 

@@ -17,13 +17,15 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
 test("service worker caches the app shell needed for offline launch", async () => {
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
-  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v47"/);
+  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v49"/);
   assert.ok(worker.includes('"./index.html"'));
   assert.ok(worker.includes('"./app.js"'));
   assert.ok(worker.includes('"./finance-core.js"'));
   assert.ok(worker.includes('"./sync-client.js"'));
   assert.ok(worker.includes('"./sync-config.js"'));
   assert.ok(worker.includes('"./assets/icon-512.png"'));
+  assert.ok(worker.indexOf("fetch(event.request)") < worker.indexOf("caches.match(event.request)"));
+  assert.ok(worker.includes("cache.put(event.request, copy)"));
 });
 
 test("mobile-first shell prioritizes free money and fast expense registration", async () => {
@@ -61,7 +63,7 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(styles.includes("@media (prefers-color-scheme: dark)"));
 });
 
-test("new users get a three-step onboarding without account registration", async () => {
+test("authenticated new users get a three-step financial onboarding", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
 
@@ -86,6 +88,22 @@ test("new users get a three-step onboarding without account registration", async
   assert.match(styles, /\.onboarding-form input,[\s\S]*\.onboarding-form select\s*{[\s\S]*-webkit-appearance: none/);
   assert.ok(styles.includes("-webkit-text-fill-color: #101614 !important"));
   assert.ok(styles.includes("-webkit-text-fill-color: #e8f5ee !important"));
+});
+
+test("authentication gates onboarding and signed-in users can close their session", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  assert.ok(app.includes("function shouldShowAuthGate()"));
+  assert.ok(app.includes("function renderAuthGate()"));
+  assert.ok(app.indexOf("if (shouldShowAuthGate())") < app.indexOf("const plan = calculatePlan();"));
+  assert.ok(app.includes('data-cloud-mode="signup">Crear cuenta'));
+  assert.ok(app.includes('data-cloud-mode="signin">Ya tengo cuenta: iniciar sesion'));
+  assert.ok(app.includes('data-action="cloud-sign-out">Cerrar sesion'));
+  assert.ok(app.includes("function clearLocalUserState()"));
+  assert.ok(app.includes("previousEmail !== nextEmail"));
+  assert.ok(styles.includes(".auth-gate"));
+  assert.ok(styles.includes(".auth-card"));
 });
 
 test("money inputs format thousands while preserving numeric calculations", async () => {
@@ -167,4 +185,16 @@ test("behavioral finance, cloud sync, undo and backup features remain available"
   assert.ok(app.includes("reconcileLiquidity"));
   assert.ok(app.includes("renderTransactionHistory"));
   assert.ok(!app.includes("state.transactions = []"));
+});
+
+test("savings remains advisory and debt features are removed", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const core = await readFile(new URL("../finance-core.js", import.meta.url), "utf8");
+
+  assert.ok(app.includes("Esta cifra es una recomendacion. No mueve dinero"));
+  assert.ok(app.includes("suggestedPeriodSavings"));
+  assert.ok(core.includes("savingsCapacityGap"));
+  assert.ok(core.includes("savingsReserved"));
+  assert.equal(/debt|deuda/i.test(app), false);
+  assert.equal(/debt|deuda/i.test(core), false);
 });

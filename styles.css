@@ -73,6 +73,57 @@ a {
   min-height: 100vh;
 }
 
+.auth-gate {
+  grid-column: 1 / -1;
+  display: grid;
+  min-height: 100svh;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(45, 155, 111, 0.18), transparent 42%),
+    radial-gradient(circle at bottom right, rgba(245, 191, 73, 0.2), transparent 38%);
+}
+
+.auth-card {
+  display: grid;
+  width: min(460px, 100%);
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.auth-brand {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.auth-brand .brand-mark {
+  border-color: rgba(21, 111, 105, 0.28);
+  color: var(--teal);
+  background: var(--teal-2);
+}
+
+.auth-brand h1 {
+  margin: 3px 0 0;
+  font-size: 1.65rem;
+  line-height: 1.15;
+}
+
+.auth-card > p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.auth-form .btn {
+  width: 100%;
+}
+
 .sidebar {
   position: sticky;
   top: 0;
@@ -511,7 +562,6 @@ a {
 
 .today-grid .card,
 .budget-grid .card,
-.debt-grid .card,
 .savings-grid .card,
 .profile-grid .card {
   grid-column: span 4;
@@ -657,7 +707,6 @@ a {
 
 .transaction-list,
 .transaction-history,
-.debt-list,
 .cooldown-list,
 .wins-list,
 .script-bars,
@@ -673,8 +722,7 @@ a {
 .extra-budget-row,
 .category-row,
 .script-row,
-.cooldown-item,
-.debt-item {
+.cooldown-item {
   display: grid;
   align-items: center;
   gap: 12px;
@@ -886,9 +934,9 @@ input[type="range"] {
   place-items: center;
   border-radius: 50%;
   background: conic-gradient(
-    var(--coral) 0 var(--debt),
-    var(--teal) var(--debt) var(--savings),
-    var(--amber) var(--savings) 360deg
+    var(--coral) 0 var(--reserved),
+    var(--teal) var(--reserved) var(--spent),
+    var(--amber) var(--spent) 360deg
   );
 }
 
@@ -926,7 +974,7 @@ input[type="range"] {
   background: rgba(32, 38, 37, 0.05);
 }
 
-.allocation-row.debt {
+.allocation-row.reserved {
   border-left: 5px solid var(--coral);
 }
 
@@ -1049,37 +1097,6 @@ label {
 .category-row {
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
-}
-
-.debt-item {
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-
-.debt-item.is-next {
-  border-color: rgba(21, 111, 105, 0.45);
-  background: linear-gradient(90deg, var(--teal-2), #fffdf8);
-}
-
-.molehill-track {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.molehill-track span {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border-radius: 50%;
-  color: var(--muted);
-  background: rgba(32, 38, 37, 0.08);
-  font-weight: 900;
-}
-
-.molehill-track span.next {
-  color: #fffdf8;
-  background: var(--teal);
 }
 
 .phase-grid,
@@ -1354,7 +1371,6 @@ label {
 
   .today-grid .card,
   .budget-grid .card,
-  .debt-grid .card,
   .savings-grid .card,
   .profile-grid .card,
   .wide-card,
@@ -1389,7 +1405,6 @@ label {
 
   .today-grid .card,
   .budget-grid .card,
-  .debt-grid .card,
   .savings-grid .card,
   .spending-grid .card,
   .profile-grid .card,
@@ -1409,7 +1424,6 @@ label {
   .extra-budget-row,
   .category-row,
   .script-row,
-  .debt-item,
   .cooldown-item,
   .inline-form,
   .extra-budget-form,

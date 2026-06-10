@@ -1,4 +1,3 @@
-export const EMERGENCY_BASELINE = 8_000_000;
 export const LARGE_PURCHASE_RATIO = 0.08;
 export const FREE_CATEGORY_ID = "free";
 
@@ -19,63 +18,60 @@ export const JOB_CADENCES = {
   period: { label: "una vez por periodo" }
 };
 
-export function calculatePlan(state) {
+export function calculatePlan(state, today) {
   const income = getMonthlyIncome(state.profile);
-  const incomeCadence = getIncomeCadence(state.profile);
-  const isPeriodIncome = incomeCadence !== "monthly";
-  const base = income / 3;
-  const hasDebt = state.debts.some((debt) => Number(debt.balance || 0) > 0);
-  const alphaMap = { low: 1.08, medium: 1.18, high: 1.32 };
-  const alpha = state.profile.incomeType === "variable" ? alphaMap[state.profile.volatility] || 1.18 : 1;
-  let savings = base * alpha;
-  let debt = hasDebt ? base * (alpha > 1 ? 0.92 : 1) : base * 0.35;
-  let expenses = income - savings - debt;
-  const minimumDebt = minimumDebtPayments(state);
-
-  if (isPeriodIncome) {
-    const committed = Number(state.profile.committedExpenses || 0);
-    const flexiblePool = Math.max(0, income - committed - (hasDebt ? minimumDebt : 0));
-    debt = hasDebt ? Math.max(minimumDebt, flexiblePool * 0.25) : 0;
-    savings = flexiblePool * 0.45;
-    expenses = Math.max(committed, income - savings - debt);
-  }
-
-  if (expenses < Number(state.profile.committedExpenses || 0)) {
-    const gap = Number(state.profile.committedExpenses || 0) - expenses;
-    savings = Math.max(base * 0.65, savings - gap * 0.7);
-    debt = hasDebt ? Math.max(minimumDebt, debt - gap * 0.3) : debt;
-    expenses = income - savings - debt;
-  }
-
-  if (!hasDebt && !isPeriodIncome) {
-    savings += debt * 0.7;
-    expenses += debt * 0.3;
-    debt = 0;
-  }
-
-  const total = Math.max(1, debt + savings + expenses);
-  const emergencyGap = Math.max(0, EMERGENCY_BASELINE - Number(state.profile.emergencySavings || 0));
-  const dayFiveSweep = state.settings.emergencyAutoDefault
-    ? Math.min(Math.max(0, savings * 0.7), Math.max(100_000, emergencyGap / 6))
-    : 0;
+  const summary = budgetSummary(state, today);
+  const emergencyTarget = getEmergencyTarget(state.profile);
+  const emergencyGap = Math.max(0, emergencyTarget - Number(state.profile.emergencySavings || 0));
+  const savingsRate = getSavingsRate(state.profile, emergencyGap);
+  const idealPeriodSavings = Math.round(summary.income * savingsRate);
+  const committedForPeriod = Math.round(Number(state.profile.committedExpenses || 0) * summary.months);
+  const protectedExpenses = Math.max(summary.expenseReserved, committedForPeriod);
+  const availableAdditional = Math.min(
+    summary.freeRemaining,
+    Math.max(0, summary.income - protectedExpenses - summary.savingsReserved - summary.totalSpent)
+  );
+  const suggestedPeriodSavings = Math.round(
+    Math.min(Math.max(0, idealPeriodSavings - summary.savingsRemaining), availableAdditional)
+  );
+  const projectedPeriodSavings = summary.savingsRemaining + suggestedPeriodSavings;
+  const savingsCapacityGap = Math.max(0, idealPeriodSavings - projectedPeriodSavings);
+  const savings = Math.round(projectedPeriodSavings / Math.max(1, summary.months));
+  const expenses = Math.max(0, income - savings);
 
   return {
     income,
-    debt,
     savings,
     expenses,
+    periodIncome: summary.income,
+    idealPeriodSavings,
+    suggestedPeriodSavings,
+    projectedPeriodSavings,
+    savingsReserved: summary.savingsRemaining,
+    savingsCapacityGap,
+    savingsRate: savingsRate * 100,
+    freeAfterSuggestion: Math.max(0, summary.freeRemaining - suggestedPeriodSavings),
+    committedForPeriod,
+    emergencyTarget,
     emergencyGap,
-    emergencyProgress: (Number(state.profile.emergencySavings || 0) / EMERGENCY_BASELINE) * 100,
-    dayFiveSweep,
-    debtDegrees: (debt / total) * 360,
-    savingsDegrees: ((debt + savings) / total) * 360,
+    emergencyProgress: (Number(state.profile.emergencySavings || 0) / emergencyTarget) * 100,
     incomeNote:
-      isPeriodIncome
-        ? `Ingreso ${cadenceLabel(incomeCadence)}: ${formatPlanNumber(getPeriodIncome(state.profile))} por periodo, equivalente mensual ${formatPlanNumber(income)}.`
-        : state.profile.incomeType === "variable"
-        ? `Ingreso variable: factor alpha ${alpha.toFixed(2)} aumenta ahorro precautorio.`
-        : "Ingreso fijo: se mantiene reparto 1/3 antes de optimizaciones."
+      state.profile.incomeType === "variable"
+        ? `Ingreso variable con volatilidad ${state.profile.volatility || "medium"}: se recomienda un margen precautorio mayor.`
+        : `Ingreso fijo: la recomendacion protege primero los gastos comprometidos del periodo.`
   };
+}
+
+export function getEmergencyTarget(profile) {
+  const income = getMonthlyIncome(profile);
+  const committed = Number(profile.committedExpenses || 0);
+  return Math.max(1, Math.round(Math.max(income, committed * 3)));
+}
+
+export function getSavingsRate(profile, emergencyGap = 0) {
+  const variableRates = { low: 0.2, medium: 0.25, high: 0.3 };
+  const baseRate = profile.incomeType === "variable" ? variableRates[profile.volatility] || 0.25 : 0.15;
+  return Math.min(0.35, baseRate + (emergencyGap > 0 ? 0.05 : 0));
 }
 
 export function getMonthlyIncome(profile) {
@@ -133,10 +129,16 @@ export function budgetSummary(state, today) {
   const income = baseIncome + extraIncome;
   const jobBudgets = state.budgetJobs.map((job) => ({
     id: job.id,
+    isSavings: isSavingsJob(job),
     budget: budgetAmountForJob(job, state.profile),
     spent: spent[job.id] || 0
   }));
   const reserved = jobBudgets.reduce((sum, job) => sum + job.budget, 0);
+  const savingsReserved = jobBudgets.filter((job) => job.isSavings).reduce((sum, job) => sum + job.budget, 0);
+  const savingsRemaining = jobBudgets
+    .filter((job) => job.isSavings)
+    .reduce((sum, job) => sum + Math.max(0, job.budget - job.spent), 0);
+  const expenseReserved = reserved - savingsReserved;
   const reservedSpent = jobBudgets.reduce((sum, job) => sum + Math.min(job.spent, job.budget), 0);
   const reservedRemaining = jobBudgets.reduce((sum, job) => sum + Math.max(0, job.budget - job.spent), 0);
   const categoryOverspent = jobBudgets.reduce((sum, job) => sum + Math.max(0, job.spent - job.budget), 0);
@@ -149,6 +151,9 @@ export function budgetSummary(state, today) {
     extraIncome,
     income,
     reserved,
+    savingsReserved,
+    savingsRemaining,
+    expenseReserved,
     reservedSpent,
     reservedRemaining,
     categoryOverspent,
@@ -166,16 +171,14 @@ export function budgetSummary(state, today) {
   };
 }
 
+export function isSavingsJob(job) {
+  return /ahorro|emergencia|buffer/i.test(String(job?.name || ""));
+}
+
 export function extraIncomeForPeriod(state, today) {
   return (state.budgetExtras || [])
     .filter((extra) => isInBudgetWindow(extra.date, state.profile, today))
     .reduce((sum, extra) => sum + Number(extra.amount || 0), 0);
-}
-
-function formatPlanNumber(value) {
-  return new Intl.NumberFormat("es-CO", {
-    maximumFractionDigits: 0
-  }).format(Number(value || 0));
 }
 
 export function categoryStatus(state, today) {
@@ -209,25 +212,6 @@ export function monthlyLabeledSpend(state, today) {
   return state.transactions
     .filter((transaction) => transaction.labeled && isInBudgetWindow(transaction.date, state.profile, today))
     .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
-}
-
-export function sortedDebts(state) {
-  return state.debts
-    .filter((debt) => Number(debt.balance || 0) > 0)
-    .slice()
-    .sort((a, b) => Number(a.balance || 0) - Number(b.balance || 0));
-}
-
-export function totalDebt(state) {
-  return state.debts.reduce((sum, debt) => sum + Number(debt.balance || 0), 0);
-}
-
-export function minimumDebtPayments(state) {
-  return state.debts.reduce((sum, debt) => sum + Number(debt.minimum || 0), 0);
-}
-
-export function shouldUseDebtExposureMode(state) {
-  return Number(state.profile.financialAnxiety || 0) >= 7 || Number(state.profile.moneyScripts.avoidance || 0) >= 4;
 }
 
 export function isLargeUnbudgetedPurchase(amount, expenses) {

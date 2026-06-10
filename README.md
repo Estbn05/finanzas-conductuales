@@ -1,6 +1,6 @@
 # Finanzas Conductuales
 
-Aplicacion personal de finanzas basada en economia conductual. El objetivo no es solo mostrar saldos, sino convertir el manejo del dinero en un sistema de pequenas acciones repetibles: monitoreo diario, automatizacion de ahorro, reduccion de deuda por victorias pequenas y alertas visuales de gasto.
+Aplicacion personal de finanzas basada en economia conductual. El objetivo no es solo mostrar saldos, sino convertir el manejo del dinero en un sistema de pequenas acciones repetibles: monitoreo diario, presupuesto por periodos, orientacion de ahorro y alertas visuales de gasto.
 
 ![Vista principal de Finanzas Conductuales](docs/screenshot-desktop.png)
 
@@ -8,29 +8,28 @@ Aplicacion personal de finanzas basada en economia conductual. El objetivo no es
 
 - Traduce un PRD con investigacion conductual a una experiencia de producto funcional.
 - Usa arquitectura frontend sin dependencias externas, ideal para GitHub Pages.
-- Incluye persistencia local, importacion/exportacion JSON, PWA basica y diseno responsive.
+- Incluye cuentas con Supabase, persistencia local, importacion/exportacion JSON, PWA basica y diseno responsive.
 - Muestra decisiones de UX orientadas a cambio de comportamiento, no solo CRUD.
 
 ## Funcionalidades principales
 
-- **Mis datos:** ingreso, gastos comprometidos, ahorro disponible, deuda, ansiedad financiera, confianza y patrones de dinero.
+- **Mis datos:** ingreso, gastos comprometidos, ahorro actual de referencia, ansiedad financiera, confianza y patrones de dinero.
 - **Inicio minimo y accionable:** la app abre mostrando el dinero libre, cuenta/efectivo y las barras de categorias, sin historial ni graficas que distraigan.
 - **Registro inmediato con FAB:** el boton flotante abre un panel rapido con categoria, origen y monto para guardar un gasto en pocos segundos.
-- **Drawer + navegacion inferior:** Inicio, Registrar y Plan quedan siempre a un toque; Ahorro, Deudas, Datos y nube viven en el menu lateral.
+- **Drawer + navegacion inferior:** Inicio, Registrar y Plan quedan siempre a un toque; Ahorro, Datos y nube viven en el menu lateral.
 - **Jerarquia de dinero clara:** el libre del periodo es el numero protagonista; cuenta, efectivo y total real aparecen como datos secundarios.
 - **Cuenta y efectivo:** separa el disponible entre dinero en cuenta y dinero fisico sin perder el total.
-- **Onboarding en tres pasos:** presupuesto y frecuencia, cuenta/efectivo y campos habituales; no exige crear cuenta antes de mostrar valor.
+- **Acceso antes del onboarding:** cada usuario crea una cuenta o inicia sesion antes de configurar presupuesto, cuenta/efectivo y campos habituales.
+- **Cierre de sesion:** disponible desde el menu y desde Datos; limpia la informacion local antes de permitir el acceso de otra cuenta.
 - **Tema automatico:** adapta la interfaz clara u oscura segun el sistema.
 - **Correccion de errores:** los gastos registrados se pueden eliminar desde el historial o deshacer directamente desde su categoria.
 - **Dinero extra:** permite sumar regalos, bonos o ayudas al presupuesto del periodo sin cambiar el presupuesto base recurrente.
 - **Sobres por periodo:** el presupuesto puede ser semanal, quincenal, mensual, semestral o anual; cada campo semanal, quincenal, mensual, semestral, anual o por periodo reserva automaticamente su parte.
-- **Inicio accionable:** muestra el siguiente paso: poner datos reales, clasificar gastos, cerrar la revision, ahorrar o pagar deuda.
+- **Inicio accionable:** muestra el siguiente paso: poner datos reales, clasificar gastos, cerrar la revision o revisar la recomendacion de ahorro.
 - **Contexto estudiante becado:** queda como preset opcional; sus campos solo se cargan al presionar "Aplicar mi contexto".
-- **Presupuesto 1/3:** divide ingreso en deuda, ahorro y gastos; ajusta ahorro precautorio si el ingreso es variable.
+- **Simulador de ahorro:** recomienda cuanto apartar durante el periodo segun presupuesto, gastos comprometidos, campos reservados, movimientos e ingreso variable.
 - **Zero-based budgeting:** cada categoria de gasto recibe un trabajo especifico.
-- **Buffer de emergencia:** meta base equivalente a US$2.000, con barrido automatico sugerido el dia 5.
-- **Deudas por pasos pequenos:** ordena deudas por saldo para priorizar cierres y aumentar autoeficacia.
-- **Exposicion gradual:** si la ansiedad o evitacion financiera es alta, oculta el total de deuda y muestra solo el siguiente paso.
+- **Fondo de referencia:** simula una meta adaptada al ingreso mensual y a los gastos comprometidos, sin mover dinero ni modificar saldos.
 - **Pausa de 24 horas:** detiene compras grandes no presupuestadas antes de registrarlas.
 - **Alertas de agotamiento:** barras por categoria cambian de verde a amarillo y rojo.
 - **Victorias de proceso:** celebra consistencia, no solo montos.
@@ -79,13 +78,15 @@ En Android/Chrome: abre la demo publicada y elige "Instalar app" o "Agregar a pa
 
 En iPhone/Safari: abre la demo, toca compartir y luego "Agregar a pantalla de inicio".
 
-## Sincronizacion entre dispositivos
+## Cuentas y sincronizacion
 
-La app funciona offline primero con `localStorage`. Para compartir datos entre computador y celular, incluye una capa opcional de Supabase:
+Supabase es obligatorio para entrar a la aplicacion. Despues de iniciar sesion, `localStorage` mantiene una copia para uso offline y la nube comparte los datos entre computador y celular:
 
-- Primer inicio de sesion en un dispositivo: si no hay nube, sube el plan local automaticamente.
+- Usuario nuevo: crea su cuenta y luego completa el onboarding financiero.
+- Usuario existente: inicia sesion y descarga automaticamente sus datos.
 - Inicio de sesion en otro dispositivo: si ya hay nube, la descarga automaticamente.
 - Cada cambio posterior se sube solo, sin presionar "descargar nube".
+- Cerrar sesion guarda la ultima copia en nube y elimina los datos locales del dispositivo.
 
 Configuracion:
 
@@ -114,12 +115,9 @@ Este repositorio incluye `.github/workflows/pages.yml`. Cuando el proyecto se su
 | --- | --- |
 | Monitoreo financiero diario | Ritual de etiquetado y streak |
 | Pain of paying sintetico | Alertas visuales de agotamiento por categoria |
-| Power of defaults | Auto-buffer activado por defecto |
-| Save More Tomorrow | Escalador de ahorro ante aumentos futuros |
-| 1/3 Rule | Motor de presupuesto deuda/ahorro/gastos |
-| Zero-based budgeting | Trabajos de dinero dentro del tercio de gastos |
-| Debt Snowball | Orden por deuda mas pequena y registro de pagos |
-| Evitar Ostrich Effect | Modo de exposicion gradual para alta ansiedad |
+| Save More Tomorrow | Simulador de ahorro ante aumentos futuros |
+| Precautionary saving | Recomendacion adaptada al periodo y a la volatilidad del ingreso |
+| Zero-based budgeting | Campos reservados dentro del presupuesto del periodo |
 | Relapse response | Reencuadre cuando una categoria se excede |
 
 ## Roadmap
