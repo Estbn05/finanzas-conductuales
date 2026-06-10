@@ -719,13 +719,7 @@ function renderAuthGate() {
         </div>
         ${
           checkingSession
-            ? `
-                <p>Estamos cargando tu cuenta y tus datos antes de mostrar el formulario inicial.</p>
-                <div class="auth-recovery-actions">
-                  <button class="btn primary" type="button" data-action="recover-auth">Continuar al acceso</button>
-                  <button class="btn ghost" type="button" data-action="reload-app">Recargar aplicacion</button>
-                </div>
-              `
+            ? `<p>Estamos cargando tu cuenta y tus datos antes de mostrar el formulario inicial.</p>`
             : unavailable
               ? `<p>La autenticacion no esta disponible. Revisa la configuracion de Supabase y vuelve a cargar la aplicacion.</p>`
               : `
@@ -2578,8 +2572,6 @@ function handleAction(event) {
     "open-diagnosis",
     "close-diagnosis",
     "cancel-extra-allocation",
-    "recover-auth",
-    "reload-app",
     "export-data"
   ]);
 
@@ -2603,8 +2595,6 @@ function handleAction(event) {
       diagnosisValidation = { field: "", message: "" };
       state.showDiagnosis = false;
     },
-    "recover-auth": recoverAuthStartup,
-    "reload-app": () => window.location.reload(),
     "complete-checkin": completeCheckin,
     "simulate-alert": simulateSpendingAlert,
     "add-process-win": addProcessWin,

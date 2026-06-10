@@ -23,14 +23,37 @@
       <main class="startup-fallback">
         <section class="startup-fallback-card">
           <h1>Iniciando Finanzas Conductuales</h1>
-          <p>Si esta pantalla no cambia, recarga la aplicacion.</p>
-          <button class="btn primary" type="button" onclick="window.location.reload()">Recargar aplicacion</button>
+          <p>La aplicacion reintentara el inicio automaticamente.</p>
         </section>
       </main>
     </div>
     <noscript>
       Esta aplicacion necesita JavaScript para guardar tu diagnostico y mostrar el tablero.
     </noscript>
+    <script>
+      (() => {
+        const retryKey = "finanzas-startup-retry";
+        window.setTimeout(() => {
+          if (!document.querySelector(".startup-fallback")) {
+            try {
+              sessionStorage.removeItem(retryKey);
+            } catch {}
+            return;
+          }
+          let shouldRetry = false;
+          try {
+            shouldRetry = sessionStorage.getItem(retryKey) !== "done";
+            sessionStorage.setItem(retryKey, "done");
+          } catch {
+            shouldRetry = !window.name.includes(retryKey);
+            window.name = `${window.name} ${retryKey}`.trim();
+          }
+          if (shouldRetry) {
+            window.location.reload();
+          }
+        }, 6000);
+      })();
+    </script>
     <script src="sync-config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="app.js" type="module"></script>

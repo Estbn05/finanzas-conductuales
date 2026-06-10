@@ -1,4 +1,4 @@
-const CACHE_NAME = "finanzas-conductuales-v51";
+const CACHE_NAME = "finanzas-conductuales-v52";
 const CORE_ASSETS = [
   "./",
   "./index.html",

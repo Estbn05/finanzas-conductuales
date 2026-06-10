@@ -124,11 +124,6 @@ a {
   width: 100%;
 }
 
-.auth-recovery-actions {
-  display: grid;
-  gap: 10px;
-}
-
 .startup-fallback {
   grid-column: 1 / -1;
   display: grid;
