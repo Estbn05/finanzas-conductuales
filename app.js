@@ -30,6 +30,7 @@ import {
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
 const DEFAULT_VIEW = "today";
+const QUICK_EXPENSE_HISTORY_STATE = "quick-expense";
 const STUDENT_SEMESTER_INCOME = 1_750_000;
 const STUDENT_SEMESTER_MONTHS = 6;
 const STUDENT_WEEKLY_GAS = 30_000;
@@ -53,7 +54,7 @@ const app = document.querySelector("#app");
 let state = loadState();
 state.activeView = viewFromHash(DEFAULT_VIEW);
 let menuOpen = false;
-let quickExpenseOpen = false;
+let quickExpenseOpen = window.history.state?.overlay === QUICK_EXPENSE_HISTORY_STATE;
 let applyingCloudState = false;
 let cloudSaveTimer;
 let authUnsubscribe = () => {};
@@ -81,6 +82,7 @@ window.addEventListener("hashchange", () => {
     render();
   }
 });
+window.addEventListener("popstate", syncQuickExpenseWithHistory);
 
 if ("serviceWorker" in navigator && window.location.protocol !== "file:") {
   navigator.serviceWorker.register("./service-worker.js").catch(() => {});
@@ -532,6 +534,37 @@ function renderCloudStatusChange() {
   if (quickExpenseOpen || state.showDiagnosis || pendingExtraAllocation) {
     return;
   }
+  render();
+}
+
+function openQuickExpense() {
+  quickExpenseOpen = true;
+  menuOpen = false;
+  if (window.history.state?.overlay !== QUICK_EXPENSE_HISTORY_STATE) {
+    window.history.pushState(
+      {
+        ...(window.history.state || {}),
+        overlay: QUICK_EXPENSE_HISTORY_STATE
+      },
+      ""
+    );
+  }
+}
+
+function closeQuickExpense() {
+  quickExpenseOpen = false;
+  if (window.history.state?.overlay === QUICK_EXPENSE_HISTORY_STATE) {
+    window.history.back();
+  }
+}
+
+function syncQuickExpenseWithHistory() {
+  const shouldBeOpen = window.history.state?.overlay === QUICK_EXPENSE_HISTORY_STATE;
+  if (quickExpenseOpen === shouldBeOpen) {
+    return;
+  }
+  quickExpenseOpen = shouldBeOpen;
+  menuOpen = false;
   render();
 }
 
@@ -1261,7 +1294,7 @@ function renderQuickExpensePanel() {
         <form class="quick-expense-form" id="transaction-form">
           <label>
             Comercio
-            <input name="merchant" type="text" maxlength="42" placeholder="Ej. Tienda, Terpel" required autofocus>
+            <input name="merchant" type="text" maxlength="42" placeholder="Ej. Tienda, Terpel" required>
           </label>
           <label>
             Descripcion opcional
@@ -2529,10 +2562,7 @@ function handleAction(event) {
   ]);
 
   const actions = {
-    "go-spending": () => {
-      quickExpenseOpen = true;
-      menuOpen = false;
-    },
+    "go-spending": openQuickExpense,
     "toggle-menu": () => {
       menuOpen = !menuOpen;
       quickExpenseOpen = false;
@@ -2540,13 +2570,8 @@ function handleAction(event) {
     "close-menu": () => {
       menuOpen = false;
     },
-    "open-expense": () => {
-      quickExpenseOpen = true;
-      menuOpen = false;
-    },
-    "close-expense": () => {
-      quickExpenseOpen = false;
-    },
+    "open-expense": openQuickExpense,
+    "close-expense": closeQuickExpense,
     "open-diagnosis": () => {
       diagnosisValidation = { field: "", message: "" };
       state.showDiagnosis = true;
@@ -3004,7 +3029,7 @@ function handleTransactionSubmit(event) {
     showUndoSnackbar(transaction.id);
   }
 
-  quickExpenseOpen = false;
+  closeQuickExpense();
   saveState();
   render();
 }
