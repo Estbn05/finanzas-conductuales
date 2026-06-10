@@ -9,7 +9,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js";
+} from "./finance-core.js?v=20260610-pwa-cleanup";
 import {
   getCloudSession,
   isCloudConfigured,
@@ -20,7 +20,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js";
+} from "./sync-client.js?v=20260610-pwa-cleanup";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -90,10 +90,6 @@ window.addEventListener("hashchange", () => {
   }
 });
 window.addEventListener("popstate", syncQuickExpenseWithLocation);
-
-if ("serviceWorker" in navigator && window.location.protocol !== "file:") {
-  navigator.serviceWorker.register("./service-worker.js").then((registration) => registration.update()).catch(() => {});
-}
 
 function createDefaultState() {
   const today = todayKey();

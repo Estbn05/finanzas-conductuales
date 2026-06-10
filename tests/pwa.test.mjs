@@ -7,25 +7,22 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
   const iconSizes = manifest.icons.map((icon) => icon.sizes);
 
   assert.equal(manifest.display, "standalone");
-  assert.equal(manifest.start_url, "./");
+  assert.equal(manifest.start_url, "./?pwa-cleanup=20260610-pwa-cleanup");
   assert.equal(manifest.scope, "./");
   assert.equal(manifest.orientation, "portrait-primary");
   assert.ok(iconSizes.includes("192x192"));
   assert.ok(iconSizes.includes("512x512"));
 });
 
-test("service worker caches the app shell needed for offline launch", async () => {
+test("service worker removes stale PWA caches and unregisters itself", async () => {
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
-  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v52"/);
-  assert.ok(worker.includes('"./index.html"'));
-  assert.ok(worker.includes('"./app.js"'));
-  assert.ok(worker.includes('"./finance-core.js"'));
-  assert.ok(worker.includes('"./sync-client.js"'));
-  assert.ok(worker.includes('"./sync-config.js"'));
-  assert.ok(worker.includes('"./assets/icon-512.png"'));
-  assert.ok(worker.indexOf("fetch(event.request)") < worker.indexOf("caches.match(event.request)"));
-  assert.ok(worker.includes("cache.put(event.request, copy)"));
+  assert.ok(worker.includes('CACHE_PREFIX = "finanzas-conductuales-"'));
+  assert.ok(worker.includes('CLEANUP_RELEASE = "20260610-pwa-cleanup"'));
+  assert.ok(worker.includes("caches.delete(key)"));
+  assert.ok(worker.includes("self.registration.unregister()"));
+  assert.ok(worker.includes('includeUncontrolled: true'));
+  assert.equal(worker.includes('addEventListener("fetch"'), false);
 });
 
 test("mobile-first shell prioritizes free money and fast expense registration", async () => {
@@ -125,6 +122,12 @@ test("static startup fallback retries automatically without manual controls", as
   assert.ok(html.includes('class="startup-fallback"'));
   assert.ok(html.includes('const retryKey = "finanzas-startup-retry"'));
   assert.ok(html.includes("window.location.reload()"));
+  assert.ok(html.includes("window.pwaCleanupReady"));
+  assert.ok(html.includes("registration.unregister()"));
+  assert.ok(html.includes("caches.delete(key)"));
+  assert.ok(html.includes('await import("./app.js?v=20260610-pwa-cleanup")'));
+  assert.equal(html.includes("Continuar al acceso"), false);
+  assert.equal(html.includes("Recargar aplicacion"), false);
   assert.equal(html.includes('onclick="window.location.reload()"'), false);
   assert.ok(styles.includes(".startup-fallback-card"));
 });

@@ -13,10 +13,47 @@
       content="App personal de finanzas conductuales con monitoreo diario, presupuesto por periodos y simulador de ahorro."
     >
     <title>Finanzas Conductuales</title>
-    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="manifest" href="manifest.webmanifest?v=20260610-pwa-cleanup">
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=20260610-pwa-cleanup">
+    <script>
+      window.pwaCleanupReady = (async () => {
+        const cachePrefix = "finanzas-conductuales-";
+        const release = "20260610-pwa-cleanup";
+        const retryKey = `finanzas-pwa-cleanup:${release}`;
+        let needsFreshLoad = Boolean(navigator.serviceWorker?.controller);
+
+        try {
+          const registrations = await navigator.serviceWorker?.getRegistrations();
+          const appRegistrations = (registrations || []).filter((registration) =>
+            registration.scope.includes("/finanzas-conductuales/")
+          );
+          const results = await Promise.all(appRegistrations.map((registration) => registration.unregister()));
+          needsFreshLoad ||= results.some(Boolean);
+        } catch {}
+
+        try {
+          const keys = await caches.keys();
+          const appKeys = keys.filter((key) => key.startsWith(cachePrefix));
+          await Promise.all(appKeys.map((key) => caches.delete(key)));
+          needsFreshLoad ||= appKeys.length > 0;
+        } catch {}
+
+        let alreadyRetried = false;
+        try {
+          alreadyRetried = sessionStorage.getItem(retryKey) === "done";
+          sessionStorage.setItem(retryKey, "done");
+        } catch {}
+
+        if (needsFreshLoad && !alreadyRetried) {
+          const url = new URL(window.location.href);
+          url.searchParams.set("pwa-cleanup", release);
+          window.location.replace(url.href);
+          await new Promise(() => {});
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="app" class="app-shell" aria-live="polite">
@@ -31,7 +68,7 @@
       Esta aplicacion necesita JavaScript para guardar tu diagnostico y mostrar el tablero.
     </noscript>
     <script>
-      (() => {
+      window.pwaCleanupReady.then(async () => {
         const retryKey = "finanzas-startup-retry";
         window.setTimeout(() => {
           if (!document.querySelector(".startup-fallback")) {
@@ -52,10 +89,20 @@
             window.location.reload();
           }
         }, 6000);
-      })();
+
+        const loadScript = (src) =>
+          new Promise((resolve) => {
+            const script = document.createElement("script");
+            script.src = src;
+            script.onload = resolve;
+            script.onerror = resolve;
+            document.body.append(script);
+          });
+
+        await loadScript("sync-config.js?v=20260610-pwa-cleanup");
+        await loadScript("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2");
+        await import("./app.js?v=20260610-pwa-cleanup");
+      });
     </script>
-    <script src="sync-config.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js" type="module"></script>
   </body>
 </html>
