@@ -17,7 +17,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
 test("service worker caches the app shell needed for offline launch", async () => {
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
-  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v49"/);
+  assert.match(worker, /CACHE_NAME = "finanzas-conductuales-v50"/);
   assert.ok(worker.includes('"./index.html"'));
   assert.ok(worker.includes('"./app.js"'));
   assert.ok(worker.includes('"./finance-core.js"'));
@@ -92,6 +92,7 @@ test("authenticated new users get a three-step financial onboarding", async () =
 
 test("authentication gates onboarding and signed-in users can close their session", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const syncClient = await readFile(new URL("../sync-client.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
 
   assert.ok(app.includes("function shouldShowAuthGate()"));
@@ -102,6 +103,12 @@ test("authentication gates onboarding and signed-in users can close their sessio
   assert.ok(app.includes('data-action="cloud-sign-out">Cerrar sesion'));
   assert.ok(app.includes("function clearLocalUserState()"));
   assert.ok(app.includes("previousEmail !== nextEmail"));
+  assert.ok(app.includes("cloudState.sessionReady = true"));
+  const pullCloud = app.slice(app.indexOf("async function pullCloudAfterLogin"), app.indexOf("function scheduleCloudSave"));
+  assert.equal(pullCloud.includes("cloudState.sessionReady = false"), false);
+  assert.ok(syncClient.includes("CLOUD_TIMEOUT_MS = 10_000"));
+  assert.ok(syncClient.includes("withCloudTimeout"));
+  assert.ok(syncClient.includes("Comprobar la sesion"));
   assert.ok(styles.includes(".auth-gate"));
   assert.ok(styles.includes(".auth-card"));
 });

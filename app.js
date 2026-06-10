@@ -240,6 +240,7 @@ async function initializeCloudSync() {
   try {
     const session = await getCloudSession();
     applyCloudSession(session);
+    cloudState.sessionReady = true;
     if (session) {
       cloudState.status = "syncing";
     }
@@ -247,6 +248,7 @@ async function initializeCloudSync() {
       const wasSignedIn = cloudState.signedIn;
       applyCloudSession(nextSession);
       if (nextSession) {
+        cloudState.sessionReady = true;
         if (cloudState.status !== "syncing") {
           pullCloudAfterLogin();
         }
@@ -298,7 +300,6 @@ async function pullCloudAfterLogin() {
   }
 
   cloudState.status = "syncing";
-  cloudState.sessionReady = false;
   cloudState.error = "";
   renderCloudStatusChange();
 
@@ -3058,6 +3059,7 @@ async function handleCloudLoginSubmit(event) {
       return;
     }
     applyCloudSession(session);
+    cloudState.sessionReady = true;
     state.lastAlert = mode === "signup" ? "Cuenta creada. Sincronizando nube..." : "Sesion iniciada. Bajando nube...";
     await pullCloudAfterLogin();
   } catch (error) {

@@ -1,5 +1,14 @@
 const config = window.FINANZAS_SYNC_CONFIG || {};
+const CLOUD_TIMEOUT_MS = 10_000;
 let client;
+
+function withCloudTimeout(promise, operation) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${operation} tardo demasiado. Revisa internet e intenta de nuevo.`)), CLOUD_TIMEOUT_MS);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 export function isCloudConfigured() {
   return Boolean(config.supabaseUrl && config.supabaseAnonKey);
@@ -32,7 +41,7 @@ export async function getCloudSession() {
   if (!cloud) {
     return null;
   }
-  const { data, error } = await cloud.auth.getSession();
+  const { data, error } = await withCloudTimeout(cloud.auth.getSession(), "Comprobar la sesion");
   if (error) {
     throw error;
   }
@@ -53,7 +62,7 @@ export async function signInToCloud(email, password) {
   if (!cloud) {
     throw new Error("La libreria de nube no esta disponible.");
   }
-  const { data, error } = await cloud.auth.signInWithPassword({ email, password });
+  const { data, error } = await withCloudTimeout(cloud.auth.signInWithPassword({ email, password }), "Iniciar sesion");
   if (error) {
     throw error;
   }
@@ -65,7 +74,7 @@ export async function signUpToCloud(email, password) {
   if (!cloud) {
     throw new Error("La libreria de nube no esta disponible.");
   }
-  const { data, error } = await cloud.auth.signUp({ email, password });
+  const { data, error } = await withCloudTimeout(cloud.auth.signUp({ email, password }), "Crear la cuenta");
   if (error) {
     throw error;
   }
@@ -77,7 +86,7 @@ export async function signOutFromCloud() {
   if (!cloud) {
     return;
   }
-  const { error } = await cloud.auth.signOut();
+  const { error } = await withCloudTimeout(cloud.auth.signOut(), "Cerrar la sesion");
   if (error) {
     throw error;
   }
@@ -90,11 +99,14 @@ export async function loadCloudState() {
     return null;
   }
 
-  const { data, error } = await cloud
-    .from("finance_app_state")
-    .select("app_state, updated_at")
-    .eq("user_id", session.user.id)
-    .maybeSingle();
+  const { data, error } = await withCloudTimeout(
+    cloud
+      .from("finance_app_state")
+      .select("app_state, updated_at")
+      .eq("user_id", session.user.id)
+      .maybeSingle(),
+    "Descargar los datos"
+  );
 
   if (error) {
     throw error;
@@ -110,15 +122,18 @@ export async function saveCloudState(appState) {
   }
 
   const updatedAt = new Date().toISOString();
-  const { data, error } = await cloud
-    .from("finance_app_state")
-    .upsert({
-      user_id: session.user.id,
-      app_state: appState,
-      updated_at: updatedAt
-    })
-    .select("updated_at")
-    .single();
+  const { data, error } = await withCloudTimeout(
+    cloud
+      .from("finance_app_state")
+      .upsert({
+        user_id: session.user.id,
+        app_state: appState,
+        updated_at: updatedAt
+      })
+      .select("updated_at")
+      .single(),
+    "Guardar los datos"
+  );
 
   if (error) {
     throw error;
