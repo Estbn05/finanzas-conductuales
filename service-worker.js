@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CLEANUP_RELEASE = "20260610-auth-unblock";
+const CLEANUP_RELEASE = "20260610-session-restore";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());

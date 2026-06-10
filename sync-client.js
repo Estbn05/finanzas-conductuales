@@ -1,5 +1,6 @@
 const config = window.FINANZAS_SYNC_CONFIG || {};
 const CLOUD_TIMEOUT_MS = 10_000;
+const SESSION_RETRY_DELAY_MS = 350;
 let client;
 
 function withCloudTimeout(promise, operation) {
@@ -28,6 +29,7 @@ export function getCloudClient() {
       auth: {
         autoRefreshToken: true,
         detectSessionInUrl: true,
+        lock: window.supabase.processLock,
         lockAcquireTimeout: 4_000,
         persistSession: true
       }
@@ -42,11 +44,23 @@ export async function getCloudSession() {
   if (!cloud) {
     return null;
   }
-  const { data, error } = await withCloudTimeout(cloud.auth.getSession(), "Comprobar la sesion");
-  if (error) {
-    throw error;
+
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const { data, error } = await withCloudTimeout(cloud.auth.getSession(), "Comprobar la sesion");
+      if (error) {
+        throw error;
+      }
+      return data.session;
+    } catch (error) {
+      lastError = error;
+      if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, SESSION_RETRY_DELAY_MS));
+      }
+    }
   }
-  return data.session;
+  throw lastError;
 }
 
 export function onCloudAuthChange(callback) {

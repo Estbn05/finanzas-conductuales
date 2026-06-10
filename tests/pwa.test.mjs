@@ -7,7 +7,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
   const iconSizes = manifest.icons.map((icon) => icon.sizes);
 
   assert.equal(manifest.display, "standalone");
-  assert.equal(manifest.start_url, "./?pwa-cleanup=20260610-auth-unblock");
+  assert.equal(manifest.start_url, "./?pwa-cleanup=20260610-session-restore");
   assert.equal(manifest.scope, "./");
   assert.equal(manifest.orientation, "portrait-primary");
   assert.ok(iconSizes.includes("192x192"));
@@ -18,7 +18,7 @@ test("service worker removes stale PWA caches and unregisters itself", async () 
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
   assert.ok(worker.includes('CACHE_PREFIX = "finanzas-conductuales-"'));
-  assert.ok(worker.includes('CLEANUP_RELEASE = "20260610-auth-unblock"'));
+  assert.ok(worker.includes('CLEANUP_RELEASE = "20260610-session-restore"'));
   assert.ok(worker.includes("caches.delete(key)"));
   assert.ok(worker.includes("self.registration.unregister()"));
   assert.ok(worker.includes('includeUncontrolled: true'));
@@ -113,7 +113,10 @@ test("authentication gates onboarding and signed-in users can close their sessio
   const pullCloud = app.slice(app.indexOf("async function pullCloudAfterLogin"), app.indexOf("function scheduleCloudSave"));
   assert.equal(pullCloud.includes("cloudState.sessionReady = false"), false);
   assert.ok(syncClient.includes("CLOUD_TIMEOUT_MS = 10_000"));
+  assert.ok(syncClient.includes("SESSION_RETRY_DELAY_MS = 350"));
+  assert.ok(syncClient.includes("lock: window.supabase.processLock"));
   assert.ok(syncClient.includes("lockAcquireTimeout: 4_000"));
+  assert.ok(syncClient.includes("attempt < 2"));
   assert.ok(syncClient.includes("withCloudTimeout"));
   assert.ok(syncClient.includes("Comprobar la sesion"));
   assert.ok(styles.includes(".auth-gate"));
@@ -133,10 +136,10 @@ test("static startup fallback retries automatically without manual controls", as
   assert.ok(html.includes("window.setTimeout(resolve, 1500)"));
   assert.ok(html.includes("registration.unregister()"));
   assert.ok(html.includes("caches.delete(key)"));
-  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260610-auth-unblock")'));
+  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260610-session-restore")'));
   assert.ok(html.includes("window.setTimeout(finish, timeoutMs)"));
   assert.equal(html.includes("cdn.jsdelivr.net/npm/@supabase/supabase-js"), false);
-  assert.ok(html.includes('await import("./app.js?v=20260610-auth-unblock")'));
+  assert.ok(html.includes('await import("./app.js?v=20260610-session-restore")'));
   assert.equal(html.includes("Continuar al acceso"), false);
   assert.equal(html.includes("Recargar aplicacion"), false);
   assert.equal(html.includes('onclick="window.location.reload()"'), false);
