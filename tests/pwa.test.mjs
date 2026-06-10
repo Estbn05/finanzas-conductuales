@@ -7,7 +7,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
   const iconSizes = manifest.icons.map((icon) => icon.sizes);
 
   assert.equal(manifest.display, "standalone");
-  assert.equal(manifest.start_url, "./?pwa-cleanup=20260610-pwa-cleanup");
+  assert.equal(manifest.start_url, "./?pwa-cleanup=20260610-auth-unblock");
   assert.equal(manifest.scope, "./");
   assert.equal(manifest.orientation, "portrait-primary");
   assert.ok(iconSizes.includes("192x192"));
@@ -18,7 +18,7 @@ test("service worker removes stale PWA caches and unregisters itself", async () 
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
   assert.ok(worker.includes('CACHE_PREFIX = "finanzas-conductuales-"'));
-  assert.ok(worker.includes('CLEANUP_RELEASE = "20260610-pwa-cleanup"'));
+  assert.ok(worker.includes('CLEANUP_RELEASE = "20260610-auth-unblock"'));
   assert.ok(worker.includes("caches.delete(key)"));
   assert.ok(worker.includes("self.registration.unregister()"));
   assert.ok(worker.includes('includeUncontrolled: true'));
@@ -98,9 +98,14 @@ test("authentication gates onboarding and signed-in users can close their sessio
   assert.ok(app.includes("function recoverAuthStartup()"));
   assert.equal(app.includes('data-action="recover-auth"'), false);
   assert.equal(app.includes('data-action="reload-app"'), false);
+  assert.ok(app.includes("return !cloudState.signedIn;"));
+  assert.ok(app.includes("Comprobando automaticamente si ya tienes una sesion guardada"));
+  assert.equal(app.includes("Estamos cargando tu cuenta y tus datos antes de mostrar el formulario inicial."), false);
   assert.ok(app.indexOf("if (shouldShowAuthGate())") < app.indexOf("const plan = calculatePlan();"));
-  assert.ok(app.includes('data-cloud-mode="signup">Crear cuenta'));
-  assert.ok(app.includes('data-cloud-mode="signin">Ya tengo cuenta: iniciar sesion'));
+  assert.ok(app.includes('data-cloud-mode="signup"'));
+  assert.ok(app.includes(">Crear cuenta</button>"));
+  assert.ok(app.includes('data-cloud-mode="signin"'));
+  assert.ok(app.includes(">Ya tengo cuenta: iniciar sesion</button>"));
   assert.ok(app.includes('data-action="cloud-sign-out">Cerrar sesion'));
   assert.ok(app.includes("function clearLocalUserState()"));
   assert.ok(app.includes("previousEmail !== nextEmail"));
@@ -108,6 +113,7 @@ test("authentication gates onboarding and signed-in users can close their sessio
   const pullCloud = app.slice(app.indexOf("async function pullCloudAfterLogin"), app.indexOf("function scheduleCloudSave"));
   assert.equal(pullCloud.includes("cloudState.sessionReady = false"), false);
   assert.ok(syncClient.includes("CLOUD_TIMEOUT_MS = 10_000"));
+  assert.ok(syncClient.includes("lockAcquireTimeout: 4_000"));
   assert.ok(syncClient.includes("withCloudTimeout"));
   assert.ok(syncClient.includes("Comprobar la sesion"));
   assert.ok(styles.includes(".auth-gate"));
@@ -123,9 +129,14 @@ test("static startup fallback retries automatically without manual controls", as
   assert.ok(html.includes('const retryKey = "finanzas-startup-retry"'));
   assert.ok(html.includes("window.location.reload()"));
   assert.ok(html.includes("window.pwaCleanupReady"));
+  assert.ok(html.includes("window.pwaCleanupReady = Promise.race"));
+  assert.ok(html.includes("window.setTimeout(resolve, 1500)"));
   assert.ok(html.includes("registration.unregister()"));
   assert.ok(html.includes("caches.delete(key)"));
-  assert.ok(html.includes('await import("./app.js?v=20260610-pwa-cleanup")'));
+  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260610-auth-unblock")'));
+  assert.ok(html.includes("window.setTimeout(finish, timeoutMs)"));
+  assert.equal(html.includes("cdn.jsdelivr.net/npm/@supabase/supabase-js"), false);
+  assert.ok(html.includes('await import("./app.js?v=20260610-auth-unblock")'));
   assert.equal(html.includes("Continuar al acceso"), false);
   assert.equal(html.includes("Recargar aplicacion"), false);
   assert.equal(html.includes('onclick="window.location.reload()"'), false);

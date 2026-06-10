@@ -13,14 +13,14 @@
       content="App personal de finanzas conductuales con monitoreo diario, presupuesto por periodos y simulador de ahorro."
     >
     <title>Finanzas Conductuales</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20260610-pwa-cleanup">
+    <link rel="manifest" href="manifest.webmanifest?v=20260610-auth-unblock">
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="styles.css?v=20260610-pwa-cleanup">
+    <link rel="stylesheet" href="styles.css?v=20260610-auth-unblock">
     <script>
-      window.pwaCleanupReady = (async () => {
+      const pwaCleanupTask = (async () => {
         const cachePrefix = "finanzas-conductuales-";
-        const release = "20260610-pwa-cleanup";
+        const release = "20260610-auth-unblock";
         const retryKey = `finanzas-pwa-cleanup:${release}`;
         let needsFreshLoad = Boolean(navigator.serviceWorker?.controller);
 
@@ -53,6 +53,10 @@
           await new Promise(() => {});
         }
       })();
+      window.pwaCleanupReady = Promise.race([
+        pwaCleanupTask,
+        new Promise((resolve) => window.setTimeout(resolve, 1500))
+      ]);
     </script>
   </head>
   <body>
@@ -90,18 +94,28 @@
           }
         }, 6000);
 
-        const loadScript = (src) =>
+        const loadScript = (src, timeoutMs = 8000) =>
           new Promise((resolve) => {
             const script = document.createElement("script");
+            let settled = false;
+            const finish = () => {
+              if (settled) {
+                return;
+              }
+              settled = true;
+              window.clearTimeout(timeout);
+              resolve();
+            };
+            const timeout = window.setTimeout(finish, timeoutMs);
             script.src = src;
-            script.onload = resolve;
-            script.onerror = resolve;
+            script.onload = finish;
+            script.onerror = finish;
             document.body.append(script);
           });
 
-        await loadScript("sync-config.js?v=20260610-pwa-cleanup");
-        await loadScript("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2");
-        await import("./app.js?v=20260610-pwa-cleanup");
+        await loadScript("sync-config.js?v=20260610-auth-unblock");
+        await loadScript("vendor/supabase-2.108.1.min.js?v=20260610-auth-unblock");
+        await import("./app.js?v=20260610-auth-unblock");
       });
     </script>
   </body>

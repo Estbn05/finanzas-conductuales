@@ -9,7 +9,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260610-pwa-cleanup";
+} from "./finance-core.js?v=20260610-auth-unblock";
 import {
   getCloudSession,
   isCloudConfigured,
@@ -20,7 +20,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260610-pwa-cleanup";
+} from "./sync-client.js?v=20260610-auth-unblock";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -696,11 +696,12 @@ function renderBottomNavigation() {
 }
 
 function shouldShowAuthGate() {
-  return !cloudState.signedIn || !cloudState.sessionReady;
+  return !cloudState.signedIn;
 }
 
 function renderAuthGate() {
-  const checkingSession = ["checking", "syncing"].includes(cloudState.status) || (cloudState.signedIn && !cloudState.sessionReady);
+  const checkingSession = cloudState.status === "checking" && !cloudState.sessionReady;
+  const submittingAccess = cloudState.status === "syncing" && !cloudState.sessionReady;
   const unavailable = !cloudState.configured || !cloudState.libraryLoaded;
 
   return `
@@ -710,29 +711,28 @@ function renderAuthGate() {
           <span class="brand-mark">FC</span>
           <div>
             <p class="eyebrow">Finanzas Conductuales</p>
-            <h1 id="auth-title">${checkingSession ? "Comprobando tu sesion" : "Crea tu cuenta para empezar"}</h1>
+            <h1 id="auth-title">Accede para empezar</h1>
           </div>
         </div>
         ${
-          checkingSession
-            ? `<p>Estamos cargando tu cuenta y tus datos antes de mostrar el formulario inicial.</p>`
-            : unavailable
-              ? `<p>La autenticacion no esta disponible. Revisa la configuracion de Supabase y vuelve a cargar la aplicacion.</p>`
-              : `
-                <p>Primero crea una cuenta o inicia sesion. Despues configuraras tu presupuesto y tus campos habituales.</p>
-                <form class="stacked-form auth-form" id="cloud-login-form">
-                  <label>
-                    Correo
-                    <input name="email" type="email" autocomplete="email" placeholder="tu@email.com" required>
-                  </label>
-                  <label>
-                    Contrasena
-                    <input name="password" type="password" autocomplete="current-password" minlength="6" placeholder="Minimo 6 caracteres" required>
-                  </label>
-                  <button class="btn primary" type="submit" data-cloud-mode="signup">Crear cuenta</button>
-                  <button class="btn ghost" type="submit" data-cloud-mode="signin">Ya tengo cuenta: iniciar sesion</button>
-                </form>
-              `
+          unavailable
+            ? `<p>La autenticacion no esta disponible. Revisa la configuracion de Supabase y vuelve a cargar la aplicacion.</p>`
+            : `
+              <p>Primero crea una cuenta o inicia sesion. Despues configuraras tu presupuesto y tus campos habituales.</p>
+              ${checkingSession ? `<p class="auth-session-note">Comprobando automaticamente si ya tienes una sesion guardada...</p>` : ""}
+              <form class="stacked-form auth-form" id="cloud-login-form">
+                <label>
+                  Correo
+                  <input name="email" type="email" autocomplete="email" placeholder="tu@email.com" required>
+                </label>
+                <label>
+                  Contrasena
+                  <input name="password" type="password" autocomplete="current-password" minlength="6" placeholder="Minimo 6 caracteres" required>
+                </label>
+                <button class="btn primary" type="submit" data-cloud-mode="signup" ${submittingAccess ? "disabled" : ""}>Crear cuenta</button>
+                <button class="btn ghost" type="submit" data-cloud-mode="signin" ${submittingAccess ? "disabled" : ""}>Ya tengo cuenta: iniciar sesion</button>
+              </form>
+            `
         }
         ${cloudState.error ? `<p class="form-error" role="alert">${escapeHtml(cloudState.error)}</p>` : ""}
       </section>

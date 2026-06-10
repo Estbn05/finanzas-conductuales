@@ -28,6 +28,7 @@ export function getCloudClient() {
       auth: {
         autoRefreshToken: true,
         detectSessionInUrl: true,
+        lockAcquireTimeout: 4_000,
         persistSession: true
       }
     });
