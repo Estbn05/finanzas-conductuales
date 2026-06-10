@@ -1,6 +1,7 @@
 const config = window.FINANZAS_SYNC_CONFIG || {};
 const CLOUD_TIMEOUT_MS = 10_000;
 const SESSION_RETRY_DELAY_MS = 350;
+const SESSION_BACKUP_KEY = "finanzas-conductuales:cloud-session:v1";
 let client;
 
 function withCloudTimeout(promise, operation) {
@@ -9,6 +10,51 @@ function withCloudTimeout(promise, operation) {
     timer = setTimeout(() => reject(new Error(`${operation} tardo demasiado. Revisa internet e intenta de nuevo.`)), CLOUD_TIMEOUT_MS);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+function readSessionBackup() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SESSION_BACKUP_KEY) || "null");
+    if (!saved?.access_token || !saved?.refresh_token) {
+      return null;
+    }
+    return saved;
+  } catch {
+    return null;
+  }
+}
+
+function isCurrentSessionBackup(session) {
+  if (!session?.user || !session.access_token || !session.refresh_token) {
+    return false;
+  }
+  const expiresAt = Number(session.expires_at || 0);
+  return !expiresAt || expiresAt * 1000 > Date.now() + 60_000;
+}
+
+function persistSessionBackup(session) {
+  if (!session?.access_token || !session?.refresh_token) {
+    return;
+  }
+  try {
+    localStorage.setItem(
+      SESSION_BACKUP_KEY,
+      JSON.stringify({
+        access_token: session.access_token,
+        expires_at: session.expires_at,
+        expires_in: session.expires_in,
+        refresh_token: session.refresh_token,
+        token_type: session.token_type,
+        user: session.user
+      })
+    );
+  } catch {}
+}
+
+function clearSessionBackup() {
+  try {
+    localStorage.removeItem(SESSION_BACKUP_KEY);
+  } catch {}
 }
 
 export function isCloudConfigured() {
@@ -45,6 +91,18 @@ export async function getCloudSession() {
     return null;
   }
 
+  const backup = readSessionBackup();
+  if (isCurrentSessionBackup(backup)) {
+    withCloudTimeout(cloud.auth.setSession(backup), "Restaurar la sesion")
+      .then(({ data, error }) => {
+        if (!error) {
+          persistSessionBackup(data.session);
+        }
+      })
+      .catch(() => {});
+    return backup;
+  }
+
   let lastError;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
@@ -52,7 +110,23 @@ export async function getCloudSession() {
       if (error) {
         throw error;
       }
-      return data.session;
+      if (data.session) {
+        persistSessionBackup(data.session);
+        return data.session;
+      }
+
+      if (!backup) {
+        return null;
+      }
+      const { data: restored, error: restoreError } = await withCloudTimeout(
+        cloud.auth.setSession(backup),
+        "Restaurar la sesion"
+      );
+      if (restoreError) {
+        throw restoreError;
+      }
+      persistSessionBackup(restored.session);
+      return restored.session;
     } catch (error) {
       lastError = error;
       if (attempt === 0) {
@@ -68,7 +142,12 @@ export function onCloudAuthChange(callback) {
   if (!cloud) {
     return () => {};
   }
-  const { data } = cloud.auth.onAuthStateChange((_event, session) => callback(session));
+  const { data } = cloud.auth.onAuthStateChange((event, session) => {
+    if (session) {
+      persistSessionBackup(session);
+    }
+    setTimeout(() => callback(session, event), 0);
+  });
   return () => data.subscription.unsubscribe();
 }
 
@@ -81,6 +160,7 @@ export async function signInToCloud(email, password) {
   if (error) {
     throw error;
   }
+  persistSessionBackup(data.session);
   return data.session;
 }
 
@@ -93,6 +173,7 @@ export async function signUpToCloud(email, password) {
   if (error) {
     throw error;
   }
+  persistSessionBackup(data.session);
   return data.session;
 }
 
@@ -105,6 +186,7 @@ export async function signOutFromCloud() {
   if (error) {
     throw error;
   }
+  clearSessionBackup();
 }
 
 export async function loadCloudState() {

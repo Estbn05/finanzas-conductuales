@@ -9,7 +9,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260610-session-restore";
+} from "./finance-core.js?v=20260610-session-backup";
 import {
   getCloudSession,
   isCloudConfigured,
@@ -20,7 +20,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260610-session-restore";
+} from "./sync-client.js?v=20260610-session-backup";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -243,20 +243,12 @@ async function initializeCloudSync() {
       cloudState.status = "syncing";
     }
     authUnsubscribe = onCloudAuthChange((nextSession) => {
-      const wasSignedIn = cloudState.signedIn;
-      applyCloudSession(nextSession);
       if (nextSession) {
+        applyCloudSession(nextSession);
         cloudState.sessionReady = true;
         if (cloudState.status !== "syncing") {
           pullCloudAfterLogin();
         }
-      } else {
-        if (wasSignedIn) {
-          clearLocalUserState();
-        }
-        cloudState.sessionReady = true;
-        cloudState.status = "signed-out";
-        renderCloudStatusChange();
       }
     });
 

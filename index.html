@@ -13,14 +13,14 @@
       content="App personal de finanzas conductuales con monitoreo diario, presupuesto por periodos y simulador de ahorro."
     >
     <title>Finanzas Conductuales</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20260610-session-restore">
+    <link rel="manifest" href="manifest.webmanifest?v=20260610-session-backup">
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="styles.css?v=20260610-session-restore">
+    <link rel="stylesheet" href="styles.css?v=20260610-session-backup">
     <script>
       const pwaCleanupTask = (async () => {
         const cachePrefix = "finanzas-conductuales-";
-        const release = "20260610-session-restore";
+        const release = "20260610-session-backup";
         const retryKey = `finanzas-pwa-cleanup:${release}`;
         let needsFreshLoad = Boolean(navigator.serviceWorker?.controller);
 
@@ -113,9 +113,9 @@
             document.body.append(script);
           });
 
-        await loadScript("sync-config.js?v=20260610-session-restore");
-        await loadScript("vendor/supabase-2.108.1.min.js?v=20260610-session-restore");
-        await import("./app.js?v=20260610-session-restore");
+        await loadScript("sync-config.js?v=20260610-session-backup");
+        await loadScript("vendor/supabase-2.108.1.min.js?v=20260610-session-backup");
+        await import("./app.js?v=20260610-session-backup");
       });
     </script>
   </body>
