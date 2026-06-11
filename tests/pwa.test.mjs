@@ -7,7 +7,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
   const iconSizes = manifest.icons.map((icon) => icon.sizes);
 
   assert.equal(manifest.display, "standalone");
-  assert.equal(manifest.start_url, "./?pwa-cleanup=20260610-budget-clarity");
+  assert.equal(manifest.start_url, "./?pwa-cleanup=20260610-movements-theme");
   assert.equal(manifest.scope, "./");
   assert.equal(manifest.orientation, "portrait-primary");
   assert.ok(iconSizes.includes("192x192"));
@@ -18,7 +18,7 @@ test("service worker removes stale PWA caches and unregisters itself", async () 
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
   assert.ok(worker.includes('CACHE_PREFIX = "finanzas-conductuales-"'));
-  assert.ok(worker.includes('CLEANUP_RELEASE = "20260610-budget-clarity"'));
+  assert.ok(worker.includes('CLEANUP_RELEASE = "20260610-movements-theme"'));
   assert.ok(worker.includes("caches.delete(key)"));
   assert.ok(worker.includes("self.registration.unregister()"));
   assert.ok(worker.includes('includeUncontrolled: true'));
@@ -33,6 +33,7 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(app.includes('class="expense-fab"'));
   assert.ok(app.includes('class="bottom-nav"'));
   assert.ok(app.includes('class="drawer-scrim"'));
+  assert.ok(app.includes('{ id: "movements", label: "Movimientos", icon: "04" }'));
   assert.ok(app.includes('data-action="open-expense"'));
   assert.ok(app.includes('data-action="close-expense"'));
   assert.ok(app.includes('class="quick-expense-panel"'));
@@ -58,6 +59,25 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.match(styles, /\.money-bar strong\s*{[\s\S]*font-size: 2\.38rem/);
   assert.match(styles, /\.bar\s*{[\s\S]*height: 4px/);
   assert.ok(styles.includes("@media (prefers-color-scheme: dark)"));
+});
+
+test("movements has its own section and can sort by recent date or highest amount", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+
+  assert.ok(app.includes("function renderMovements()"));
+  assert.ok(app.includes('id="transaction-history-sort"'));
+  assert.ok(app.includes('value="recent"'));
+  assert.ok(app.includes('value="amount"'));
+  assert.ok(app.includes("transactionHistorySort"));
+  assert.ok(app.includes('sort === "amount"'));
+  assert.ok(app.includes("Number(b.amount || 0) - Number(a.amount || 0)"));
+  assert.ok(app.includes("function compareTransactionsByRecent(a, b)"));
+  assert.ok(app.includes('String(b.date || "").localeCompare(String(a.date || ""))'));
+  assert.ok(app.includes('movements: "movimientos"'));
+
+  const profile = app.slice(app.indexOf("function renderProfile"), app.indexOf("function renderStudentContextPanel"));
+  assert.equal(profile.includes("renderTransactionHistory"), false);
+  assert.equal(profile.includes("Movimientos del periodo"), false);
 });
 
 test("authenticated new users get a three-step financial onboarding", async () => {
@@ -145,10 +165,10 @@ test("static startup fallback retries automatically without manual controls", as
   assert.ok(html.includes("window.setTimeout(resolve, 1500)"));
   assert.ok(html.includes("registration.unregister()"));
   assert.ok(html.includes("caches.delete(key)"));
-  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260610-budget-clarity")'));
+  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260610-movements-theme")'));
   assert.ok(html.includes("window.setTimeout(finish, timeoutMs)"));
   assert.equal(html.includes("cdn.jsdelivr.net/npm/@supabase/supabase-js"), false);
-  assert.ok(html.includes('await import("./app.js?v=20260610-budget-clarity")'));
+  assert.ok(html.includes('await import("./app.js?v=20260610-movements-theme")'));
   assert.equal(html.includes("Continuar al acceso"), false);
   assert.equal(html.includes("Recargar aplicacion"), false);
   assert.equal(html.includes('onclick="window.location.reload()"'), false);
@@ -207,6 +227,8 @@ test("every form keeps readable controls in Android PWA themes", async () => {
   assert.ok(styles.includes("var(--field-arrow)"));
   assert.ok(styles.includes("input:-webkit-autofill"));
   assert.match(styles, /\.btn\.ghost\s*{[\s\S]*background: rgba\(255, 255, 255, 0\.06\)/);
+  assert.match(styles, /\.history-row,[\s\S]*background: var\(--panel\)/);
+  assert.equal(styles.includes("background: #fffdf8;"), false);
   assert.match(styles, /\.quick-amount input\[data-money-input="true"\]\s*{[\s\S]*background: transparent !important/);
 });
 

@@ -187,7 +187,7 @@ a {
   border: 2px solid rgba(255, 253, 248, 0.72);
   border-radius: var(--radius);
   color: var(--teal);
-  background: #fffdf8;
+  background: var(--panel);
   font-weight: 900;
 }
 
@@ -288,7 +288,7 @@ a {
   border-left: 4px solid var(--amber);
   border-radius: var(--radius);
   color: var(--ink);
-  background: #fff7d8;
+  background: var(--amber-2);
   overflow-wrap: anywhere;
 }
 
@@ -409,7 +409,7 @@ a {
   border: 1px solid rgba(255, 253, 248, 0.24);
   border-radius: var(--radius);
   color: var(--muted);
-  background: #fffdf8;
+  background: var(--panel);
 }
 
 .card h2,
@@ -583,6 +583,7 @@ a {
 .today-grid .card,
 .budget-grid .card,
 .savings-grid .card,
+.movements-grid .card,
 .profile-grid .card {
   grid-column: span 4;
 }
@@ -596,6 +597,14 @@ a {
 .split-card,
 .today-grid .ritual-card {
   grid-column: span 8;
+}
+
+.movements-grid .movements-card {
+  grid-column: span 12;
+}
+
+.history-sort {
+  width: min(320px, 100%);
 }
 
 .today-grid .focus-card {
@@ -704,7 +713,7 @@ a {
 .btn.ghost {
   border-color: var(--line);
   color: var(--ink);
-  background: #fffdf8;
+  background: var(--panel);
 }
 
 .btn.danger {
@@ -750,7 +759,8 @@ a {
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: #fffdf8;
+  color: var(--ink);
+  background: var(--panel);
 }
 
 .transaction-row {
@@ -801,7 +811,7 @@ input {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   color: var(--ink);
-  background: #fffdf8;
+  background: var(--field-bg);
 }
 
 input,
@@ -1080,7 +1090,7 @@ input[type="range"] {
 
 [data-invalid="true"] {
   border-color: var(--coral);
-  background: #fff7f5;
+  background: var(--coral-2);
 }
 
 label {
@@ -1140,7 +1150,7 @@ label {
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: #fffdf8;
+  background: var(--panel);
 }
 
 .phase-grid span,
@@ -1260,7 +1270,7 @@ label {
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: #fffdf8;
+  background: var(--panel);
 }
 
 .allocation-preview strong,
@@ -1392,6 +1402,7 @@ label {
   .today-grid .card,
   .budget-grid .card,
   .savings-grid .card,
+  .movements-grid .card,
   .profile-grid .card,
   .wide-card,
   .split-card,
@@ -1427,6 +1438,7 @@ label {
   .budget-grid .card,
   .savings-grid .card,
   .spending-grid .card,
+  .movements-grid .card,
   .profile-grid .card,
   .wide-card,
   .split-card,
@@ -2316,6 +2328,9 @@ body {
     --muted: #8d9a94;
     --line: rgba(255, 255, 255, 0.1);
     --teal-2: rgba(45, 155, 111, 0.18);
+    --amber-2: rgba(184, 124, 26, 0.18);
+    --coral-2: rgba(184, 74, 58, 0.18);
+    --plum-2: rgba(98, 81, 138, 0.2);
     --shadow: 0 18px 42px rgba(0, 0, 0, 0.22);
     --field-bg: #1d2421;
     --field-text: #e8f5ee;
@@ -2325,7 +2340,16 @@ body {
   }
 
   .money-location-chips div,
+  .transaction-row,
+  .history-row,
+  .job-row,
+  .extra-budget-row,
   .category-row,
+  .script-row,
+  .cooldown-item,
+  .score-grid div,
+  .context-grid div,
+  .allocation-preview div,
   .bottom-nav,
   .quick-expense-form input[type="text"],
   .quick-expense-form input[type="number"],

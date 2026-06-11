@@ -10,7 +10,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260610-budget-clarity";
+} from "./finance-core.js?v=20260610-movements-theme";
 import {
   getCloudSession,
   isCloudConfigured,
@@ -21,7 +21,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260610-budget-clarity";
+} from "./sync-client.js?v=20260610-movements-theme";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -43,7 +43,8 @@ const NAV_ITEMS = [
   { id: "today", label: "Inicio", icon: "01" },
   { id: "budget", label: "Plan", icon: "02" },
   { id: "savings", label: "Ahorro", icon: "03" },
-  { id: "profile", label: "Datos", icon: "04" }
+  { id: "movements", label: "Movimientos", icon: "04" },
+  { id: "profile", label: "Datos", icon: "05" }
 ];
 
 const app = document.querySelector("#app");
@@ -57,6 +58,7 @@ if (quickExpenseOpen) {
 let applyingCloudState = false;
 let cloudSaveTimer;
 let authUnsubscribe = () => {};
+let transactionHistorySort = "recent";
 let snackbar = null;
 let snackbarTimer;
 let pendingExtraAllocation = null;
@@ -784,6 +786,7 @@ function renderView(plan) {
     budget: renderBudget,
     savings: renderSavings,
     spending: renderSpending,
+    movements: renderMovements,
     profile: renderProfile
   };
   return views[state.activeView](plan);
@@ -928,17 +931,6 @@ function renderToday(plan) {
             ? `<p class="helper-text">Quedan gastos de hoy sin categoria.</p>`
             : `<p class="helper-text">Todo lo de hoy ya tiene categoria.</p>`
         }
-      </article>
-
-      <article class="card wide-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Gastos registrados</p>
-            <h2>Movimientos del periodo</h2>
-          </div>
-          <span class="metric-badge">${transactionsForSummary(summary).length} gastos</span>
-        </div>
-        ${renderTransactionHistory(summary)}
       </article>
 
       <article class="card hero-visual">
@@ -1516,10 +1508,39 @@ function renderLocationOptions(selected) {
     .join("");
 }
 
-function renderTransactionHistory(summary = budgetSummary()) {
+function renderMovements() {
+  const summary = budgetSummary();
+  return `
+    <section class="content-grid movements-grid">
+      <article class="card wide-card movements-card">
+        <div class="card-heading movements-heading">
+          <div>
+            <p class="eyebrow">Historial</p>
+            <h2>Movimientos del periodo</h2>
+          </div>
+          <span class="metric-badge">${transactionsForSummary(summary).length} gastos</span>
+        </div>
+        <label class="history-sort">
+          Ordenar por
+          <select id="transaction-history-sort">
+            <option value="recent" ${transactionHistorySort === "recent" ? "selected" : ""}>Mas recientes</option>
+            <option value="amount" ${transactionHistorySort === "amount" ? "selected" : ""}>Mayor cantidad gastada</option>
+          </select>
+        </label>
+        ${renderTransactionHistory(summary, transactionHistorySort)}
+      </article>
+    </section>
+  `;
+}
+
+function renderTransactionHistory(summary = budgetSummary(), sort = "recent") {
   const transactions = transactionsForSummary(summary)
     .slice()
-    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    .sort((a, b) =>
+      sort === "amount"
+        ? Number(b.amount || 0) - Number(a.amount || 0) || compareTransactionsByRecent(a, b)
+        : compareTransactionsByRecent(a, b)
+    );
 
   if (!transactions.length) {
     return `<div class="empty-state">Todavia no hay gastos registrados en este periodo.</div>`;
@@ -1543,6 +1564,15 @@ function renderTransactionHistory(summary = budgetSummary()) {
         .join("")}
     </div>
   `;
+}
+
+function compareTransactionsByRecent(a, b) {
+  const dateDifference = String(b.date || "").localeCompare(String(a.date || ""));
+  if (dateDifference) return dateDifference;
+
+  const aCreated = Date.parse(a.createdAt || a.updated_at || "");
+  const bCreated = Date.parse(b.createdAt || b.updated_at || "");
+  return (Number.isFinite(bCreated) ? bCreated : 0) - (Number.isFinite(aCreated) ? aCreated : 0);
 }
 
 function renderCooldown(cooldown) {
@@ -1608,17 +1638,6 @@ function renderProfile(plan) {
         ${renderAllocation("Ahorro proyectado", plan.savings, "savings")}
         ${renderAllocation("Resto para gastos", plan.expenses, "expenses")}
         <p class="helper-text">Es una simulacion; no modifica tu presupuesto ni tus saldos.</p>
-      </article>
-
-      <article class="card wide-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Historial</p>
-            <h2>Movimientos del periodo</h2>
-          </div>
-          <span class="metric-badge">${transactionsForSummary(budgetSummary()).length} gastos</span>
-        </div>
-        ${renderTransactionHistory()}
       </article>
 
       <article class="card">
@@ -2207,6 +2226,14 @@ function bindEvents() {
   const cloudLoginForm = document.querySelector("#cloud-login-form");
   if (cloudLoginForm) {
     cloudLoginForm.addEventListener("submit", handleCloudLoginSubmit);
+  }
+
+  const historySort = document.querySelector("#transaction-history-sort");
+  if (historySort) {
+    historySort.addEventListener("change", () => {
+      transactionHistorySort = historySort.value === "amount" ? "amount" : "recent";
+      render();
+    });
   }
 
   const importFile = document.querySelector("#import-file");
@@ -3593,6 +3620,8 @@ function viewFromHash(fallback) {
     ahorro: "savings",
     registrar: "spending",
     gastos: "spending",
+    movimientos: "movements",
+    historial: "movements",
     datos: "profile",
     cuenta: "profile",
     profile: "profile"
@@ -3619,6 +3648,7 @@ function hashFromView(view) {
     budget: "plan",
     savings: "ahorro",
     spending: "registrar",
+    movements: "movimientos",
     profile: "datos"
   };
   return hashes[view] || view;

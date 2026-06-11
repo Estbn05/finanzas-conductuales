@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CLEANUP_RELEASE = "20260610-budget-clarity";
+const CLEANUP_RELEASE = "20260610-movements-theme";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
