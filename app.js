@@ -2,6 +2,7 @@ import {
   FREE_CATEGORY_ID,
   LARGE_PURCHASE_RATIO,
   budgetAmountForJob as getBudgetAmountForJob,
+  budgetRingAllocation as getBudgetRingAllocation,
   budgetSummary as getBudgetSummary,
   calculatePlan as calculateFinancePlan,
   categoryStatus as getCategoryStatus,
@@ -9,7 +10,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260610-session-backup";
+} from "./finance-core.js?v=20260610-budget-clarity";
 import {
   getCloudSession,
   isCloudConfigured,
@@ -20,7 +21,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260610-session-backup";
+} from "./sync-client.js?v=20260610-budget-clarity";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -632,10 +633,9 @@ function render() {
           ${NAV_ITEMS.map((item) => renderNavItem(item)).join("")}
         </nav>
         <div class="menu-tools">
-          ${renderCloudStatus()}
           <button class="btn primary" type="button" data-action="open-diagnosis">Mis datos</button>
           <button class="btn ghost" type="button" data-action="cloud-sign-out">Cerrar sesion</button>
-          ${state.lastAlert ? `<div class="menu-notice" role="status">${escapeHtml(state.lastAlert)}</div>` : ""}
+          ${menuAlertText() ? `<div class="menu-notice" role="status">${escapeHtml(menuAlertText())}</div>` : ""}
         </div>
       </div>
     </aside>
@@ -773,26 +773,9 @@ function periodExtraSourceLabel(summary = budgetSummary()) {
   return hiddenCount > 0 ? `${labels} · +${hiddenCount} mas` : labels;
 }
 
-function renderCloudStatus() {
-  if (!cloudState.configured) {
-    return `<span class="status-pill cloud-status"><strong>Local</strong> sin nube</span>`;
-  }
-  if (cloudState.status === "checking") {
-    return `<span class="status-pill cloud-status"><strong>Nube</strong> revisando</span>`;
-  }
-  if (!cloudState.signedIn) {
-    return `<span class="status-pill cloud-status"><strong>Nube</strong> sin sesion</span>`;
-  }
-  if (cloudState.status === "syncing") {
-    return `<span class="status-pill cloud-status"><strong>Nube</strong> sincronizando</span>`;
-  }
-  if (cloudState.status === "pending") {
-    return `<span class="status-pill cloud-status pending"><strong>Nube</strong> pendiente</span>`;
-  }
-  if (cloudState.status === "error") {
-    return `<span class="status-pill cloud-status danger"><strong>Nube</strong> error</span>`;
-  }
-  return `<span class="status-pill cloud-status"><strong>Nube</strong> al dia</span>`;
+function menuAlertText() {
+  const alert = String(state.lastAlert || "");
+  return /nube|sincron/i.test(alert) ? "" : alert;
 }
 
 function renderView(plan) {
@@ -814,16 +797,6 @@ function getPrimaryAction(plan, unlabeled, checkinDone) {
       badge: "Primer paso",
       button: "Empezar",
       action: "open-diagnosis"
-    };
-  }
-
-  if (cloudState.configured && !cloudState.signedIn) {
-    return {
-      title: "Inicia sesion para sincronizar",
-      copy: "Asi tus datos se bajan automaticamente en el celular despues de iniciar sesion.",
-      badge: "Nube",
-      button: "Ir a Datos",
-      view: "profile"
     };
   }
 
@@ -1085,13 +1058,16 @@ function renderTransactionLabeler(transaction) {
 
 function renderBudget(plan) {
   const summary = budgetSummary();
-  const assignmentRatio = summary.income ? (summary.reserved / summary.income) * 100 : 0;
+  const ring = getBudgetRingAllocation(summary);
+  const assignmentRatio = summary.income ? (ring.reserved / summary.income) * 100 : 0;
+  const reservedAngle = (ring.reserved / Math.max(1, ring.total)) * 360;
+  const spentAngle = ((ring.reserved + ring.spent) / Math.max(1, ring.total)) * 360;
   const status = summary.overReserved ? "over" : summary.freeBudget > 0 ? "under" : "balanced";
 
   return `
     <section class="content-grid budget-grid">
       <article class="card split-card">
-        <div class="budget-ring" style="--reserved:${Math.min(360, (summary.reserved / Math.max(1, summary.income)) * 360)}deg; --spent:${Math.min(360, ((summary.reserved + summary.freeImpactSpent) / Math.max(1, summary.income)) * 360)}deg">
+        <div class="budget-ring" style="--reserved:${reservedAngle}deg; --spent:${spentAngle}deg">
           <div>
             <strong>${Math.round(assignmentRatio)}%</strong>
             <span>reservado</span>
@@ -1100,12 +1076,11 @@ function renderBudget(plan) {
         <div class="split-details">
           <p class="eyebrow">Presupuesto ${summary.cadenceLabel}</p>
           <h2>${formatMoney(summary.income)} por periodo</h2>
-          ${renderAllocation("Presupuesto base", summary.baseIncome, "savings")}
-          ${renderAllocation("Dinero extra", summary.extraIncome, "expenses")}
-          ${renderAllocation("Campos reservados", summary.reserved, "reserved")}
-          ${renderAllocation("Apartado sin gastar", summary.reservedRemaining, "savings")}
-          ${renderAllocation("Libre antes de gastos", summary.freeBudget, "savings")}
-          ${renderAllocation("Todos los gastos registrados", summary.totalSpent, "expenses")}
+          ${renderAllocation("Campos reservados", ring.reserved, "reserved")}
+          ${renderAllocation("Gastos registrados", ring.spent, "expenses")}
+          ${renderAllocation("Libre disponible", ring.free, "savings")}
+          <p class="helper-text">Las tres porciones suman ${formatMoney(ring.total)}. Base ${formatMoney(summary.baseIncome)} + extra ${formatMoney(summary.extraIncome)}.</p>
+          ${ring.outside > 0 ? `<p class="form-error">Gastos fuera del presupuesto: ${formatMoney(ring.outside)}.</p>` : ""}
           <p class="helper-text">Periodo actual: ${formatDate(summary.window.start)} - ${formatDate(previousDay(summary.window.end))}. Equivale a ${formatMoney(getMonthlyIncome(state.profile))} / mes.</p>
         </div>
       </article>
@@ -1594,7 +1569,7 @@ function renderProfile(plan) {
 
   return `
     <section class="content-grid profile-grid">
-      ${renderCloudPanel()}
+      ${renderAccountPanel()}
 
       <article class="card">
         <p class="eyebrow">Tus datos</p>
@@ -1724,7 +1699,7 @@ function renderStudentContextPanel() {
 function renderBackupTools() {
   const backup = latestLocalBackup();
   if (!backup) {
-    return `<p class="helper-text">Los respaldos automaticos aparecen aqui despues de importar, reiniciar o bajar nube.</p>`;
+    return `<p class="helper-text">Los respaldos automaticos aparecen aqui despues de importar o reiniciar.</p>`;
   }
 
   return `
@@ -1738,68 +1713,18 @@ function renderBackupTools() {
   `;
 }
 
-function renderCloudPanel() {
-  if (!cloudState.configured) {
-    return `
-      <article class="card wide-card cloud-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Sincronizacion</p>
-            <h2>Modo local por ahora</h2>
-          </div>
-          <span class="metric-badge">Falta Supabase</span>
-        </div>
-        <p>Para que computador y celular compartan datos, configura Supabase en <strong>sync-config.js</strong>. Cuando este activo, iniciar sesion bajara la nube automaticamente.</p>
-      </article>
-    `;
-  }
-
-  if (cloudState.signedIn) {
-    return `
-      <article class="card wide-card cloud-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Cuenta y nube</p>
-            <h2>${escapeHtml(cloudState.email)}</h2>
-          </div>
-          <span class="metric-badge">${cloudState.status === "syncing" ? "Sincronizando" : "Al dia"}</span>
-        </div>
-        <p>Cuando guardas cambios, se suben solos. En otro dispositivo solo inicia sesion y la app baja la nube automaticamente.</p>
-        ${cloudState.error ? `<p class="form-error">${escapeHtml(cloudState.error)}</p>` : ""}
-        <div class="card-actions">
-          <button class="btn secondary" type="button" data-action="push-cloud-now">Subir ahora</button>
-          <button class="btn ghost" type="button" data-action="pull-cloud-now">Bajar nube</button>
-          <button class="btn danger" type="button" data-action="cloud-sign-out">Cerrar sesion</button>
-        </div>
-      </article>
-    `;
-  }
-
+function renderAccountPanel() {
   return `
-    <article class="card wide-card cloud-card">
+    <article class="card wide-card account-card">
       <div class="card-heading">
         <div>
-          <p class="eyebrow">Cuenta y nube</p>
-          <h2>Inicia sesion</h2>
+          <p class="eyebrow">Cuenta</p>
+          <h2>${escapeHtml(cloudState.email)}</h2>
         </div>
-        <span class="metric-badge">Auto-sync</span>
       </div>
-      <p>Despues de iniciar sesion, la app descarga tu nube automaticamente. Si es tu primer dispositivo, sube tu plan actual.</p>
-      ${cloudState.error ? `<p class="form-error">${escapeHtml(cloudState.error)}</p>` : ""}
-      <form class="inline-form cloud-form" id="cloud-login-form">
-        <label>
-          Correo
-          <input name="email" type="email" autocomplete="email" placeholder="tu@email.com" required>
-        </label>
-        <label>
-          Contrasena
-          <input name="password" type="password" autocomplete="current-password" minlength="6" placeholder="Minimo 6 caracteres" required>
-        </label>
-        <div class="cloud-form-actions">
-          <button class="btn primary" type="submit" data-cloud-mode="signin">Iniciar sesion</button>
-          <button class="btn ghost" type="submit" data-cloud-mode="signup">Crear cuenta</button>
-        </div>
-      </form>
+      <div class="card-actions">
+        <button class="btn danger" type="button" data-action="cloud-sign-out">Cerrar sesion</button>
+      </div>
     </article>
   `;
 }
@@ -3065,7 +2990,7 @@ async function handleCloudLoginSubmit(event) {
     }
     applyCloudSession(session);
     cloudState.sessionReady = true;
-    state.lastAlert = mode === "signup" ? "Cuenta creada. Sincronizando nube..." : "Sesion iniciada. Bajando nube...";
+    state.lastAlert = mode === "signup" ? "Cuenta creada." : "Sesion iniciada.";
     await pullCloudAfterLogin();
   } catch (error) {
     cloudState.sessionReady = true;

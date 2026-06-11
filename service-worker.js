@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CLEANUP_RELEASE = "20260610-session-backup";
+const CLEANUP_RELEASE = "20260610-budget-clarity";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());

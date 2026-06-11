@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   budgetAmountForJob,
+  budgetRingAllocation,
   budgetSummary,
   calculatePlan,
   categoryStatus,
@@ -9,6 +10,34 @@ import {
   getEmergencyTarget,
   isLargeUnbudgetedPurchase
 } from "../finance-core.js";
+
+test("budget ring allocation is an exact non-overlapping partition of income", () => {
+  const ring = budgetRingAllocation({
+    income: 1_690_000,
+    reserved: 1_124_000,
+    totalSpent: 371_000
+  });
+
+  assert.deepEqual(ring, {
+    reserved: 1_124_000,
+    spent: 371_000,
+    free: 195_000,
+    outside: 0,
+    total: 1_690_000
+  });
+});
+
+test("budget ring reports spending outside the available budget separately", () => {
+  const ring = budgetRingAllocation({
+    income: 1_000_000,
+    reserved: 800_000,
+    totalSpent: 350_000
+  });
+
+  assert.equal(ring.reserved + ring.spent + ring.free, ring.total);
+  assert.equal(ring.total, 1_000_000);
+  assert.equal(ring.outside, 150_000);
+});
 
 function makeState(overrides = {}) {
   return {

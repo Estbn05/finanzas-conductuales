@@ -7,7 +7,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
   const iconSizes = manifest.icons.map((icon) => icon.sizes);
 
   assert.equal(manifest.display, "standalone");
-  assert.equal(manifest.start_url, "./?pwa-cleanup=20260610-session-backup");
+  assert.equal(manifest.start_url, "./?pwa-cleanup=20260610-budget-clarity");
   assert.equal(manifest.scope, "./");
   assert.equal(manifest.orientation, "portrait-primary");
   assert.ok(iconSizes.includes("192x192"));
@@ -18,7 +18,7 @@ test("service worker removes stale PWA caches and unregisters itself", async () 
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
   assert.ok(worker.includes('CACHE_PREFIX = "finanzas-conductuales-"'));
-  assert.ok(worker.includes('CLEANUP_RELEASE = "20260610-session-backup"'));
+  assert.ok(worker.includes('CLEANUP_RELEASE = "20260610-budget-clarity"'));
   assert.ok(worker.includes("caches.delete(key)"));
   assert.ok(worker.includes("self.registration.unregister()"));
   assert.ok(worker.includes('includeUncontrolled: true'));
@@ -145,10 +145,10 @@ test("static startup fallback retries automatically without manual controls", as
   assert.ok(html.includes("window.setTimeout(resolve, 1500)"));
   assert.ok(html.includes("registration.unregister()"));
   assert.ok(html.includes("caches.delete(key)"));
-  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260610-session-backup")'));
+  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260610-budget-clarity")'));
   assert.ok(html.includes("window.setTimeout(finish, timeoutMs)"));
   assert.equal(html.includes("cdn.jsdelivr.net/npm/@supabase/supabase-js"), false);
-  assert.ok(html.includes('await import("./app.js?v=20260610-session-backup")'));
+  assert.ok(html.includes('await import("./app.js?v=20260610-budget-clarity")'));
   assert.equal(html.includes("Continuar al acceso"), false);
   assert.equal(html.includes("Recargar aplicacion"), false);
   assert.equal(html.includes('onclick="window.location.reload()"'), false);
@@ -210,7 +210,7 @@ test("every form keeps readable controls in Android PWA themes", async () => {
   assert.match(styles, /\.quick-amount input\[data-money-input="true"\]\s*{[\s\S]*background: transparent !important/);
 });
 
-test("behavioral finance, cloud sync, undo and backup features remain available", async () => {
+test("behavioral finance, silent sync, undo and backup features remain available", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
 
   assert.ok(app.includes("Gasto registrado."));
@@ -225,7 +225,10 @@ test("behavioral finance, cloud sync, undo and backup features remain available"
   assert.ok(app.includes("BACKUP_KEY"));
   assert.ok(app.includes("saveLocalBackup"));
   assert.ok(app.includes('"restore-latest-backup"'));
-  assert.ok(app.includes("Nube</strong> pendiente"));
+  assert.ok(app.includes("function menuAlertText()"));
+  assert.equal(app.includes("function renderCloudStatus()"), false);
+  assert.equal(app.includes("Cuenta y nube"), false);
+  assert.ok(app.includes("function renderAccountPanel()"));
   assert.ok(app.includes("liquiditySummary"));
   assert.ok(app.includes("adjustLiquidity"));
   assert.ok(app.includes("validateTransactionDraft"));
@@ -234,6 +237,19 @@ test("behavioral finance, cloud sync, undo and backup features remain available"
   assert.ok(app.includes("reconcileLiquidity"));
   assert.ok(app.includes("renderTransactionHistory"));
   assert.ok(!app.includes("state.transactions = []"));
+});
+
+test("budget ring uses one matching color per non-overlapping amount", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  assert.ok(app.includes("getBudgetRingAllocation(summary)"));
+  assert.ok(app.includes('renderAllocation("Campos reservados", ring.reserved, "reserved")'));
+  assert.ok(app.includes('renderAllocation("Gastos registrados", ring.spent, "expenses")'));
+  assert.ok(app.includes('renderAllocation("Libre disponible", ring.free, "savings")'));
+  assert.equal(app.includes('renderAllocation("Apartado sin gastar"'), false);
+  assert.equal(app.includes('renderAllocation("Libre antes de gastos"'), false);
+  assert.match(styles, /var\(--coral\) 0 var\(--reserved\),[\s\S]*var\(--amber\) var\(--reserved\) var\(--spent\),[\s\S]*var\(--teal\) var\(--spent\) 360deg/);
 });
 
 test("savings remains advisory and debt features are removed", async () => {

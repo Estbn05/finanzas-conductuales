@@ -171,6 +171,20 @@ export function budgetSummary(state, today) {
   };
 }
 
+export function budgetRingAllocation(summary) {
+  const income = Math.max(0, Number(summary?.income || 0));
+  const reserved = Math.min(income, Math.max(0, Number(summary?.reserved || 0)));
+  const spent = Math.min(Math.max(0, income - reserved), Math.max(0, Number(summary?.totalSpent || 0)));
+  const free = Math.max(0, income - reserved - spent);
+  return {
+    reserved,
+    spent,
+    free,
+    outside: Math.max(0, Number(summary?.totalSpent || 0) - spent),
+    total: reserved + spent + free
+  };
+}
+
 export function isSavingsJob(job) {
   return /ahorro|emergencia|buffer/i.test(String(job?.name || ""));
 }

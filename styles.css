@@ -480,10 +480,6 @@ a {
   background: var(--amber-2);
 }
 
-.cloud-status {
-  max-width: 190px;
-}
-
 .status-pill strong,
 .metric-badge strong {
   color: var(--ink);
@@ -959,8 +955,8 @@ input[type="range"] {
   border-radius: 50%;
   background: conic-gradient(
     var(--coral) 0 var(--reserved),
-    var(--teal) var(--reserved) var(--spent),
-    var(--amber) var(--spent) 360deg
+    var(--amber) var(--reserved) var(--spent),
+    var(--teal) var(--spent) 360deg
   );
 }
 
@@ -1027,7 +1023,7 @@ input[type="range"] {
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
-.cloud-card {
+.account-card {
   border-color: rgba(21, 111, 105, 0.28);
 }
 
