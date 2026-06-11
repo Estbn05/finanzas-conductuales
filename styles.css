@@ -1032,8 +1032,7 @@ input[type="range"] {
   align-items: end;
 }
 
-.extra-budget-form,
-.liquidity-form {
+.extra-budget-form {
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
@@ -1194,18 +1193,6 @@ label {
   border-bottom: 0;
 }
 
-.file-btn {
-  position: relative;
-  overflow: hidden;
-}
-
-.file-btn input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1315,12 +1302,6 @@ label {
   border-color: rgba(240, 113, 103, 0.42);
   color: #fffdf8;
   background: #8c2d25;
-}
-
-.backup-tools {
-  display: grid;
-  gap: 10px;
-  padding-top: 4px;
 }
 
 .quick-save-actions {
@@ -1463,7 +1444,6 @@ label {
   .cooldown-item,
   .inline-form,
   .extra-budget-form,
-  .liquidity-form,
   .cloud-form,
   .diagnosis-form,
   .phase-grid,

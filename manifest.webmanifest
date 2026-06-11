@@ -5,7 +5,7 @@
   "description": "Finanzas personales con ritual diario, presupuesto 1/3 y nudges conductuales.",
   "lang": "es-CO",
   "dir": "ltr",
-  "start_url": "./?pwa-cleanup=20260611-session-check",
+  "start_url": "./?pwa-cleanup=20260611-simplified-sections",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",

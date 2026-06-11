@@ -7,7 +7,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
   const iconSizes = manifest.icons.map((icon) => icon.sizes);
 
   assert.equal(manifest.display, "standalone");
-  assert.equal(manifest.start_url, "./?pwa-cleanup=20260611-session-check");
+  assert.equal(manifest.start_url, "./?pwa-cleanup=20260611-simplified-sections");
   assert.equal(manifest.scope, "./");
   assert.equal(manifest.orientation, "portrait-primary");
   assert.ok(iconSizes.includes("192x192"));
@@ -18,7 +18,7 @@ test("service worker removes stale PWA caches and unregisters itself", async () 
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
   assert.ok(worker.includes('CACHE_PREFIX = "finanzas-conductuales-"'));
-  assert.ok(worker.includes('CLEANUP_RELEASE = "20260611-session-check"'));
+  assert.ok(worker.includes('CLEANUP_RELEASE = "20260611-simplified-sections"'));
   assert.ok(worker.includes("caches.delete(key)"));
   assert.ok(worker.includes("self.registration.unregister()"));
   assert.ok(worker.includes('includeUncontrolled: true'));
@@ -175,10 +175,10 @@ test("static startup fallback retries automatically without manual controls", as
   assert.ok(html.includes("caches.delete(key)"));
   assert.ok(html.includes("Comprobando tu sesion"));
   assert.ok(html.includes("Estamos verificando automaticamente si ya tienes una sesion iniciada."));
-  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260611-session-check")'));
+  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260611-simplified-sections")'));
   assert.ok(html.includes("window.setTimeout(finish, timeoutMs)"));
   assert.equal(html.includes("cdn.jsdelivr.net/npm/@supabase/supabase-js"), false);
-  assert.ok(html.includes('await import("./app.js?v=20260611-session-check")'));
+  assert.ok(html.includes('await import("./app.js?v=20260611-simplified-sections")'));
   assert.equal(html.includes("Continuar al acceso"), false);
   assert.equal(html.includes("Recargar aplicacion"), false);
   assert.equal(html.includes('onclick="window.location.reload()"'), false);
@@ -242,21 +242,19 @@ test("every form keeps readable controls in Android PWA themes", async () => {
   assert.match(styles, /\.quick-amount input\[data-money-input="true"\]\s*{[\s\S]*background: transparent !important/);
 });
 
-test("behavioral finance, silent sync, undo and backup features remain available", async () => {
+test("behavioral finance, silent sync, undo and automatic backups remain available", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
 
   assert.ok(app.includes("Gasto registrado."));
   assert.ok(app.includes("Deshacer?"));
   assert.ok(app.includes('"undo-snackbar"'));
   assert.ok(app.includes("savingsPercent"));
-  assert.ok(app.includes("finanzas-${todayKey()}.json"));
   assert.ok(app.includes("window.confirm"));
   assert.ok(app.includes("stateUpdatedTime"));
   assert.ok(app.includes("cloudRecordUpdatedTime"));
   assert.ok(app.includes("hasMeaningfulLocalData"));
   assert.ok(app.includes("BACKUP_KEY"));
   assert.ok(app.includes("saveLocalBackup"));
-  assert.ok(app.includes('"restore-latest-backup"'));
   assert.ok(app.includes("function menuAlertText()"));
   assert.equal(app.includes("function renderCloudStatus()"), false);
   assert.equal(app.includes("Cuenta y nube"), false);
@@ -266,9 +264,23 @@ test("behavioral finance, silent sync, undo and backup features remain available
   assert.ok(app.includes("validateTransactionDraft"));
   assert.ok(app.includes("remove-transaction"));
   assert.ok(app.includes("clearCurrentPeriodExtras"));
-  assert.ok(app.includes("reconcileLiquidity"));
   assert.ok(app.includes("renderTransactionHistory"));
   assert.ok(!app.includes("state.transactions = []"));
+});
+
+test("manual local backup and account plus cash panels are not shown", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const budget = app.slice(app.indexOf("function renderBudget("), app.indexOf("function renderBudgetJobForm"));
+  const profile = app.slice(app.indexOf("function renderProfile("), app.indexOf("function renderStudentContextPanel"));
+
+  assert.equal(budget.includes("renderLiquidityCard"), false);
+  assert.equal(budget.includes("Disponible por lugar"), false);
+  assert.equal(profile.includes("Tus datos locales"), false);
+  assert.equal(profile.includes("export-data"), false);
+  assert.equal(profile.includes("import-file"), false);
+  assert.equal(profile.includes("reset-demo"), false);
+  assert.equal(app.includes("function renderLiquidityCard"), false);
+  assert.equal(app.includes("function renderBackupTools"), false);
 });
 
 test("budget ring uses one matching color per non-overlapping amount", async () => {

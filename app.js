@@ -10,7 +10,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260611-session-check";
+} from "./finance-core.js?v=20260611-simplified-sections";
 import {
   getCloudSession,
   isCloudConfigured,
@@ -21,7 +21,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260611-session-check";
+} from "./sync-client.js?v=20260611-simplified-sections";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -516,26 +516,6 @@ function saveLocalBackup(reason, snapshot = state) {
   };
   const backups = [backup, ...readLocalBackups()].slice(0, 5);
   localStorage.setItem(BACKUP_KEY, JSON.stringify(backups));
-}
-
-function latestLocalBackup() {
-  return readLocalBackups()[0] || null;
-}
-
-function restoreLatestBackup() {
-  const backup = latestLocalBackup();
-  if (!backup?.state) {
-    state.lastAlert = "No encontre respaldos automaticos en este navegador.";
-    return;
-  }
-
-  saveLocalBackup("antes de restaurar respaldo");
-  state = migrateState(backup.state);
-  state.showDiagnosis = false;
-  pendingExtraAllocation = null;
-  clearSnackbar({ renderNow: false });
-  activateView(DEFAULT_VIEW);
-  state.lastAlert = `Respaldo restaurado: ${backup.counts?.transactions || 0} gastos y ${backup.counts?.fields || 0} campos.`;
 }
 
 function friendlyCloudError(error) {
@@ -1096,7 +1076,6 @@ function renderBudget(plan) {
         </div>
       </article>
 
-      ${renderLiquidityCard(summary)}
       ${renderExtraBudgetCard(summary)}
 
       <article class="card">
@@ -1411,41 +1390,6 @@ function renderSpending(plan) {
   `;
 }
 
-function renderLiquidityCard(summary = budgetSummary()) {
-  const liquidity = liquiditySummary(summary);
-  const drift = liquidityDrift(summary);
-  return `
-    <article class="card wide-card">
-      <div class="card-heading">
-        <div>
-          <p class="eyebrow">Disponible por lugar</p>
-          <h2>Cuenta + efectivo</h2>
-        </div>
-        <span class="metric-badge">${formatMoney(liquidity.total)} total</span>
-      </div>
-      <form class="inline-form liquidity-form" id="liquidity-form">
-        <label>
-          En cuenta
-          <input name="account" type="number" min="0" step="1000" value="${liquidity.account}">
-        </label>
-        <label>
-          En efectivo
-          <input name="cash" type="number" min="0" step="1000" value="${liquidity.cash}">
-        </label>
-        <button class="btn secondary" type="submit">Actualizar disponible</button>
-      </form>
-      ${
-        drift.amount
-          ? `<div class="menu-notice">
-              El saldo real esta ${drift.amount > 0 ? "por encima" : "por debajo"} de lo que explican el presupuesto y los gastos por ${formatMoney(Math.abs(drift.amount))}.
-              <button class="btn ghost" type="button" data-action="reconcile-liquidity">Ajustar saldo real</button>
-            </div>`
-          : ""
-      }
-    </article>
-  `;
-}
-
 function renderExtraBudgetCard(summary = budgetSummary()) {
   return `
     <article class="card wide-card">
@@ -1659,21 +1603,6 @@ function renderProfile(plan) {
         <p class="helper-text">Es una simulacion; no modifica tu presupuesto ni tus saldos.</p>
       </article>
 
-      <article class="card">
-        <p class="eyebrow">Respaldo</p>
-        <h2>Tus datos locales</h2>
-        <p>La informacion queda guardada en este navegador. Puedes exportarla como JSON o restaurar un respaldo.</p>
-        <div class="card-actions">
-          <button class="btn secondary" type="button" data-action="export-data">Exportar</button>
-          <label class="btn ghost file-btn">
-            Importar
-            <input id="import-file" type="file" accept="application/json">
-          </label>
-          <button class="btn danger" type="button" data-action="reset-demo">Reiniciar</button>
-        </div>
-        ${renderBackupTools()}
-      </article>
-
       <article class="card wide-card">
         <div class="card-heading">
           <div>
@@ -1731,23 +1660,6 @@ function renderStudentContextPanel() {
         <button class="btn secondary" type="button" data-action="apply-student-context">Aplicar mi contexto</button>
       </div>
     </article>
-  `;
-}
-
-function renderBackupTools() {
-  const backup = latestLocalBackup();
-  if (!backup) {
-    return `<p class="helper-text">Los respaldos automaticos aparecen aqui despues de importar o reiniciar.</p>`;
-  }
-
-  return `
-    <div class="backup-tools">
-      <p class="helper-text">
-        Ultimo respaldo: ${formatDate(String(backup.created_at).slice(0, 10))}.
-        ${backup.counts?.transactions || 0} gastos, ${backup.counts?.fields || 0} campos.
-      </p>
-      <button class="btn ghost" type="button" data-action="restore-latest-backup">Restaurar respaldo</button>
-    </div>
   `;
 }
 
@@ -2221,11 +2133,6 @@ function bindEvents() {
     extraBudgetForm.addEventListener("submit", handleExtraBudgetSubmit);
   }
 
-  const liquidityForm = document.querySelector("#liquidity-form");
-  if (liquidityForm) {
-    liquidityForm.addEventListener("submit", handleLiquiditySubmit);
-  }
-
   const transactionForm = document.querySelector("#transaction-form");
   if (transactionForm) {
     transactionForm.addEventListener("submit", handleTransactionSubmit);
@@ -2255,10 +2162,6 @@ function bindEvents() {
     });
   }
 
-  const importFile = document.querySelector("#import-file");
-  if (importFile) {
-    importFile.addEventListener("change", handleImport);
-  }
 }
 
 function bindOnboardingFlow(form) {
@@ -2530,8 +2433,7 @@ function handleAction(event) {
     "close-expense",
     "open-diagnosis",
     "close-diagnosis",
-    "cancel-extra-allocation",
-    "export-data"
+    "cancel-extra-allocation"
   ]);
 
   const actions = {
@@ -2566,7 +2468,6 @@ function handleAction(event) {
     },
     "remove-extra": () => removeBudgetExtra(id),
     "clear-period-extras": clearCurrentPeriodExtras,
-    "reconcile-liquidity": reconcileLiquidity,
     "extra-all-free": () => applyPendingExtraAllocation(0),
     "cancel-extra-allocation": () => {
       pendingExtraAllocation = null;
@@ -2576,10 +2477,7 @@ function handleAction(event) {
     "unlock-cooldown": () => unlockCooldown(id),
     "push-cloud-now": () => pushCloudState(),
     "pull-cloud-now": () => pullCloudAfterLogin(),
-    "cloud-sign-out": () => handleCloudSignOut(),
-    "export-data": exportData,
-    "restore-latest-backup": restoreLatestBackup,
-    "reset-demo": resetDemo
+    "cloud-sign-out": () => handleCloudSignOut()
   };
 
   if (actions[action]) {
@@ -2927,20 +2825,6 @@ function applyPendingExtraAllocation(rawPercent) {
   pendingExtraAllocation = null;
 }
 
-function handleLiquiditySubmit(event) {
-  event.preventDefault();
-  const data = new FormData(event.currentTarget);
-  state.liquidity = {
-    account: numberFrom(data.get("account")),
-    cash: numberFrom(data.get("cash")),
-    initialized: true,
-    updated_at: new Date().toISOString()
-  };
-  state.lastAlert = `Disponible actualizado: ${formatMoney(state.liquidity.account + state.liquidity.cash)} en total.`;
-  saveState();
-  render();
-}
-
 function handleTransactionSubmit(event) {
   event.preventDefault();
   const data = new FormData(event.currentTarget);
@@ -3077,40 +2961,6 @@ function clearLocalUserState() {
   quickExpenseOpen = false;
   pendingExtraAllocation = null;
   clearSnackbar({ renderNow: false });
-}
-
-function handleImport(event) {
-  const file = event.target.files?.[0];
-  if (!file) {
-    return;
-  }
-
-  if (!window.confirm("Importar este JSON reemplazara los datos actuales de este navegador. ¿Quieres continuar?")) {
-    event.target.value = "";
-    return;
-  }
-
-  const reader = new FileReader();
-  reader.addEventListener("load", () => {
-    try {
-      const parsed = JSON.parse(String(reader.result));
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error("El archivo no contiene datos de la app.");
-      }
-      saveLocalBackup("antes de importar JSON");
-      state = migrateState(parsed);
-      pendingExtraAllocation = null;
-      clearSnackbar({ renderNow: false });
-      state.lastAlert = "Datos importados correctamente.";
-      saveState();
-      render();
-    } catch {
-      state.lastAlert = "No pude importar ese archivo. Revisa que sea un JSON exportado desde esta app.";
-      render();
-    }
-    event.target.value = "";
-  });
-  reader.readAsText(file);
 }
 
 function completeCheckin() {
@@ -3257,38 +3107,6 @@ function clearCurrentPeriodExtras() {
   state.lastAlert = `Quite ${formatMoney(total)} de dinero extra del periodo.`;
 }
 
-function reconcileLiquidity() {
-  const drift = liquidityDrift();
-  if (!drift.amount) {
-    state.lastAlert = "El saldo real ya cuadra con presupuesto y gastos.";
-    return;
-  }
-
-  if (
-    typeof window.confirm === "function" &&
-    !window.confirm(`Ajustar saldo real de ${formatMoney(drift.actual)} a ${formatMoney(drift.expected)}?`)
-  ) {
-    state.lastAlert = "No ajuste el saldo real.";
-    return;
-  }
-
-  const liquidity = normalizeLiquidity(state.liquidity);
-  if (drift.amount > 0) {
-    let remaining = drift.amount;
-    const fromAccount = Math.min(liquidity.account, remaining);
-    liquidity.account -= fromAccount;
-    remaining -= fromAccount;
-    liquidity.cash = Math.max(0, liquidity.cash - remaining);
-  } else {
-    liquidity.account += Math.abs(drift.amount);
-  }
-
-  liquidity.initialized = true;
-  liquidity.updated_at = new Date().toISOString();
-  state.liquidity = liquidity;
-  state.lastAlert = `Saldo real ajustado a ${formatMoney(drift.expected)}.`;
-}
-
 function cancelCooldown(id) {
   state.cooldowns = state.cooldowns.filter((cooldown) => cooldown.id !== id);
   state.wins.push({
@@ -3314,27 +3132,6 @@ function unlockCooldown(id) {
   });
   state.cooldowns = state.cooldowns.filter((item) => item.id !== id);
   state.lastAlert = createSpendAlert(cooldown.category);
-}
-
-function exportData() {
-  const payload = JSON.stringify(state, null, 2);
-  const blob = new Blob([payload], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `finanzas-${todayKey()}.json`;
-  link.click();
-  URL.revokeObjectURL(url);
-  state.lastAlert = "Archivo JSON exportado.";
-}
-
-function resetDemo() {
-  saveLocalBackup("antes de reiniciar");
-  pendingExtraAllocation = null;
-  clearSnackbar({ renderNow: false });
-  localStorage.removeItem(STORAGE_KEY);
-  state = createDefaultState();
-  state.lastAlert = "Demo reiniciada. Usa Mis datos para personalizarla.";
 }
 
 function addTransaction({ merchant, description = "", amount, category, budgeted, source = "account" }) {
@@ -3468,23 +3265,6 @@ function liquiditySummary(summary = budgetSummary()) {
   return {
     ...liquidity,
     total: liquidity.account + liquidity.cash
-  };
-}
-
-function expectedLiquidityTotal(summary = budgetSummary()) {
-  const spent = transactionsForSummary(summary).reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
-  return Math.max(0, summary.income - spent);
-}
-
-function liquidityDrift(summary = budgetSummary()) {
-  const liquidity = liquiditySummary(summary);
-  const expected = expectedLiquidityTotal(summary);
-  const actual = liquidity.total;
-  const amount = Math.round(actual - expected);
-  return {
-    actual,
-    expected,
-    amount: Math.abs(amount) >= 1 ? amount : 0
   };
 }
 
