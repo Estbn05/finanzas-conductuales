@@ -86,7 +86,7 @@ a {
 
 .auth-card {
   display: grid;
-  width: min(460px, 100%);
+  width: min(460px, calc(100vw - 48px));
   gap: 18px;
   padding: 24px;
   border: 1px solid var(--line);
@@ -124,7 +124,8 @@ a {
   width: 100%;
 }
 
-.startup-fallback {
+.startup-fallback,
+.session-check {
   grid-column: 1 / -1;
   display: grid;
   min-height: 100svh;
@@ -134,7 +135,9 @@ a {
 
 .startup-fallback-card {
   display: grid;
-  width: min(460px, 100%);
+  width: min(460px, calc(100vw - 48px));
+  min-width: 0;
+  max-width: 100%;
   gap: 14px;
   padding: 24px;
   border: 1px solid var(--line);
@@ -146,6 +149,7 @@ a {
 .startup-fallback-card h1,
 .startup-fallback-card p {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .sidebar {

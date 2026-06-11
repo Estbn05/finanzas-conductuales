@@ -10,7 +10,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260610-movements-theme";
+} from "./finance-core.js?v=20260611-session-check";
 import {
   getCloudSession,
   isCloudConfigured,
@@ -21,13 +21,13 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260610-movements-theme";
+} from "./sync-client.js?v=20260611-session-check";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
 const DEFAULT_VIEW = "today";
 const QUICK_EXPENSE_HASH = "registrar-gasto";
-const AUTH_STARTUP_TIMEOUT_MS = 5_000;
+const AUTH_STARTUP_TIMEOUT_MS = 25_000;
 const STUDENT_SEMESTER_INCOME = 1_750_000;
 const STUDENT_SEMESTER_MONTHS = 6;
 const STUDENT_WEEKLY_GAS = 30_000;
@@ -603,6 +603,12 @@ function syncQuickExpenseWithLocation(options = {}) {
 }
 
 function render() {
+  if (shouldShowSessionCheck()) {
+    app.classList.remove("is-menu-open", "is-expense-open");
+    app.innerHTML = renderSessionCheck();
+    return;
+  }
+
   if (shouldShowAuthGate()) {
     app.classList.remove("is-menu-open", "is-expense-open");
     app.innerHTML = renderAuthGate();
@@ -689,12 +695,26 @@ function renderBottomNavigation() {
   `;
 }
 
+function shouldShowSessionCheck() {
+  return !cloudState.sessionReady;
+}
+
 function shouldShowAuthGate() {
-  return !cloudState.signedIn;
+  return cloudState.sessionReady && !cloudState.signedIn;
+}
+
+function renderSessionCheck() {
+  return `
+    <main class="session-check" aria-busy="true" aria-live="polite">
+      <section class="startup-fallback-card">
+        <h1>Comprobando tu sesion</h1>
+        <p>Estamos verificando automaticamente si ya tienes una sesion iniciada.</p>
+      </section>
+    </main>
+  `;
 }
 
 function renderAuthGate() {
-  const checkingSession = cloudState.status === "checking" && !cloudState.sessionReady;
   const submittingAccess = cloudState.status === "syncing" && !cloudState.sessionReady;
   const unavailable = !cloudState.configured || !cloudState.libraryLoaded;
 
@@ -713,7 +733,6 @@ function renderAuthGate() {
             ? `<p>La autenticacion no esta disponible. Revisa la configuracion de Supabase y vuelve a cargar la aplicacion.</p>`
             : `
               <p>Primero crea una cuenta o inicia sesion. Despues configuraras tu presupuesto y tus campos habituales.</p>
-              ${checkingSession ? `<p class="auth-session-note">Comprobando automaticamente si ya tienes una sesion guardada...</p>` : ""}
               <form class="stacked-form auth-form" id="cloud-login-form">
                 <label>
                   Correo

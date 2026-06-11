@@ -13,14 +13,14 @@
       content="App personal de finanzas conductuales con monitoreo diario, presupuesto por periodos y simulador de ahorro."
     >
     <title>Finanzas Conductuales</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20260610-movements-theme">
+    <link rel="manifest" href="manifest.webmanifest?v=20260611-session-check">
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="styles.css?v=20260610-movements-theme">
+    <link rel="stylesheet" href="styles.css?v=20260611-session-check">
     <script>
       const pwaCleanupTask = (async () => {
         const cachePrefix = "finanzas-conductuales-";
-        const release = "20260610-movements-theme";
+        const release = "20260611-session-check";
         const retryKey = `finanzas-pwa-cleanup:${release}`;
         let needsFreshLoad = Boolean(navigator.serviceWorker?.controller);
 
@@ -63,8 +63,8 @@
     <div id="app" class="app-shell" aria-live="polite">
       <main class="startup-fallback">
         <section class="startup-fallback-card">
-          <h1>Iniciando Finanzas Conductuales</h1>
-          <p>La aplicacion reintentara el inicio automaticamente.</p>
+          <h1>Comprobando tu sesion</h1>
+          <p>Estamos verificando automaticamente si ya tienes una sesion iniciada.</p>
         </section>
       </main>
     </div>
@@ -113,9 +113,9 @@
             document.body.append(script);
           });
 
-        await loadScript("sync-config.js?v=20260610-movements-theme");
-        await loadScript("vendor/supabase-2.108.1.min.js?v=20260610-movements-theme");
-        await import("./app.js?v=20260610-movements-theme");
+        await loadScript("sync-config.js?v=20260611-session-check");
+        await loadScript("vendor/supabase-2.108.1.min.js?v=20260611-session-check");
+        await import("./app.js?v=20260611-session-check");
       });
     </script>
   </body>

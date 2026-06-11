@@ -7,7 +7,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
   const iconSizes = manifest.icons.map((icon) => icon.sizes);
 
   assert.equal(manifest.display, "standalone");
-  assert.equal(manifest.start_url, "./?pwa-cleanup=20260610-movements-theme");
+  assert.equal(manifest.start_url, "./?pwa-cleanup=20260611-session-check");
   assert.equal(manifest.scope, "./");
   assert.equal(manifest.orientation, "portrait-primary");
   assert.ok(iconSizes.includes("192x192"));
@@ -18,7 +18,7 @@ test("service worker removes stale PWA caches and unregisters itself", async () 
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
   assert.ok(worker.includes('CACHE_PREFIX = "finanzas-conductuales-"'));
-  assert.ok(worker.includes('CLEANUP_RELEASE = "20260610-movements-theme"'));
+  assert.ok(worker.includes('CLEANUP_RELEASE = "20260611-session-check"'));
   assert.ok(worker.includes("caches.delete(key)"));
   assert.ok(worker.includes("self.registration.unregister()"));
   assert.ok(worker.includes('includeUncontrolled: true'));
@@ -113,15 +113,22 @@ test("authentication gates onboarding and signed-in users can close their sessio
   const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
 
   assert.ok(app.includes("function shouldShowAuthGate()"));
+  assert.ok(app.includes("function shouldShowSessionCheck()"));
+  assert.ok(app.includes("function renderSessionCheck()"));
   assert.ok(app.includes("function renderAuthGate()"));
-  assert.ok(app.includes("AUTH_STARTUP_TIMEOUT_MS = 5_000"));
+  assert.ok(app.includes("AUTH_STARTUP_TIMEOUT_MS = 25_000"));
   assert.ok(app.includes("function recoverAuthStartup()"));
   assert.equal(app.includes('data-action="recover-auth"'), false);
   assert.equal(app.includes('data-action="reload-app"'), false);
-  assert.ok(app.includes("return !cloudState.signedIn;"));
-  assert.ok(app.includes("Comprobando automaticamente si ya tienes una sesion guardada"));
+  assert.ok(app.includes("return !cloudState.sessionReady;"));
+  assert.ok(app.includes("return cloudState.sessionReady && !cloudState.signedIn;"));
+  assert.ok(app.includes("Estamos verificando automaticamente si ya tienes una sesion iniciada."));
   assert.equal(app.includes("Estamos cargando tu cuenta y tus datos antes de mostrar el formulario inicial."), false);
-  assert.ok(app.indexOf("if (shouldShowAuthGate())") < app.indexOf("const plan = calculatePlan();"));
+  const renderFunction = app.slice(app.indexOf("function render()"), app.indexOf("function renderNavItem"));
+  assert.ok(renderFunction.indexOf("if (shouldShowSessionCheck())") < renderFunction.indexOf("if (shouldShowAuthGate())"));
+  assert.ok(renderFunction.indexOf("if (shouldShowAuthGate())") < renderFunction.indexOf("const plan = calculatePlan();"));
+  const sessionCheck = app.slice(app.indexOf("function renderSessionCheck()"), app.indexOf("function renderAuthGate()"));
+  assert.equal(sessionCheck.includes("cloud-login-form"), false);
   assert.ok(app.includes('data-cloud-mode="signup"'));
   assert.ok(app.includes(">Crear cuenta</button>"));
   assert.ok(app.includes('data-cloud-mode="signin"'));
@@ -150,6 +157,7 @@ test("authentication gates onboarding and signed-in users can close their sessio
   assert.ok(syncClient.includes("Comprobar la sesion"));
   assert.ok(styles.includes(".auth-gate"));
   assert.ok(styles.includes(".auth-card"));
+  assert.ok(styles.includes(".session-check"));
   assert.equal(styles.includes(".auth-recovery-actions"), false);
 });
 
@@ -165,10 +173,12 @@ test("static startup fallback retries automatically without manual controls", as
   assert.ok(html.includes("window.setTimeout(resolve, 1500)"));
   assert.ok(html.includes("registration.unregister()"));
   assert.ok(html.includes("caches.delete(key)"));
-  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260610-movements-theme")'));
+  assert.ok(html.includes("Comprobando tu sesion"));
+  assert.ok(html.includes("Estamos verificando automaticamente si ya tienes una sesion iniciada."));
+  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260611-session-check")'));
   assert.ok(html.includes("window.setTimeout(finish, timeoutMs)"));
   assert.equal(html.includes("cdn.jsdelivr.net/npm/@supabase/supabase-js"), false);
-  assert.ok(html.includes('await import("./app.js?v=20260610-movements-theme")'));
+  assert.ok(html.includes('await import("./app.js?v=20260611-session-check")'));
   assert.equal(html.includes("Continuar al acceso"), false);
   assert.equal(html.includes("Recargar aplicacion"), false);
   assert.equal(html.includes('onclick="window.location.reload()"'), false);
