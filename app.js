@@ -10,7 +10,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260611-simplified-sections";
+} from "./finance-core.js?v=20260611-single-save";
 import {
   getCloudSession,
   isCloudConfigured,
@@ -21,7 +21,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260611-simplified-sections";
+} from "./sync-client.js?v=20260611-single-save";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -1882,7 +1882,7 @@ function renderDiagnosisModal() {
           </fieldset>
 
           <div class="modal-actions quick-save-actions">
-            <button class="btn primary" type="button" data-diagnosis-save>Guardar plan</button>
+            <button class="btn primary" type="submit">Guardar plan</button>
           </div>
 
           <fieldset>
@@ -1924,7 +1924,7 @@ function renderDiagnosisModal() {
 
           <div class="modal-actions">
             <button class="btn ghost" type="button" data-action="close-diagnosis">Cancelar</button>
-            <button class="btn primary" type="button" data-diagnosis-save>Guardar y usar mi plan</button>
+            <button class="btn primary" type="submit">Guardar y usar mi plan</button>
           </div>
         </form>
       </section>
@@ -2118,9 +2118,6 @@ function bindEvents() {
   if (diagnosisForm) {
     bindDiagnosisPreview(diagnosisForm);
     diagnosisForm.addEventListener("submit", handleDiagnosisSubmit);
-    document.querySelectorAll("[data-diagnosis-save]").forEach((button) => {
-      button.addEventListener("click", () => submitDiagnosisForm(diagnosisForm));
-    });
   }
 
   const budgetForm = document.querySelector("#budget-job-form");
