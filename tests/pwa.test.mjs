@@ -7,7 +7,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
   const iconSizes = manifest.icons.map((icon) => icon.sizes);
 
   assert.equal(manifest.display, "standalone");
-  assert.equal(manifest.start_url, "./?pwa-cleanup=20260611-single-save");
+  assert.equal(manifest.start_url, "./?pwa-cleanup=20260612-mockup-system");
   assert.equal(manifest.scope, "./");
   assert.equal(manifest.orientation, "portrait-primary");
   assert.ok(iconSizes.includes("192x192"));
@@ -18,7 +18,7 @@ test("service worker removes stale PWA caches and unregisters itself", async () 
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
   assert.ok(worker.includes('CACHE_PREFIX = "finanzas-conductuales-"'));
-  assert.ok(worker.includes('CLEANUP_RELEASE = "20260611-single-save"'));
+  assert.ok(worker.includes('CLEANUP_RELEASE = "20260612-mockup-system"'));
   assert.ok(worker.includes("caches.delete(key)"));
   assert.ok(worker.includes("self.registration.unregister()"));
   assert.ok(worker.includes('includeUncontrolled: true'));
@@ -30,7 +30,6 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
 
   assert.match(app, /const DEFAULT_VIEW = "today"/);
-  assert.ok(app.includes('class="expense-fab"'));
   assert.ok(app.includes('class="bottom-nav"'));
   assert.ok(app.includes('class="drawer-scrim"'));
   assert.ok(app.includes('{ id: "movements", label: "Movimientos", icon: "04" }'));
@@ -52,12 +51,14 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.equal(todayView.includes("Fondo inicial"), false);
   assert.equal(todayView.includes("Pago recomendado"), false);
 
-  assert.ok(styles.includes(".expense-fab"));
+  assert.ok(app.includes('class="bottom-nav-icon movement-icon"'));
+  assert.ok(app.includes('class="bottom-nav-icon plus-icon"'));
   assert.ok(styles.includes(".bottom-nav"));
   assert.ok(styles.includes(".quick-expense-panel"));
   assert.ok(styles.includes(".money-location-chips"));
-  assert.match(styles, /\.money-bar strong\s*{[\s\S]*font-size: 2\.38rem/);
-  assert.match(styles, /\.bar\s*{[\s\S]*height: 4px/);
+  assert.ok(styles.includes("grid-template-columns: repeat(5"));
+  assert.ok(styles.includes(".money-context"));
+  assert.ok(styles.includes(".category-card-bar"));
   assert.ok(styles.includes("@media (prefers-color-scheme: dark)"));
 });
 
@@ -88,20 +89,19 @@ test("authenticated new users get a three-step financial onboarding", async () =
   assert.ok(app.includes("Paso 1 de 3"));
   assert.ok(app.includes("Paso 2 de 3"));
   assert.ok(app.includes("Paso 3 de 3"));
-  assert.ok(app.includes("¿Cuanto recibes y cada cuanto?"));
+  assert.ok(app.includes("¿Cuando recibes dinero?"));
   assert.ok(app.includes("¿Donde tienes ese dinero?"));
-  assert.ok(app.includes("¿Para que separas plata normalmente?"));
+  assert.ok(app.includes("¿Para que separas dinero?"));
   assert.ok(app.includes("Cuenta + efectivo debe sumar"));
   assert.ok(app.includes("handleOnboardingSubmit"));
   assert.ok(app.includes("onboardingCategories"));
-  assert.ok(app.includes("renderOnboardingCategoryRow(0, { example: true })"));
-  assert.ok(app.includes("data-add-onboarding-category"));
-  assert.ok(app.includes("data-remove-onboarding-category"));
-  assert.ok(app.includes("categoryList.insertAdjacentHTML"));
+  assert.ok(app.includes("data-onboarding-category-chip"));
+  assert.ok(app.includes("data-onboarding-free-preview"));
+  assert.ok(app.includes("bindOnboardingFlowV2"));
   assert.equal(app.includes('["Transporte", "weekly"]'), false);
   assert.equal(app.includes('["Comida", "monthly"]'), false);
-  assert.ok(styles.includes(".onboarding-add-category"));
-  assert.ok(styles.includes(".onboarding-category-add"));
+  assert.ok(styles.includes(".onboarding-category-chips"));
+  assert.ok(styles.includes(".onboarding-category-chip"));
   assert.match(styles, /\.onboarding-form input,[\s\S]*\.onboarding-form select\s*{[\s\S]*-webkit-appearance: none/);
   assert.ok(styles.includes("-webkit-text-fill-color: #101614 !important"));
   assert.ok(styles.includes("-webkit-text-fill-color: #e8f5ee !important"));
@@ -187,10 +187,10 @@ test("static startup fallback retries automatically without manual controls", as
   assert.ok(html.includes("caches.delete(key)"));
   assert.ok(html.includes("Comprobando tu sesion"));
   assert.ok(html.includes("Estamos verificando automaticamente si ya tienes una sesion iniciada."));
-  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260611-single-save")'));
+  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260612-mockup-system")'));
   assert.ok(html.includes("window.setTimeout(finish, timeoutMs)"));
   assert.equal(html.includes("cdn.jsdelivr.net/npm/@supabase/supabase-js"), false);
-  assert.ok(html.includes('await import("./app.js?v=20260611-single-save")'));
+  assert.ok(html.includes('await import("./app.js?v=20260612-mockup-system")'));
   assert.equal(html.includes("Continuar al acceso"), false);
   assert.equal(html.includes("Recargar aplicacion"), false);
   assert.equal(html.includes('onclick="window.location.reload()"'), false);
@@ -295,27 +295,55 @@ test("manual local backup and account plus cash panels are not shown", async () 
   assert.equal(app.includes("function renderBackupTools"), false);
 });
 
-test("budget ring uses one matching color per non-overlapping amount", async () => {
+test("plan distribution uses one matching segment per non-overlapping amount", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
 
   assert.ok(app.includes("getBudgetRingAllocation(summary)"));
-  assert.ok(app.includes('renderAllocation("Campos reservados", ring.reserved, "reserved")'));
-  assert.ok(app.includes('renderAllocation("Gastos registrados", ring.spent, "expenses")'));
-  assert.ok(app.includes('renderAllocation("Libre disponible", ring.free, "savings")'));
+  assert.ok(app.includes('class="distribution-bar"'));
+  assert.ok(app.includes('class="dist-reserved"'));
+  assert.ok(app.includes('class="dist-spent"'));
+  assert.ok(app.includes('class="dist-free"'));
   assert.equal(app.includes('renderAllocation("Apartado sin gastar"'), false);
   assert.equal(app.includes('renderAllocation("Libre antes de gastos"'), false);
-  assert.match(styles, /var\(--coral\) 0 var\(--reserved\),[\s\S]*var\(--amber\) var\(--reserved\) var\(--spent\),[\s\S]*var\(--teal\) var\(--spent\) 360deg/);
+  assert.ok(styles.includes(".distribution-bar"));
+  assert.ok(styles.includes(".dist-reserved"));
+  assert.ok(styles.includes(".dist-spent"));
+  assert.ok(styles.includes(".dist-free"));
 });
 
 test("savings remains advisory and debt features are removed", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
   const core = await readFile(new URL("../finance-core.js", import.meta.url), "utf8");
 
-  assert.ok(app.includes("Esta cifra es una recomendacion. No mueve dinero"));
+  assert.ok(app.includes("Orientativo"));
+  assert.ok(app.includes("No mueve dinero"));
   assert.ok(app.includes("suggestedPeriodSavings"));
   assert.ok(core.includes("savingsCapacityGap"));
   assert.ok(core.includes("savingsReserved"));
   assert.equal(/debt|deuda/i.test(app), false);
   assert.equal(/debt|deuda/i.test(core), false);
+});
+
+test("mockup system covers progressive plan, correction and special states", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  assert.ok(app.includes("function renderPlanSheet()"));
+  assert.ok(app.includes("data-category-conversion"));
+  assert.ok(app.includes("data-category-limit-warning"));
+  assert.ok(app.includes("function renderJobRemovalConfirmation()"));
+  assert.ok(app.includes("gastos quedaran"));
+  assert.ok(app.includes("function renderTransactionEditor()"));
+  assert.ok(app.includes('id="transaction-edit-form"'));
+  assert.ok(app.includes("function renderConnectionBanner()"));
+  assert.ok(app.includes("Tus datos locales siguen disponibles."));
+  assert.ok(app.includes('type="range" min="0" max="100"'));
+  assert.ok(app.includes("Plan basico"));
+  assert.ok(app.includes("Perfil conductual"));
+  assert.ok(app.includes("data-onboarding-skip"));
+  assert.ok(styles.includes(".sheet-backdrop"));
+  assert.ok(styles.includes(".destructive-consequence"));
+  assert.ok(styles.includes(".history-row.is-unclassified"));
+  assert.ok(styles.includes(".connection-banner"));
 });

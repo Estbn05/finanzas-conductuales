@@ -10,7 +10,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260611-single-save";
+} from "./finance-core.js?v=20260612-mockup-system";
 import {
   getCloudSession,
   isCloudConfigured,
@@ -21,7 +21,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260611-single-save";
+} from "./sync-client.js?v=20260612-mockup-system";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -62,6 +62,9 @@ let transactionHistorySort = "recent";
 let snackbar = null;
 let snackbarTimer;
 let pendingExtraAllocation = null;
+let planSheet = "";
+let pendingJobRemovalId = "";
+let editingTransactionId = "";
 let diagnosisValidation = { field: "", message: "" };
 let cloudState = {
   configured: isCloudConfigured(),
@@ -93,6 +96,8 @@ window.addEventListener("hashchange", () => {
   }
 });
 window.addEventListener("popstate", syncQuickExpenseWithLocation);
+window.addEventListener("online", render);
+window.addEventListener("offline", render);
 
 function createDefaultState() {
   const today = todayKey();
@@ -628,12 +633,15 @@ function render() {
       </div>
     </aside>
     <main class="main-panel">
-      ${renderHeader(plan)}
+      ${renderConnectionBanner()}
+      ${state.activeView === "today" ? renderHeader(plan) : ""}
       ${renderView(plan)}
     </main>
     ${renderBottomNavigation()}
-    <button class="expense-fab" type="button" data-action="open-expense" aria-label="Registrar gasto">+</button>
     ${quickExpenseOpen ? renderQuickExpensePanel() : ""}
+    ${planSheet ? renderPlanSheet() : ""}
+    ${pendingJobRemovalId ? renderJobRemovalConfirmation() : ""}
+    ${editingTransactionId ? renderTransactionEditor() : ""}
     ${!state.profile.completed || state.showDiagnosis ? renderDiagnosisModal() : ""}
     ${pendingExtraAllocation ? renderExtraAllocationModal() : ""}
     ${renderSnackbar()}
@@ -655,23 +663,39 @@ function renderNavItem(item) {
 function renderBottomNavigation() {
   return `
     <nav class="bottom-nav" aria-label="Navegacion rapida">
-      <button class="bottom-nav-item" type="button" data-action="toggle-menu">
-        <span class="bottom-nav-icon menu-icon" aria-hidden="true"></span>
-        <span>Menu</span>
-      </button>
       <button class="bottom-nav-item ${state.activeView === "today" ? "is-active" : ""}" type="button" data-view="today">
         <span class="bottom-nav-icon home-icon" aria-hidden="true"></span>
         <span>Inicio</span>
-      </button>
-      <button class="bottom-nav-item is-register" type="button" data-action="open-expense">
-        <span class="bottom-nav-icon plus-icon" aria-hidden="true">+</span>
-        <span>Registrar</span>
       </button>
       <button class="bottom-nav-item ${state.activeView === "budget" ? "is-active" : ""}" type="button" data-view="budget">
         <span class="bottom-nav-icon plan-icon" aria-hidden="true"></span>
         <span>Plan</span>
       </button>
+      <button class="bottom-nav-item is-register" type="button" data-action="open-expense">
+        <span class="bottom-nav-icon plus-icon" aria-hidden="true"><b>+</b></span>
+        <span>Registrar</span>
+      </button>
+      <button class="bottom-nav-item ${state.activeView === "movements" ? "is-active" : ""}" type="button" data-view="movements">
+        <span class="bottom-nav-icon movement-icon" aria-hidden="true"></span>
+        <span>Movimientos</span>
+      </button>
+      <button class="bottom-nav-item ${["savings", "profile"].includes(state.activeView) ? "is-active" : ""}" type="button" data-action="toggle-menu">
+        <span class="bottom-nav-icon menu-icon" aria-hidden="true"></span>
+        <span>Menu</span>
+      </button>
     </nav>
+  `;
+}
+
+function renderConnectionBanner() {
+  if (navigator.onLine) {
+    return "";
+  }
+  return `
+    <div class="connection-banner" role="status">
+      <span class="connection-dot" aria-hidden="true"></span>
+      <div><strong>Sin conexion</strong><span>Tus datos locales siguen disponibles.</span></div>
+    </div>
   `;
 }
 
@@ -736,6 +760,7 @@ function renderAuthGate() {
 function renderHeader(plan) {
   const summary = budgetSummary();
   const liquidity = liquiditySummary(summary);
+  const period = `${formatShortDate(summary.window.start)} - ${formatShortDate(previousDay(summary.window.end))}`;
   const periodLine =
     summary.extraIncome > 0
       ? `<span class="money-split">Total incluye extra: ${periodExtraSourceLabel(summary)}. Base ${formatMoney(summary.baseIncome)} · Total ${formatMoney(summary.income)}</span>`
@@ -743,9 +768,9 @@ function renderHeader(plan) {
 
   return `
     <header class="money-bar ${summary.overReserved ? "danger" : ""}" role="status" aria-label="Dinero libre sin asignar">
-      <span class="money-label">Libre ${summary.cadenceLabel}</span>
+      <div class="money-context"><span>Tu dinero libre</span><span>${period}</span></div>
       <strong>${formatMoney(summary.freeRemaining)}</strong>
-      <span class="money-caption">${summary.overReserved ? "sobreasignado" : "para nuevos gastos"}</span>
+      <span class="money-caption">${summary.overReserved ? "Presupuesto sobreasignado" : "Disponible para nuevos gastos"}</span>
       ${
         summary.categoryOverspent > 0
           ? `<span class="money-split danger-text">Exceso sobre topes: ${formatMoney(summary.categoryOverspent)}</span>`
@@ -756,6 +781,7 @@ function renderHeader(plan) {
         <div><span>Efectivo</span><strong>${formatMoney(liquidity.cash)}</strong></div>
         <div><span>Total real</span><strong>${formatMoney(liquidity.total)}</strong></div>
       </div>
+      <p class="money-help">Libre descuenta reservas y gastos. Total real muestra lo que hay entre cuenta y efectivo.</p>
     </header>
   `;
 }
@@ -860,6 +886,7 @@ function renderPrimaryActionButton(action) {
 
 function renderToday(plan) {
   const visibleCategoryCount = Math.max(1, Math.min(6, state.budgetJobs.length + 1));
+  const homeSummary = budgetSummary();
   return `
     <section class="home-view" aria-label="Resumen del periodo">
       <div class="home-section-heading">
@@ -873,8 +900,14 @@ function renderToday(plan) {
       ${
         state.budgetJobs.length
           ? ""
-          : `<div class="empty-state home-empty">Crea campos como gasolina, comida o ahorro para ver sus limites aqui.</div>`
+          : `<div class="empty-state home-empty actionable-empty">
+              <span class="empty-icon" aria-hidden="true">+</span>
+              <strong>Tu plan aun no tiene categorias</strong>
+              <span>Separa dinero para comida, transporte o cualquier proposito habitual.</span>
+              <button class="btn primary" type="button" data-action="open-category-sheet">Crear primera categoria</button>
+            </div>`
       }
+      <div class="home-period-note">Presupuesto ${formatMoney(homeSummary.income)} · ${Math.round((homeSummary.freeRemaining / Math.max(1, homeSummary.income)) * 100)}% sigue libre</div>
     </section>
   `;
 
@@ -1050,90 +1083,153 @@ function renderTransactionLabeler(transaction) {
 function renderBudget(plan) {
   const summary = budgetSummary();
   const ring = getBudgetRingAllocation(summary);
-  const assignmentRatio = summary.income ? (ring.reserved / summary.income) * 100 : 0;
-  const reservedAngle = (ring.reserved / Math.max(1, ring.total)) * 360;
-  const spentAngle = ((ring.reserved + ring.spent) / Math.max(1, ring.total)) * 360;
-  const status = summary.overReserved ? "over" : summary.freeBudget > 0 ? "under" : "balanced";
+  const reservedRatio = (ring.reserved / Math.max(1, ring.total)) * 100;
+  const spentRatio = (ring.spent / Math.max(1, ring.total)) * 100;
+  const freeRatio = (ring.free / Math.max(1, ring.total)) * 100;
+  const period = `${formatShortDate(summary.window.start)} - ${formatShortDate(previousDay(summary.window.end))}`;
 
   return `
-    <section class="content-grid budget-grid">
-      <article class="card split-card">
-        <div class="budget-ring" style="--reserved:${reservedAngle}deg; --spent:${spentAngle}deg">
-          <div>
-            <strong>${Math.round(assignmentRatio)}%</strong>
-            <span>reservado</span>
-          </div>
+    <section class="screen-view plan-view" aria-label="Plan del periodo">
+      <div class="screen-title-row">
+        <div>
+          <p class="eyebrow">Organiza antes de gastar</p>
+          <h1>Plan del periodo</h1>
         </div>
-        <div class="split-details">
-          <p class="eyebrow">Presupuesto ${summary.cadenceLabel}</p>
-          <h2>${formatMoney(summary.income)} por periodo</h2>
-          ${renderAllocation("Campos reservados", ring.reserved, "reserved")}
-          ${renderAllocation("Gastos registrados", ring.spent, "expenses")}
-          ${renderAllocation("Libre disponible", ring.free, "savings")}
-          <p class="helper-text">Las tres porciones suman ${formatMoney(ring.total)}. Base ${formatMoney(summary.baseIncome)} + extra ${formatMoney(summary.extraIncome)}.</p>
-          ${ring.outside > 0 ? `<p class="form-error">Gastos fuera del presupuesto: ${formatMoney(ring.outside)}.</p>` : ""}
-          <p class="helper-text">Periodo actual: ${formatDate(summary.window.start)} - ${formatDate(previousDay(summary.window.end))}. Equivale a ${formatMoney(getMonthlyIncome(state.profile))} / mes.</p>
+        <span class="period-chip">${period}</span>
+      </div>
+
+      <article class="plan-distribution">
+        <div class="distribution-labels">
+          <span><i class="dist-reserved"></i>Reservado <strong>${formatCompactMoney(ring.reserved)}</strong></span>
+          <span><i class="dist-spent"></i>Gastado <strong>${formatCompactMoney(ring.spent)}</strong></span>
+          <span><i class="dist-free"></i>Libre <strong>${formatCompactMoney(ring.free)}</strong></span>
         </div>
+        <div class="distribution-bar" aria-label="Distribucion del presupuesto">
+          <span class="dist-reserved" style="width:${reservedRatio}%"></span>
+          <span class="dist-spent" style="width:${spentRatio}%"></span>
+          <span class="dist-free" style="width:${freeRatio}%"></span>
+        </div>
+        <div class="distribution-foot">
+          <span>Presupuesto total: ${formatMoney(summary.income)}</span>
+          <strong>${Math.round(freeRatio)}% libre</strong>
+        </div>
+        ${ring.outside > 0 ? `<p class="inline-warning">Gastos fuera del presupuesto: ${formatMoney(ring.outside)}.</p>` : ""}
       </article>
 
-      ${renderExtraBudgetCard(summary)}
+      <div class="plan-actions">
+        <button class="plan-action" type="button" data-action="open-extra-sheet">
+          <span class="plan-action-icon extra-icon" aria-hidden="true">+</span>
+          <span><strong>Registrar dinero extra</strong><small>Bonos, regalos o ventas</small></span>
+          <b>&rsaquo;</b>
+        </button>
+        ${
+          summary.extraIncome > 0
+            ? `<span class="extra-inline-summary">${formatMoney(summary.extraIncome)} extra en este periodo · ${periodExtraSourceLabel(summary)}</span>`
+            : ""
+        }
+      </div>
 
-      <article class="card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Crear campo</p>
-            <h2>Reservar dinero</h2>
-          </div>
-          <span class="metric-badge ${status}">${formatMoney(summary.freeBudget)} libre</span>
-        </div>
-        ${renderProgress(assignmentRatio, "Reservado del presupuesto del periodo")}
-        ${renderBudgetJobForm()}
-      </article>
+      <div class="section-heading">
+        <h2>Categorias <span>(${state.budgetJobs.length} de 10)</span></h2>
+        <span>${formatMoney(summary.freeBudget)} reservables</span>
+      </div>
 
-      <article class="card wide-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Trabajos del dinero</p>
-            <h2>Gasto consciente</h2>
-          </div>
-          <span class="metric-badge">${state.budgetJobs.length}/10 maximo</span>
-        </div>
-        <div class="job-table">
-          ${
-            state.budgetJobs.length
-              ? state.budgetJobs.map((job) => renderBudgetJob(job)).join("")
-              : `<div class="empty-state">Aun no tienes campos. Crea uno como gasolina, comida, ahorro o salidas.</div>`
-          }
-        </div>
-      </article>
+      <div class="plan-category-list">
+        ${
+          state.budgetJobs.length
+            ? state.budgetJobs.map((job) => renderBudgetJob(job)).join("")
+            : `<div class="empty-state actionable-empty">
+                <span class="empty-icon" aria-hidden="true">+</span>
+                <strong>Aun no separas dinero por categorias</strong>
+                <span>Crea una categoria y veras su limite siempre antes de gastar.</span>
+                <button class="btn primary" type="button" data-action="open-category-sheet">Crear categoria</button>
+              </div>`
+        }
+        <button class="add-category-row" type="button" data-action="open-category-sheet" ${state.budgetJobs.length >= 10 ? "disabled" : ""}>
+          <span aria-hidden="true">+</span>
+          <strong>Crear categoria</strong>
+          <small>max. ${formatCompactMoney(summary.freeBudget)} reservables</small>
+        </button>
+      </div>
     </section>
   `;
 }
 
 function renderBudgetJobForm() {
+  const summary = budgetSummary();
   return `
-    <form class="inline-form" id="budget-job-form">
+    <form class="sheet-form" id="budget-job-form">
       <label>
-        Campo
-        <input name="name" type="text" placeholder="Ej. Novia, ahorro, comida" maxlength="32" required>
+        Nombre
+        <input name="name" type="text" placeholder="Ej. Mercado semanal" maxlength="32" required>
       </label>
       <label>
         Monto
-        <input name="amount" type="number" min="1000" step="1000" placeholder="30000" required>
+        <input name="amount" type="number" min="1000" step="1000" inputmode="numeric" placeholder="$0" required>
       </label>
-      <label>
-        Frecuencia
-        <select name="cadence">
-          <option value="weekly">Semanal</option>
-          <option value="biweekly">Quincenal</option>
-          <option value="monthly">Mensual</option>
-          <option value="semester">Semestral</option>
-          <option value="yearly">Anual</option>
-          <option value="period">Una vez por periodo</option>
-        </select>
-      </label>
-      <button class="btn secondary" type="submit">Agregar campo</button>
+      <div class="sheet-field">
+        <span class="sheet-label">Frecuencia</span>
+        ${renderChoicePills("cadence", [
+          { value: "weekly", label: "Semanal" },
+          { value: "biweekly", label: "Quincenal" },
+          { value: "monthly", label: "Mensual" }
+        ], "monthly")}
+      </div>
+      <div class="conversion-box" data-category-conversion>
+        <span>Conversion automatica</span>
+        <strong>Escribe un monto para ver su valor en este periodo.</strong>
+        <small>Disponible para reservar: ${formatMoney(summary.freeBudget)}</small>
+      </div>
+      <div class="limit-warning" data-category-limit-warning hidden>
+        <span aria-hidden="true">!</span>
+        <p>Esta categoria excede el dinero libre del periodo.</p>
+      </div>
+      <button class="btn primary" type="submit" data-category-submit>Agregar categoria</button>
+      <button class="btn ghost" type="button" data-action="close-plan-sheet">Cancelar</button>
     </form>
+  `;
+}
+
+function renderPlanSheet() {
+  if (planSheet === "category") {
+    return `
+      <div class="sheet-backdrop" role="presentation">
+        <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="category-sheet-title">
+          <div class="sheet-handle"></div>
+          <div class="sheet-heading">
+            <div><p class="eyebrow">Plan</p><h2 id="category-sheet-title">Nueva categoria</h2></div>
+            <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">x</button>
+          </div>
+          ${renderBudgetJobForm()}
+        </section>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="sheet-backdrop" role="presentation">
+      <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="extra-sheet-title">
+        <div class="sheet-handle"></div>
+        <div class="sheet-heading">
+          <div><span class="extra-badge">Dinero extra</span><h2 id="extra-sheet-title">¿De donde viene?</h2></div>
+          <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">x</button>
+        </div>
+        <form class="sheet-form" id="extra-budget-form">
+          <label>Origen<input name="source" type="text" maxlength="36" placeholder="Ej. Bono trabajo" required></label>
+          <label>Monto<input name="amount" type="number" min="1000" step="1000" inputmode="numeric" placeholder="$0" required></label>
+          <input name="date" type="hidden" value="${todayKey()}">
+          <div class="sheet-field">
+            <span class="sheet-label">¿Donde entro?</span>
+            ${renderChoicePills("location", [
+              { value: "account", label: "Cuenta" },
+              { value: "cash", label: "Efectivo" }
+            ], "account")}
+          </div>
+          <button class="btn primary" type="submit">Continuar</button>
+          <button class="btn ghost" type="button" data-action="close-plan-sheet">Cancelar</button>
+        </form>
+      </section>
+    </div>
   `;
 }
 
@@ -1151,17 +1247,49 @@ function renderBudgetJob(job) {
   const budget = getBudgetAmountForJob(job, state.profile);
   const ratio = budget ? (spent / budget) * 100 : 0;
   const band = ratio > 90 ? "danger" : ratio > 65 ? "warning" : "good";
+  const remaining = Math.max(0, budget - spent);
+  const status = ratio > 100 ? "Excedida" : ratio > 90 ? "Critica" : ratio > 65 ? "Atencion" : "Saludable";
 
   return `
-    <div class="job-row">
-      <div>
-        <strong>${escapeHtml(job.name)}</strong>
-        <span>${formatMoney(spent)} de ${formatMoney(budget)} (${formatMoney(job.amount)} ${cadenceLabel(job.cadence)})</span>
+    <article class="plan-category-card ${band}">
+      <div class="category-card-top">
+        <div>
+          <strong>${escapeHtml(job.name)}</strong>
+          <span>${capitalize(cadenceLabel(job.cadence))} · ${formatMoney(job.amount)}</span>
+        </div>
+        <button class="category-menu-btn" type="button" data-action="request-remove-job" data-id="${escapeAttr(job.id)}" aria-label="Eliminar ${escapeAttr(job.name)}">&middot;&middot;&middot;</button>
       </div>
-      <div class="bar ${band}" aria-label="${Math.round(ratio)} por ciento usado">
+      <div class="category-card-bar ${band}" aria-label="${Math.round(ratio)} por ciento usado">
         <span style="width:${clamp(ratio, 0, 120)}%"></span>
       </div>
-      <button class="icon-btn muted" type="button" data-action="remove-job" data-id="${escapeAttr(job.id)}" aria-label="Eliminar ${escapeAttr(job.name)}">x</button>
+      <div class="category-card-foot">
+        <span><strong>${formatMoney(spent)}</strong> usado</span>
+        <span class="category-status">${status} · ${formatCompactMoney(remaining)} restante</span>
+      </div>
+    </article>
+  `;
+}
+
+function renderJobRemovalConfirmation() {
+  const job = state.budgetJobs.find((item) => item.id === pendingJobRemovalId);
+  if (!job) {
+    return "";
+  }
+  const affected = state.transactions.filter((transaction) => transaction.category === job.id).length;
+  return `
+    <div class="sheet-backdrop destructive-backdrop" role="presentation">
+      <section class="bottom-sheet destructive-sheet" role="alertdialog" aria-modal="true" aria-labelledby="remove-category-title">
+        <div class="sheet-handle"></div>
+        <span class="destructive-icon" aria-hidden="true">!</span>
+        <h2 id="remove-category-title">Eliminar ${escapeHtml(job.name)}</h2>
+        <p>La reserva desaparecera del plan. Tus movimientos no se borran.</p>
+        <div class="destructive-consequence">
+          <strong>${affected} ${affected === 1 ? "gasto quedara" : "gastos quedaran"} sin clasificar</strong>
+          <span>Podras reclasificarlos despues desde Movimientos.</span>
+        </div>
+        <button class="btn danger" type="button" data-action="confirm-remove-job">Eliminar categoria</button>
+        <button class="btn ghost" type="button" data-action="cancel-remove-job">Conservar categoria</button>
+      </section>
     </div>
   `;
 }
@@ -1176,80 +1304,66 @@ function renderSavings(plan) {
   const escalatedSavings = futureRaise * (state.settings.escalationPct / 100);
 
   return `
-    <section class="content-grid savings-grid">
-      <article class="card wide-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Simulador · ${capitalize(summary.cadenceLabel)}</p>
-            <h2>${formatMoney(plan.suggestedPeriodSavings)} sugeridos para apartar</h2>
-          </div>
-          <span class="metric-badge">${Math.round(plan.savingsRate)}% orientativo</span>
-        </div>
-        <p>Esta cifra es una recomendacion. No mueve dinero, no cambia saldos y no crea campos en tu plan.</p>
-        <div class="phase-grid">
-          <div>
-            <strong>Meta ideal del periodo</strong>
-            <span>${formatMoney(plan.idealPeriodSavings)}</span>
-          </div>
-          <div>
-            <strong>Ya reservado como ahorro</strong>
-            <span>${formatMoney(plan.savingsReserved)}</span>
-          </div>
-          <div>
-            <strong>Libre despues de la sugerencia</strong>
-            <span>${formatMoney(plan.freeAfterSuggestion)}</span>
-          </div>
-          <div>
-            <strong>Momento sugerido</strong>
-            <span>${suggestedSavingsMoment()}</span>
-          </div>
-        </div>
-        ${
-          plan.savingsCapacityGap > 0
-            ? `<p class="helper-text danger-text">La meta ideal no cabe completa: faltaria liberar ${formatMoney(plan.savingsCapacityGap)} del presupuesto.</p>`
-            : `<p class="helper-text">La recomendacion cabe en el dinero libre actual del periodo.</p>`
-        }
-      </article>
+    <section class="screen-view savings-view" aria-label="Ahorro">
+      <div class="screen-title-row">
+        <div><p class="eyebrow">Recomendacion del periodo</p><h1>Ahorro</h1></div>
+      </div>
 
-      <article class="card">
-        <p class="eyebrow">Como se calcula</p>
-        <h2>${formatMoney(plan.projectedPeriodSavings)} proyectados</h2>
-        <p>${plan.incomeNote}</p>
-        <div class="phase-grid">
-          <div><strong>Presupuesto</strong><span>${formatMoney(plan.periodIncome)}</span></div>
-          <div><strong>Gastos comprometidos</strong><span>${formatMoney(plan.committedForPeriod)}</span></div>
-          <div><strong>Campos de gasto</strong><span>${formatMoney(summary.expenseReserved)}</span></div>
+      <article class="savings-hero">
+        <div class="trust-tags"><span>Orientativo</span><span>No mueve dinero</span></div>
+        <p>Podrias apartar</p>
+        <strong>${formatMoney(plan.suggestedPeriodSavings)}</strong>
+        <span>durante este periodo ${summary.cadenceLabel}</span>
+        <div class="savings-fit ${plan.savingsCapacityGap > 0 ? "warning" : ""}">
+          ${
+            plan.savingsCapacityGap > 0
+              ? `La meta ideal no cabe completa. Faltaria liberar ${formatMoney(plan.savingsCapacityGap)}.`
+              : `La recomendacion cabe y deja ${formatMoney(plan.freeAfterSuggestion)} libres.`
+          }
         </div>
       </article>
 
-      <article class="card">
-        <p class="eyebrow">Fondo de referencia</p>
-        <h2>${targetCovered ? "Meta cubierta" : `${periodsToTarget || "Sin"} periodos estimados`}</h2>
-        ${renderProgress(plan.emergencyProgress, "Avance simulado con el ahorro actual")}
-        <p>Referencia: ${formatMoney(plan.emergencyTarget)}. Ahorro actual informado: ${formatMoney(state.profile.emergencySavings)}.</p>
-      </article>
+      <div class="savings-metrics">
+        <div><span>Meta ideal</span><strong>${formatMoney(plan.idealPeriodSavings)}</strong></div>
+        <div><span>Ya reservado</span><strong>${formatMoney(plan.savingsReserved)}</strong></div>
+        <div><span>Momento sugerido</span><strong>${suggestedSavingsMoment()}</strong></div>
+      </div>
 
-      <article class="card">
-        <p class="eyebrow">Simular un aumento</p>
-        <h2>${formatMoney(escalatedSavings)} adicionales / mes</h2>
-        <p>Si tus ingresos subieran ${state.settings.monthlyRaisePct}%, podrias orientar el ${state.settings.escalationPct}% del aumento al ahorro.</p>
-        <form class="stacked-form" id="smart-form">
+      <details class="calculation-accordion">
+        <summary><span><strong>Como se calculo</strong><small>Ver presupuesto, compromisos y reservas</small></span><b>+</b></summary>
+        <div class="calculation-body">
+          <p>${plan.incomeNote}</p>
+          ${renderAllocation("Presupuesto del periodo", plan.periodIncome, "reserved")}
+          ${renderAllocation("Gastos comprometidos", plan.committedForPeriod, "expenses")}
+          ${renderAllocation("Categorias de gasto", summary.expenseReserved, "expenses")}
+          ${renderAllocation("Ahorro proyectado", plan.projectedPeriodSavings, "savings")}
+        </div>
+      </details>
+
+      <article class="raise-simulator">
+        <p class="eyebrow">Simulador interactivo</p>
+        <h2>¿Y si tus ingresos aumentaran?</h2>
+        <div class="simulator-result">
+          <strong data-simulator-result>${formatMoney(escalatedSavings)}</strong>
+          <span>adicionales al ahorro cada mes</span>
+        </div>
+        <form id="smart-form" class="simulator-form" data-monthly-income="${getMonthlyIncome(state.profile)}">
           <label>
-            Aumento hipotetico %
-            <input name="monthlyRaisePct" type="number" min="0" max="100" value="${state.settings.monthlyRaisePct}">
+            <span>Aumento hipotetico <output data-raise-output>${state.settings.monthlyRaisePct}%</output></span>
+            <input name="monthlyRaisePct" type="range" min="0" max="100" step="1" value="${state.settings.monthlyRaisePct}">
           </label>
           <label>
-            Porcion hipotetica al ahorro %
-            <input name="escalationPct" type="number" min="0" max="100" value="${state.settings.escalationPct}">
+            <span>Porcion del aumento al ahorro <output data-escalation-output>${state.settings.escalationPct}%</output></span>
+            <input name="escalationPct" type="range" min="0" max="100" step="5" value="${state.settings.escalationPct}">
           </label>
-          <button class="btn secondary" type="submit">Actualizar simulacion</button>
+          <button class="btn primary" type="submit">Guardar simulacion</button>
         </form>
       </article>
 
-      <article class="card">
-        <p class="eyebrow">Proyeccion orientativa</p>
-        <h2>${futureFreedom(plan)}</h2>
-        <p>Estimacion basada en repetir el ahorro proyectado; no representa un rendimiento garantizado.</p>
+      <article class="reference-fund">
+        <div><p class="eyebrow">Fondo de referencia</p><h2>${targetCovered ? "Meta cubierta" : `${periodsToTarget || "Sin"} periodos estimados`}</h2></div>
+        ${renderProgress(plan.emergencyProgress, "Avance simulado con el ahorro actual")}
+        <p>${futureFreedom(plan)}. Es una proyeccion orientativa, no una promesa.</p>
       </article>
     </section>
   `;
@@ -1474,15 +1588,12 @@ function renderLocationOptions(selected) {
 function renderMovements() {
   const summary = budgetSummary();
   return `
-    <section class="content-grid movements-grid">
-      <article class="card wide-card movements-card">
-        <div class="card-heading movements-heading">
-          <div>
-            <p class="eyebrow">Historial</p>
-            <h2>Movimientos del periodo</h2>
-          </div>
-          <span class="metric-badge">${transactionsForSummary(summary).length} gastos</span>
-        </div>
+    <section class="screen-view movements-view" aria-label="Movimientos">
+      <div class="screen-title-row movements-heading">
+        <div><p class="eyebrow">Historial del periodo</p><h1>Movimientos</h1></div>
+        <span class="period-chip">${transactionsForSummary(summary).length} gastos</span>
+      </div>
+      <article class="movements-card">
         <label class="history-sort">
           Ordenar por
           <select id="transaction-history-sort">
@@ -1506,25 +1617,74 @@ function renderTransactionHistory(summary = budgetSummary(), sort = "recent") {
     );
 
   if (!transactions.length) {
-    return `<div class="empty-state">Todavia no hay gastos registrados en este periodo.</div>`;
+    return `<div class="empty-state actionable-empty">
+      <span class="empty-icon" aria-hidden="true">+</span>
+      <strong>Todavia no hay movimientos</strong>
+      <span>Cuando registres un gasto aparecera aqui para revisarlo o corregirlo.</span>
+      <button class="btn primary" type="button" data-action="open-expense">Registrar gasto</button>
+    </div>`;
   }
+
+  const groups = transactions.reduce((acc, transaction) => {
+    const date = String(transaction.date || todayKey()).slice(0, 10);
+    (acc[date] ||= []).push(transaction);
+    return acc;
+  }, {});
 
   return `
     <div class="transaction-history">
-      ${transactions
-        .map(
-          (transaction) => `
-            <div class="history-row">
-              <div>
-                <strong>${escapeHtml(transaction.merchant)}</strong>
-                ${transaction.description ? `<span>${escapeHtml(transaction.description)}</span>` : ""}
-                <span>${formatMoney(transaction.amount)} · ${escapeHtml(categoryName(transaction.category))} · ${locationLabel(transaction.source)} · ${formatDate(transaction.date)}</span>
-              </div>
-              <button class="btn ghost" type="button" data-action="remove-transaction" data-id="${escapeAttr(transaction.id)}">Eliminar</button>
-            </div>
-          `
-        )
-        .join("")}
+      ${Object.entries(groups).map(([date, dayTransactions]) => `
+        <section class="movement-day">
+          <div class="movement-day-heading"><strong>${movementDayLabel(date)}</strong><span>${formatMoney(dayTransactions.reduce((sum, item) => sum + Number(item.amount || 0), 0))}</span></div>
+          ${dayTransactions.map((transaction) => {
+            const unlabeled = !transaction.labeled || !transaction.category || transaction.category === FREE_CATEGORY_ID;
+            return `
+              <button class="history-row ${unlabeled ? "is-unclassified" : ""}" type="button" data-action="edit-transaction" data-id="${escapeAttr(transaction.id)}">
+                <span class="movement-type-icon ${normalizeLocation(transaction.source)}" aria-hidden="true">${normalizeLocation(transaction.source) === "cash" ? "$" : "C"}</span>
+                <span class="movement-copy">
+                  <strong>${escapeHtml(transaction.merchant)}</strong>
+                  <small>${transaction.description ? `${escapeHtml(transaction.description)} · ` : ""}${unlabeled ? "Sin clasificar" : escapeHtml(categoryName(transaction.category))} · ${locationLabel(transaction.source)}</small>
+                </span>
+                <span class="movement-amount"><strong>-${formatMoney(transaction.amount)}</strong><small>Editar</small></span>
+              </button>
+            `;
+          }).join("")}
+        </section>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderTransactionEditor() {
+  const transaction = state.transactions.find((item) => item.id === editingTransactionId);
+  if (!transaction) {
+    return "";
+  }
+  return `
+    <div class="sheet-backdrop" role="presentation">
+      <section class="bottom-sheet transaction-editor" role="dialog" aria-modal="true" aria-labelledby="transaction-editor-title">
+        <div class="sheet-handle"></div>
+        <div class="sheet-heading">
+          <div><p class="eyebrow">Corregir movimiento</p><h2 id="transaction-editor-title">${escapeHtml(transaction.merchant)}</h2></div>
+          <button class="icon-btn muted" type="button" data-action="close-transaction-editor" aria-label="Cerrar">x</button>
+        </div>
+        <div class="editor-amount">${formatMoney(transaction.amount)}<span>${formatDate(transaction.date)}</span></div>
+        <form class="sheet-form" id="transaction-edit-form">
+          <div class="sheet-field">
+            <span class="sheet-label">Categoria</span>
+            ${renderChoicePills("category", categoryChoiceOptions(), transaction.category || FREE_CATEGORY_ID)}
+          </div>
+          <div class="sheet-field">
+            <span class="sheet-label">Pagado con</span>
+            ${renderChoicePills("source", [
+              { value: "account", label: "Cuenta" },
+              { value: "cash", label: "Efectivo" }
+            ], normalizeLocation(transaction.source))}
+          </div>
+          <button class="btn primary" type="submit">Guardar cambios</button>
+          <button class="btn danger subtle-danger" type="button" data-action="remove-transaction" data-id="${escapeAttr(transaction.id)}">Eliminar gasto y devolver saldo</button>
+        </form>
+      </section>
     </div>
   `;
 }
@@ -1557,68 +1717,39 @@ function renderCooldown(cooldown) {
 
 function renderProfile(plan) {
   const script = dominantMoneyScript();
-  const anxietyTone = state.profile.financialAnxiety >= 7 ? "Revision suave" : "Revision estandar";
   const monthlyIncome = getMonthlyIncome(state.profile);
+  const liquidity = liquiditySummary();
 
   return `
-    <section class="content-grid profile-grid">
-      ${renderAccountPanel()}
+    <section class="screen-view data-view" aria-label="Datos">
+      <div class="screen-title-row">
+        <div><p class="eyebrow">Configuracion y contexto</p><h1>Datos</h1></div>
+      </div>
 
-      <article class="card">
-        <p class="eyebrow">Tus datos</p>
-        <h2>${escapeHtml(state.profile.name)}</h2>
-        <p>${anxietyTone}. Patron dominante: ${script.name.toLowerCase()}.</p>
-        <div class="score-grid">
-          <div>
-            <strong>${state.profile.selfEfficacy}/10</strong>
-            <span>Autoeficacia</span>
-          </div>
-          <div>
-            <strong>${state.profile.financialAnxiety}/10</strong>
-            <span>Ansiedad</span>
-          </div>
-        </div>
-        <button class="btn primary" type="button" data-action="open-diagnosis">Editar datos</button>
+      <article class="data-section">
+        <div class="data-section-heading"><span class="data-icon">P</span><div><strong>Plan basico</strong><small>Ingreso y frecuencia del periodo</small></div><button type="button" data-action="open-diagnosis">Editar</button></div>
+        <div class="data-metrics"><div><span>Presupuesto</span><strong>${formatMoney(getPeriodIncome(state.profile))}</strong></div><div><span>Frecuencia</span><strong>${capitalize(cadenceLabel(state.profile.incomeCadence))}</strong></div></div>
       </article>
 
-      <article class="card wide-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Patrones de dinero</p>
-            <h2>Patrones que guian decisiones</h2>
-          </div>
-        </div>
-        <div class="script-bars">
-          ${Object.entries(state.profile.moneyScripts)
-            .map(([key, value]) => renderScriptBar(key, value))
-            .join("")}
-        </div>
+      <article class="data-section">
+        <div class="data-section-heading"><span class="data-icon">S</span><div><strong>Saldos</strong><small>Dinero disponible hoy</small></div><button type="button" data-action="open-diagnosis">Editar</button></div>
+        <div class="data-metrics three"><div><span>Cuenta</span><strong>${formatMoney(liquidity.account)}</strong></div><div><span>Efectivo</span><strong>${formatMoney(liquidity.cash)}</strong></div><div><span>Total real</span><strong>${formatMoney(liquidity.total)}</strong></div></div>
       </article>
 
-      <article class="card">
-        <p class="eyebrow">Orientacion mensual</p>
-        <h2>${formatMoney(monthlyIncome)} / mes</h2>
-        ${renderAllocation("Ahorro proyectado", plan.savings, "savings")}
-        ${renderAllocation("Resto para gastos", plan.expenses, "expenses")}
-        <p class="helper-text">Es una simulacion; no modifica tu presupuesto ni tus saldos.</p>
+      <article class="data-section">
+        <div class="data-section-heading"><span class="data-icon">R</span><div><strong>Recomendacion</strong><small>Orientacion mensual simple</small></div><button type="button" data-view="savings">Ver ahorro</button></div>
+        <div class="data-metrics three"><div><span>Ingreso mensual</span><strong>${formatMoney(monthlyIncome)}</strong></div><div><span>Ahorro proyectado</span><strong>${formatMoney(plan.savings)}</strong></div><div><span>Para gastos</span><strong>${formatMoney(plan.expenses)}</strong></div></div>
+        <p class="data-note">Es una simulacion: no modifica tu presupuesto ni tus saldos.</p>
       </article>
 
-      <article class="card wide-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Avances</p>
-            <h2>Lo que ya hiciste</h2>
-          </div>
-          <span class="metric-badge">${state.wins.length}</span>
-        </div>
-        <div class="wins-list">
-          ${state.wins
-            .slice()
-            .reverse()
-            .slice(0, 6)
-            .map((win) => `<div><strong>${formatDate(win.date)}</strong><span>${escapeHtml(win.text)}</span></div>`)
-            .join("")}
-        </div>
+      <article class="data-section">
+        <div class="data-section-heading"><span class="data-icon">C</span><div><strong>Perfil conductual</strong><small>Opcional, ayuda a orientar el tono</small></div><button type="button" data-action="open-diagnosis">Editar</button></div>
+        <div class="data-metrics three"><div><span>Patron dominante</span><strong>${script.name}</strong></div><div><span>Confianza</span><strong>${state.profile.selfEfficacy}/10</strong></div><div><span>Ansiedad</span><strong>${state.profile.financialAnxiety}/10</strong></div></div>
+      </article>
+
+      <article class="sign-out-section">
+        <div><strong>${escapeHtml(cloudState.email)}</strong><span>La copia local se retirara de este dispositivo.</span></div>
+        <button class="btn danger" type="button" data-action="cloud-sign-out">Cerrar sesion</button>
       </article>
     </section>
   `;
@@ -1716,6 +1847,16 @@ function renderIncomeCadenceOptions(selected) {
 function renderOnboardingModal() {
   const profile = state.profile;
   const liquidity = normalizeLiquidity(state.liquidity);
+  const income = getPeriodIncome(profile);
+  const suggestions = [
+    ["Comida", 0.18, true],
+    ["Gasolina", 0.1, true],
+    ["Transporte", 0.08, false],
+    ["Salidas", 0.08, true],
+    ["Arriendo", 0.25, false],
+    ["Salud", 0.06, false],
+    ["Ropa", 0.05, false]
+  ];
 
   return `
     <div class="modal-backdrop onboarding-backdrop" role="presentation">
@@ -1725,57 +1866,70 @@ function renderOnboardingModal() {
         </div>
         <form id="onboarding-form" class="onboarding-form" novalidate>
           <section class="onboarding-step is-active" data-step="1">
-            <p class="eyebrow">Paso 1 de 3</p>
-            <h2 id="onboarding-title">¿Cuanto recibes y cada cuanto?</h2>
-            <p>Con esto calculamos el dinero libre del periodo.</p>
+            <span class="step-badge">Paso 1 de 3</span>
+            <h2 id="onboarding-title">¿Cuando recibes dinero?</h2>
+            <p>Asi calculamos cuanto tienes disponible en cada periodo.</p>
+            <div class="sheet-field">
+              <span class="sheet-label">¿Cada cuanto recibes?</span>
+              <div class="onboarding-segmented" data-onboarding-cadence-group>
+                <button type="button" data-onboarding-cadence="weekly" class="${profile.incomeCadence === "weekly" ? "is-active" : ""}">Semanal</button>
+                <button type="button" data-onboarding-cadence="monthly" class="${profile.incomeCadence === "monthly" ? "is-active" : ""}">Mensual</button>
+                <button type="button" data-onboarding-cadence="semester" class="${!["weekly", "monthly"].includes(profile.incomeCadence) ? "is-active" : ""}">Otro</button>
+              </div>
+              <input name="incomeCadence" type="hidden" value="${escapeAttr(profile.incomeCadence)}">
+            </div>
             <label>
-              Frecuencia
-              <select name="incomeCadence">
-                ${renderIncomeCadenceOptions(profile.incomeCadence)}
-              </select>
-            </label>
-            <label>
-              Presupuesto por periodo
+              ¿Cuanto recibes por periodo?
               <input name="incomeAmount" type="number" min="1" step="1000" inputmode="numeric" value="${getPeriodIncome(profile)}" required>
             </label>
+            <div class="onboarding-preview"><span>Libre estimado</span><strong data-onboarding-income-preview>${formatMoney(income)}</strong></div>
+            <small class="onboarding-note">Despues separaras reservas para gastos habituales y este numero bajara.</small>
             <input name="periodStart" type="hidden" value="${escapeAttr(profile.periodStart || monthStartKey())}">
           </section>
 
           <section class="onboarding-step" data-step="2">
-            <p class="eyebrow">Paso 2 de 3</p>
+            <span class="step-badge">Paso 2 de 3</span>
             <h2>¿Donde tienes ese dinero?</h2>
-            <p>Cuenta y efectivo deben sumar el presupuesto del periodo.</p>
+            <p>La app distingue entre cuenta y efectivo para que los saldos reflejen la realidad.</p>
             <div class="onboarding-balance-grid">
-              <label>
-                En cuenta
+              <label class="balance-card">
+                <span>Cuenta</span>
                 <input name="account" type="number" min="0" step="1000" inputmode="numeric" value="${liquidity.account}" required>
               </label>
-              <label>
-                En efectivo
+              <label class="balance-card">
+                <span>Efectivo</span>
                 <input name="cash" type="number" min="0" step="1000" inputmode="numeric" value="${liquidity.cash}" required>
               </label>
             </div>
+            <div class="onboarding-preview"><span>Total real</span><strong data-onboarding-total-preview>${formatMoney(liquidity.account + liquidity.cash)}</strong></div>
             <small class="balance-hint" data-onboarding-balance></small>
           </section>
 
           <section class="onboarding-step" data-step="3">
-            <p class="eyebrow">Paso 3 de 3</p>
-            <h2>¿Para que separas plata normalmente?</h2>
-            <p>Agrega montos solo a los campos que quieras usar. Puedes editarlos despues.</p>
-            <div class="onboarding-categories">
-              ${renderOnboardingCategoryRow(0, { example: true })}
+            <span class="step-badge">Paso 3 de 3</span>
+            <h2>¿Para que separas dinero?</h2>
+            <p>Elige categorias habituales. Puedes ajustar sus montos despues.</p>
+            <div class="onboarding-category-chips">
+              ${suggestions.map(([name, rate, selected], index) => `
+                <button type="button" class="onboarding-category-chip ${selected ? "is-active" : ""}" data-onboarding-category-chip data-category-index="${index}" data-rate="${rate}">${name}</button>
+                <input name="categoryName${index}" type="hidden" value="${name}" ${selected ? "" : "disabled"}>
+                <input name="categoryAmount${index}" type="hidden" value="${Math.round(income * rate)}" ${selected ? "" : "disabled"}>
+                <input name="categoryCadence${index}" type="hidden" value="period" ${selected ? "" : "disabled"}>
+              `).join("")}
             </div>
-            <div class="onboarding-add-category">
-              <span>Añadir otro campo</span>
-              <button class="icon-btn onboarding-category-add" type="button" data-add-onboarding-category aria-label="Añadir otro campo" title="Añadir otro campo">+</button>
+            <div class="onboarding-preview category-preview">
+              <span>Libre estimado despues de reservas</span>
+              <strong data-onboarding-free-preview>${formatMoney(income * 0.64)}</strong>
+              <small data-onboarding-category-count>de ${formatMoney(income)} · 3 categorias seleccionadas</small>
             </div>
           </section>
 
           <p class="form-error onboarding-error" role="alert" aria-live="assertive"></p>
           <div class="onboarding-actions">
-            <button class="btn ghost onboarding-back" type="button" data-onboarding-back hidden>Atras</button>
-            <button class="btn primary onboarding-next" type="button" data-onboarding-next>Continuar</button>
+            <button class="btn ghost onboarding-back" type="button" data-onboarding-back hidden>← Atras</button>
+            <button class="btn primary onboarding-next" type="button" data-onboarding-next>Siguiente →</button>
             <button class="btn primary onboarding-finish" type="submit" hidden>Ver mi dinero libre</button>
+            <button class="btn ghost onboarding-skip" type="button" data-onboarding-skip hidden>Saltarme esto por ahora</button>
           </div>
         </form>
       </section>
@@ -1987,44 +2141,35 @@ function renderCategoryBars(plan, limit) {
 
 function renderExtraAllocationModal() {
   const draft = pendingExtraAllocation;
-  const percent = clamp(Number(draft.savingsPercent ?? 50), 0, 100);
+  const percent = clamp(Number(draft.savingsPercent ?? 20), 0, 100);
   const savingsAmount = Math.round(Number(draft.amount || 0) * percent / 100);
   const freeAmount = Number(draft.amount || 0) - savingsAmount;
   const target = savingsAllocationTarget();
 
   return `
-    <div class="modal-backdrop" role="presentation">
-      <section class="modal compact-modal" role="dialog" aria-modal="true" aria-labelledby="extra-allocation-title">
-        <div class="modal-heading">
-          <div>
-            <p class="eyebrow">Dinero extra</p>
-            <h2 id="extra-allocation-title">Asignar antes de sumar</h2>
-          </div>
-          <button class="icon-btn" type="button" data-action="cancel-extra-allocation" aria-label="Cerrar">x</button>
+    <div class="sheet-backdrop" role="presentation">
+      <section class="bottom-sheet extra-suggestion-sheet" role="dialog" aria-modal="true" aria-labelledby="extra-allocation-title">
+        <div class="sheet-handle"></div>
+        <div class="sheet-heading">
+          <div><span class="extra-badge">Dinero extra</span><h2 id="extra-allocation-title">Antes de sumarlo</h2></div>
+          <button class="icon-btn muted" type="button" data-action="cancel-extra-allocation" aria-label="Cerrar">x</button>
         </div>
-        <p>
-          ${escapeHtml(draft.source)} suma ${formatMoney(draft.amount)} en ${locationLabel(draft.location)}.
-          Sugerencia: separar una parte para ${escapeHtml(target.label)} y dejar el resto libre.
-        </p>
-        <form class="stacked-form" id="extra-allocation-form">
+        <div class="extra-origin-summary">
+          <strong>${formatMoney(draft.amount)}</strong>
+          <span>${escapeHtml(draft.source)} · ${locationLabel(draft.location)}</span>
+        </div>
+        <form class="sheet-form" id="extra-allocation-form">
+          <div class="extra-suggestion-card">
+            <span>Una sugerencia antes de decidir</span>
+            <strong data-allocation-savings>${formatMoney(savingsAmount)}</strong>
+            <p>para ${escapeHtml(target.label)} (${percent}%). Los <b data-allocation-free>${formatMoney(freeAmount)}</b> restantes quedarian libres.</p>
+          </div>
           <label>
             Porcentaje para ${escapeHtml(target.label)}
             <input name="savingsPercent" type="range" min="0" max="100" step="5" value="${percent}" data-extra-allocation-range>
           </label>
-          <div class="allocation-preview" aria-live="polite">
-            <div>
-              <strong data-allocation-savings>${formatMoney(savingsAmount)}</strong>
-              <span>${escapeHtml(target.label)}</span>
-            </div>
-            <div>
-              <strong data-allocation-free>${formatMoney(freeAmount)}</strong>
-              <span>Libre</span>
-            </div>
-          </div>
-          <div class="modal-actions">
-            <button class="btn ghost" type="button" data-action="extra-all-free">Dejar todo libre</button>
-            <button class="btn primary" type="submit">Aplicar asignacion</button>
-          </div>
+          <button class="btn primary" type="submit">Separar ${formatCompactMoney(savingsAmount)} y sumar</button>
+          <button class="btn ghost" type="button" data-action="extra-all-free">Dejar todo libre</button>
         </form>
       </section>
     </div>
@@ -2110,7 +2255,7 @@ function bindEvents() {
 
   const onboardingForm = document.querySelector("#onboarding-form");
   if (onboardingForm) {
-    bindOnboardingFlow(onboardingForm);
+    bindOnboardingFlowV2(onboardingForm);
     onboardingForm.addEventListener("submit", handleOnboardingSubmit);
   }
 
@@ -2122,6 +2267,7 @@ function bindEvents() {
 
   const budgetForm = document.querySelector("#budget-job-form");
   if (budgetForm) {
+    bindPlanCategoryPreview(budgetForm);
     budgetForm.addEventListener("submit", handleBudgetSubmit);
   }
 
@@ -2135,6 +2281,11 @@ function bindEvents() {
     transactionForm.addEventListener("submit", handleTransactionSubmit);
   }
 
+  const transactionEditForm = document.querySelector("#transaction-edit-form");
+  if (transactionEditForm) {
+    transactionEditForm.addEventListener("submit", handleTransactionEditSubmit);
+  }
+
   const extraAllocationForm = document.querySelector("#extra-allocation-form");
   if (extraAllocationForm) {
     bindExtraAllocationPreview(extraAllocationForm);
@@ -2143,6 +2294,7 @@ function bindEvents() {
 
   const smartForm = document.querySelector("#smart-form");
   if (smartForm) {
+    bindSavingsSimulatorPreview(smartForm);
     smartForm.addEventListener("submit", handleSmartSubmit);
   }
 
@@ -2167,6 +2319,7 @@ function bindOnboardingFlow(form) {
   const nextButton = form.querySelector("[data-onboarding-next]");
   const backButton = form.querySelector("[data-onboarding-back]");
   const finishButton = form.querySelector(".onboarding-finish");
+  const skipButton = form.querySelector("[data-onboarding-skip]");
   const balanceHint = form.querySelector("[data-onboarding-balance]");
   const categoryList = form.querySelector(".onboarding-categories");
   const addCategoryButton = form.querySelector("[data-add-onboarding-category]");
@@ -2187,9 +2340,10 @@ function bindOnboardingFlow(form) {
     modal.dataset.onboardingStep = String(step);
     form.querySelectorAll("[data-step]").forEach((section) => section.classList.toggle("is-active", Number(section.dataset.step) === step));
     modal.querySelectorAll(".onboarding-progress span").forEach((dot, index) => dot.classList.toggle("is-active", index < step));
-    backButton.hidden = step === 1;
+    backButton.hidden = step === 1 || step === 3;
     nextButton.hidden = step === 3;
     finishButton.hidden = step !== 3;
+    skipButton.hidden = step !== 3;
     error.textContent = "";
     if (step === 2) {
       updateBalanceHint();
@@ -2249,6 +2403,101 @@ function bindOnboardingFlow(form) {
   });
 
   updateCategoryControls();
+}
+
+function bindOnboardingFlowV2(form) {
+  const modal = form.closest("[data-onboarding-step]");
+  const error = form.querySelector(".onboarding-error");
+  const nextButton = form.querySelector("[data-onboarding-next]");
+  const backButton = form.querySelector("[data-onboarding-back]");
+  const finishButton = form.querySelector(".onboarding-finish");
+  const skipButton = form.querySelector("[data-onboarding-skip]");
+  const balanceHint = form.querySelector("[data-onboarding-balance]");
+  const incomePreview = form.querySelector("[data-onboarding-income-preview]");
+  const totalPreview = form.querySelector("[data-onboarding-total-preview]");
+  const freePreview = form.querySelector("[data-onboarding-free-preview]");
+  const categoryCount = form.querySelector("[data-onboarding-category-count]");
+
+  const updateBalance = () => {
+    const data = new FormData(form);
+    const budget = numberFrom(data.get("incomeAmount"));
+    const total = numberFrom(data.get("account")) + numberFrom(data.get("cash"));
+    const matches = budget > 0 && total === budget;
+    balanceHint.textContent = matches
+      ? `Coincide con tu presupuesto de ${formatMoney(budget)}.`
+      : `Cuenta + efectivo suma ${formatMoney(total)} de ${formatMoney(budget)}.`;
+    balanceHint.classList.toggle("is-ok", matches);
+    balanceHint.classList.toggle("is-error", !matches);
+    if (totalPreview) totalPreview.textContent = formatMoney(total);
+  };
+
+  const updateCategories = () => {
+    const income = numberFrom(form.elements.namedItem("incomeAmount")?.value);
+    let reserved = 0;
+    let selected = 0;
+    form.querySelectorAll("[data-onboarding-category-chip]").forEach((chip) => {
+      const index = chip.dataset.categoryIndex;
+      const amount = Math.round(income * Number(chip.dataset.rate || 0));
+      const enabled = chip.classList.contains("is-active");
+      ["categoryName", "categoryAmount", "categoryCadence"].forEach((prefix) => {
+        const input = form.elements.namedItem(`${prefix}${index}`);
+        if (input) input.disabled = !enabled;
+      });
+      const amountInput = form.elements.namedItem(`categoryAmount${index}`);
+      if (amountInput) amountInput.value = amount;
+      if (enabled) {
+        reserved += amount;
+        selected += 1;
+      }
+    });
+    if (incomePreview) incomePreview.textContent = formatMoney(income);
+    if (freePreview) freePreview.textContent = formatMoney(Math.max(0, income - reserved));
+    if (categoryCount) categoryCount.textContent = `de ${formatMoney(income)} · ${selected} categorias seleccionadas`;
+  };
+
+  const showStep = (step) => {
+    modal.dataset.onboardingStep = String(step);
+    form.querySelectorAll("[data-step]").forEach((section) => section.classList.toggle("is-active", Number(section.dataset.step) === step));
+    modal.querySelectorAll(".onboarding-progress span").forEach((dot, index) => dot.classList.toggle("is-active", index === step - 1));
+    backButton.hidden = step === 1 || step === 3;
+    nextButton.hidden = step === 3;
+    finishButton.hidden = step !== 3;
+    skipButton.hidden = step !== 3;
+    error.textContent = "";
+    if (step === 2) updateBalance();
+    if (step === 3) updateCategories();
+  };
+
+  nextButton.addEventListener("click", () => {
+    const step = Number(modal.dataset.onboardingStep || 1);
+    const message = validateOnboardingStep(form, step);
+    if (message) {
+      error.textContent = message;
+      return;
+    }
+    showStep(Math.min(3, step + 1));
+  });
+  backButton.addEventListener("click", () => showStep(Math.max(1, Number(modal.dataset.onboardingStep || 1) - 1)));
+  form.elements.namedItem("incomeAmount")?.addEventListener("input", updateCategories);
+  ["account", "cash"].forEach((name) => form.elements.namedItem(name)?.addEventListener("input", updateBalance));
+  form.querySelectorAll("[data-onboarding-cadence]").forEach((button) => {
+    button.addEventListener("click", () => {
+      form.elements.namedItem("incomeCadence").value = button.dataset.onboardingCadence;
+      form.querySelectorAll("[data-onboarding-cadence]").forEach((item) => item.classList.toggle("is-active", item === button));
+    });
+  });
+  form.querySelectorAll("[data-onboarding-category-chip]").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      chip.classList.toggle("is-active");
+      updateCategories();
+    });
+  });
+  skipButton.addEventListener("click", () => {
+    form.querySelectorAll("[data-onboarding-category-chip]").forEach((chip) => chip.classList.remove("is-active"));
+    updateCategories();
+    form.requestSubmit(finishButton);
+  });
+  updateCategories();
 }
 
 function validateOnboardingStep(form, step) {
@@ -2418,6 +2667,49 @@ function bindExtraAllocationPreview(form) {
   update();
 }
 
+function bindPlanCategoryPreview(form) {
+  const conversion = form.querySelector("[data-category-conversion]");
+  const warning = form.querySelector("[data-category-limit-warning]");
+  const submit = form.querySelector("[data-category-submit]");
+  const update = () => {
+    const data = new FormData(form);
+    const amount = numberFrom(data.get("amount"));
+    const cadence = data.get("cadence") || "monthly";
+    const draft = { amount, cadence };
+    const converted = getBudgetAmountForJob(draft, state.profile);
+    const available = budgetSummary().freeBudget;
+    const exceeds = amount > 0 && converted > available;
+    if (conversion) {
+      conversion.innerHTML = amount > 0
+        ? `<span>Conversion automatica</span><strong>${formatMoney(amount)} ${cadenceLabel(cadence)} = ${formatMoney(converted)} en este periodo</strong><small>Disponible para reservar: ${formatMoney(available)}</small>`
+        : `<span>Conversion automatica</span><strong>Escribe un monto para ver su valor en este periodo.</strong><small>Disponible para reservar: ${formatMoney(available)}</small>`;
+    }
+    if (warning) warning.hidden = !exceeds;
+    if (submit) submit.disabled = exceeds;
+  };
+  form.querySelectorAll("input, [data-choice-value]").forEach((control) => control.addEventListener("input", update));
+  form.querySelectorAll("[data-choice-value]").forEach((control) => control.addEventListener("click", () => window.setTimeout(update)));
+  update();
+}
+
+function bindSavingsSimulatorPreview(form) {
+  const raise = form.elements.namedItem("monthlyRaisePct");
+  const escalation = form.elements.namedItem("escalationPct");
+  const result = form.closest(".raise-simulator")?.querySelector("[data-simulator-result]");
+  const raiseOutput = form.querySelector("[data-raise-output]");
+  const escalationOutput = form.querySelector("[data-escalation-output]");
+  const update = () => {
+    const monthlyIncome = Number(form.dataset.monthlyIncome || 0);
+    const raiseValue = Number(raise.value || 0);
+    const escalationValue = Number(escalation.value || 0);
+    if (raiseOutput) raiseOutput.value = `${raiseValue}%`;
+    if (escalationOutput) escalationOutput.value = `${escalationValue}%`;
+    if (result) result.textContent = formatMoney(monthlyIncome * (raiseValue / 100) * (escalationValue / 100));
+  };
+  raise?.addEventListener("input", update);
+  escalation?.addEventListener("input", update);
+}
+
 function handleAction(event) {
   event.preventDefault();
   const action = event.currentTarget.dataset.action;
@@ -2428,6 +2720,13 @@ function handleAction(event) {
     "close-menu",
     "open-expense",
     "close-expense",
+    "open-category-sheet",
+    "open-extra-sheet",
+    "close-plan-sheet",
+    "request-remove-job",
+    "cancel-remove-job",
+    "edit-transaction",
+    "close-transaction-editor",
     "open-diagnosis",
     "close-diagnosis",
     "cancel-extra-allocation"
@@ -2444,6 +2743,33 @@ function handleAction(event) {
     },
     "open-expense": openQuickExpense,
     "close-expense": closeQuickExpense,
+    "open-category-sheet": () => {
+      planSheet = "category";
+      menuOpen = false;
+    },
+    "open-extra-sheet": () => {
+      planSheet = "extra";
+      menuOpen = false;
+    },
+    "close-plan-sheet": () => {
+      planSheet = "";
+    },
+    "request-remove-job": () => {
+      pendingJobRemovalId = id;
+    },
+    "cancel-remove-job": () => {
+      pendingJobRemovalId = "";
+    },
+    "confirm-remove-job": () => {
+      removeBudgetJob(pendingJobRemovalId);
+      pendingJobRemovalId = "";
+    },
+    "edit-transaction": () => {
+      editingTransactionId = id;
+    },
+    "close-transaction-editor": () => {
+      editingTransactionId = "";
+    },
     "open-diagnosis": () => {
       diagnosisValidation = { field: "", message: "" };
       state.showDiagnosis = true;
@@ -2458,7 +2784,10 @@ function handleAction(event) {
     "add-process-win": addProcessWin,
     "apply-student-context": applyStudentContext,
     "remove-job": () => removeBudgetJob(id),
-    "remove-transaction": () => removeTransaction(id),
+    "remove-transaction": () => {
+      removeTransaction(id);
+      editingTransactionId = "";
+    },
     "undo-snackbar": () => {
       removeTransaction(id);
       clearSnackbar({ renderNow: false });
@@ -2735,8 +3064,8 @@ function handleBudgetSubmit(event) {
   };
   const semesterBudget = getBudgetAmountForJob(job, state.profile);
   const summary = budgetSummary();
-  if (semesterBudget > summary.freeRemaining) {
-    state.lastAlert = `${name} reservaria ${formatMoney(semesterBudget)}, pero solo hay ${formatMoney(summary.freeRemaining)} libre.`;
+  if (semesterBudget > summary.freeBudget) {
+    state.lastAlert = `${name} reservaria ${formatMoney(semesterBudget)}, pero solo hay ${formatMoney(summary.freeBudget)} libre para reservar.`;
     showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
     saveState();
     render();
@@ -2745,6 +3074,7 @@ function handleBudgetSubmit(event) {
 
   state.budgetJobs.push(job);
   state.lastAlert = `${name} reserva ${formatMoney(semesterBudget)} del periodo ${budgetSummary().cadenceLabel}.`;
+  planSheet = "";
   saveState();
   render();
 }
@@ -2768,8 +3098,9 @@ function handleExtraBudgetSubmit(event) {
     amount,
     date,
     location,
-    savingsPercent: 50
+    savingsPercent: 20
   };
+  planSheet = "";
   state.lastAlert = "Antes de sumarlo, decide cuanto va a ahorro y cuanto queda libre.";
   render();
 }
@@ -2861,6 +3192,39 @@ function handleTransactionSubmit(event) {
   }
 
   closeQuickExpense();
+  saveState();
+  render();
+}
+
+function handleTransactionEditSubmit(event) {
+  event.preventDefault();
+  const transaction = state.transactions.find((item) => item.id === editingTransactionId);
+  if (!transaction) {
+    editingTransactionId = "";
+    render();
+    return;
+  }
+  const data = new FormData(event.currentTarget);
+  const nextCategory = String(data.get("category") || FREE_CATEGORY_ID);
+  const nextSource = normalizeLocation(data.get("source"));
+  const currentSource = normalizeLocation(transaction.source);
+  if (nextSource !== currentSource) {
+    const available = liquiditySummary()[nextSource];
+    if (Number(transaction.amount || 0) > available) {
+      showNoticeSnackbar(`${locationLabel(nextSource)} solo tiene ${formatMoney(available)} disponible.`, { kind: "error" });
+      return;
+    }
+    if (state.liquidity?.initialized) {
+      adjustLiquidity(currentSource, Number(transaction.amount || 0), "refund");
+      adjustLiquidity(nextSource, -Number(transaction.amount || 0), "expense");
+    }
+  }
+  transaction.category = nextCategory;
+  transaction.labeled = nextCategory !== FREE_CATEGORY_ID;
+  transaction.source = nextSource;
+  transaction.updated_at = new Date().toISOString();
+  state.lastAlert = `${transaction.merchant} quedo reclasificado.`;
+  editingTransactionId = "";
   saveState();
   render();
 }
@@ -2957,6 +3321,9 @@ function clearLocalUserState() {
   menuOpen = false;
   quickExpenseOpen = false;
   pendingExtraAllocation = null;
+  planSheet = "";
+  pendingJobRemovalId = "";
+  editingTransactionId = "";
   clearSnackbar({ renderNow: false });
 }
 
@@ -3702,12 +4069,37 @@ function formatDate(dateValue) {
   }).format(new Date(`${dateValue}T12:00:00`));
 }
 
+function formatShortDate(dateValue) {
+  return new Intl.DateTimeFormat("es-CO", {
+    month: "short",
+    day: "numeric"
+  }).format(new Date(`${dateValue}T12:00:00`)).replace(".", "");
+}
+
+function movementDayLabel(dateValue) {
+  if (dateValue === todayKey()) return "Hoy";
+  if (dateValue === previousDay(todayKey())) return "Ayer";
+  return new Intl.DateTimeFormat("es-CO", {
+    weekday: "long",
+    month: "short",
+    day: "numeric"
+  }).format(new Date(`${dateValue}T12:00:00`));
+}
+
 function formatMoney(value) {
   return new Intl.NumberFormat("es-CO", {
     style: "currency",
     currency: state.profile.currency || "COP",
     maximumFractionDigits: 0
   }).format(Number(value || 0));
+}
+
+function formatCompactMoney(value) {
+  const amount = Number(value || 0);
+  if (Math.abs(amount) < 1000) {
+    return formatMoney(amount);
+  }
+  return `$${new Intl.NumberFormat("es-CO", { maximumFractionDigits: 1 }).format(amount / 1000)}k`;
 }
 
 function clamp(value, min, max) {
