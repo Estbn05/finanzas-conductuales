@@ -7,7 +7,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
   const iconSizes = manifest.icons.map((icon) => icon.sizes);
 
   assert.equal(manifest.display, "standalone");
-  assert.equal(manifest.start_url, "./?pwa-cleanup=20260612-mockup-system");
+  assert.equal(manifest.start_url, "./?pwa-cleanup=20260612-source-icons");
   assert.equal(manifest.scope, "./");
   assert.equal(manifest.orientation, "portrait-primary");
   assert.ok(iconSizes.includes("192x192"));
@@ -18,7 +18,7 @@ test("service worker removes stale PWA caches and unregisters itself", async () 
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
   assert.ok(worker.includes('CACHE_PREFIX = "finanzas-conductuales-"'));
-  assert.ok(worker.includes('CLEANUP_RELEASE = "20260612-mockup-system"'));
+  assert.ok(worker.includes('CLEANUP_RELEASE = "20260612-source-icons"'));
   assert.ok(worker.includes("caches.delete(key)"));
   assert.ok(worker.includes("self.registration.unregister()"));
   assert.ok(worker.includes('includeUncontrolled: true'));
@@ -51,8 +51,9 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.equal(todayView.includes("Fondo inicial"), false);
   assert.equal(todayView.includes("Pago recomendado"), false);
 
-  assert.ok(app.includes('class="bottom-nav-icon movement-icon"'));
+  assert.ok(app.includes('renderIcon("receipt")'));
   assert.ok(app.includes('class="bottom-nav-icon plus-icon"'));
+  assert.ok(app.includes('renderIcon(normalizeLocation(transaction.source) === "cash" ? "cash" : "account")'));
   assert.ok(styles.includes(".bottom-nav"));
   assert.ok(styles.includes(".quick-expense-panel"));
   assert.ok(styles.includes(".money-location-chips"));
@@ -187,10 +188,10 @@ test("static startup fallback retries automatically without manual controls", as
   assert.ok(html.includes("caches.delete(key)"));
   assert.ok(html.includes("Comprobando tu sesion"));
   assert.ok(html.includes("Estamos verificando automaticamente si ya tienes una sesion iniciada."));
-  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260612-mockup-system")'));
+  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260612-source-icons")'));
   assert.ok(html.includes("window.setTimeout(finish, timeoutMs)"));
   assert.equal(html.includes("cdn.jsdelivr.net/npm/@supabase/supabase-js"), false);
-  assert.ok(html.includes('await import("./app.js?v=20260612-mockup-system")'));
+  assert.ok(html.includes('await import("./app.js?v=20260612-source-icons")'));
   assert.equal(html.includes("Continuar al acceso"), false);
   assert.equal(html.includes("Recargar aplicacion"), false);
   assert.equal(html.includes('onclick="window.location.reload()"'), false);

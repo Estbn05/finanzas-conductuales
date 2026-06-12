@@ -1859,70 +1859,16 @@ body {
 }
 
 .bottom-nav-icon {
-  position: relative;
   display: grid;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   place-items: center;
 }
 
-.menu-icon {
-  border-top: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-}
-
-.menu-icon::after,
-.home-icon::before,
-.home-icon::after,
-.plan-icon::before,
-.plan-icon::after {
-  position: absolute;
-  content: "";
-}
-
-.menu-icon::after {
-  top: 9px;
-  left: 0;
-  width: 22px;
-  border-top: 2px solid currentColor;
-}
-
-.home-icon::before {
-  width: 14px;
-  height: 14px;
-  border: 2px solid currentColor;
-  border-top: 0;
-  transform: translateY(3px);
-}
-
-.home-icon::after {
-  width: 12px;
-  height: 12px;
-  border-top: 2px solid currentColor;
-  border-left: 2px solid currentColor;
-  transform: translateY(-3px) rotate(45deg);
-}
-
-.plus-icon {
-  color: currentColor;
-  font-size: 1.45rem;
-  font-weight: 500;
-  line-height: 1;
-}
-
-.plan-icon::before {
-  inset: 3px 2px;
-  border: 2px solid currentColor;
-  border-radius: 3px;
-}
-
-.plan-icon::after {
-  right: 5px;
-  bottom: 5px;
-  left: 5px;
-  height: 5px;
-  border-top: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
+.ui-icon {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .expense-fab {
@@ -3587,19 +3533,25 @@ input[type="range"] {
 
 .movement-type-icon {
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 38px;
+  height: 38px;
   place-items: center;
   border-radius: 50%;
   color: var(--teal-dark);
   background: var(--teal-2);
-  font-size: 0.67rem;
-  font-weight: 750;
+  box-shadow: inset 0 0 0 1px rgba(29, 158, 117, 0.08);
+}
+
+.movement-type-icon .ui-icon {
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.9;
 }
 
 .movement-type-icon.cash {
   color: var(--amber);
   background: var(--amber-2);
+  box-shadow: inset 0 0 0 1px rgba(133, 79, 11, 0.08);
 }
 
 .movement-copy,
@@ -4081,31 +4033,10 @@ input[type="range"] {
   box-shadow: 0 8px 18px rgba(29, 158, 117, 0.24);
 }
 
-.bottom-nav-item.is-register .plus-icon b {
-  font-size: 1.25rem;
-  font-weight: 500;
-  line-height: 1;
-}
-
-.movement-icon::before,
-.movement-icon::after {
-  position: absolute;
-  content: "";
-}
-
-.movement-icon::before {
-  inset: 3px 4px;
-  border: 2px solid currentColor;
-  border-radius: 2px;
-}
-
-.movement-icon::after {
-  top: 8px;
-  right: 7px;
-  left: 7px;
-  height: 5px;
-  border-top: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
+.bottom-nav-item.is-register .plus-icon .ui-icon {
+  width: 22px;
+  height: 22px;
+  stroke-width: 2;
 }
 
 .expense-fab {

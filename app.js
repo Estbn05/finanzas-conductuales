@@ -10,7 +10,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260612-mockup-system";
+} from "./finance-core.js?v=20260612-source-icons";
 import {
   getCloudSession,
   isCloudConfigured,
@@ -21,7 +21,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260612-mockup-system";
+} from "./sync-client.js?v=20260612-source-icons";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -664,27 +664,40 @@ function renderBottomNavigation() {
   return `
     <nav class="bottom-nav" aria-label="Navegacion rapida">
       <button class="bottom-nav-item ${state.activeView === "today" ? "is-active" : ""}" type="button" data-view="today">
-        <span class="bottom-nav-icon home-icon" aria-hidden="true"></span>
+        <span class="bottom-nav-icon" aria-hidden="true">${renderIcon("home")}</span>
         <span>Inicio</span>
       </button>
       <button class="bottom-nav-item ${state.activeView === "budget" ? "is-active" : ""}" type="button" data-view="budget">
-        <span class="bottom-nav-icon plan-icon" aria-hidden="true"></span>
+        <span class="bottom-nav-icon" aria-hidden="true">${renderIcon("plan")}</span>
         <span>Plan</span>
       </button>
       <button class="bottom-nav-item is-register" type="button" data-action="open-expense">
-        <span class="bottom-nav-icon plus-icon" aria-hidden="true"><b>+</b></span>
+        <span class="bottom-nav-icon plus-icon" aria-hidden="true">${renderIcon("plus")}</span>
         <span>Registrar</span>
       </button>
       <button class="bottom-nav-item ${state.activeView === "movements" ? "is-active" : ""}" type="button" data-view="movements">
-        <span class="bottom-nav-icon movement-icon" aria-hidden="true"></span>
+        <span class="bottom-nav-icon" aria-hidden="true">${renderIcon("receipt")}</span>
         <span>Movimientos</span>
       </button>
       <button class="bottom-nav-item ${["savings", "profile"].includes(state.activeView) ? "is-active" : ""}" type="button" data-action="toggle-menu">
-        <span class="bottom-nav-icon menu-icon" aria-hidden="true"></span>
+        <span class="bottom-nav-icon" aria-hidden="true">${renderIcon("menu")}</span>
         <span>Menu</span>
       </button>
     </nav>
   `;
+}
+
+function renderIcon(name) {
+  const paths = {
+    home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/>',
+    plan: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 15v2M12 11v6M16 8v9"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6M9 16h4"/>',
+    menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+    account: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 9h18M7 15h3"/>',
+    cash: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 9.5a3 3 0 0 1-1.5 1.5A3 3 0 0 1 7 14.5M17 9.5a3 3 0 0 0 1.5 1.5 3 3 0 0 0-1.5 3.5"/><circle cx="12" cy="12" r="2.25"/>'
+  };
+  return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">${paths[name] || paths.menu}</svg>`;
 }
 
 function renderConnectionBanner() {
@@ -1640,7 +1653,7 @@ function renderTransactionHistory(summary = budgetSummary(), sort = "recent") {
             const unlabeled = !transaction.labeled || !transaction.category || transaction.category === FREE_CATEGORY_ID;
             return `
               <button class="history-row ${unlabeled ? "is-unclassified" : ""}" type="button" data-action="edit-transaction" data-id="${escapeAttr(transaction.id)}">
-                <span class="movement-type-icon ${normalizeLocation(transaction.source)}" aria-hidden="true">${normalizeLocation(transaction.source) === "cash" ? "$" : "C"}</span>
+                <span class="movement-type-icon ${normalizeLocation(transaction.source)}" aria-hidden="true">${renderIcon(normalizeLocation(transaction.source) === "cash" ? "cash" : "account")}</span>
                 <span class="movement-copy">
                   <strong>${escapeHtml(transaction.merchant)}</strong>
                   <small>${transaction.description ? `${escapeHtml(transaction.description)} · ` : ""}${unlabeled ? "Sin clasificar" : escapeHtml(categoryName(transaction.category))} · ${locationLabel(transaction.source)}</small>

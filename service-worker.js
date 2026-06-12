@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CLEANUP_RELEASE = "20260612-mockup-system";
+const CLEANUP_RELEASE = "20260612-source-icons";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
