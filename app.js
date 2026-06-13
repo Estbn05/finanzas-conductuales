@@ -10,7 +10,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260612-source-icons";
+} from "./finance-core.js?v=20260613-reserved-spend";
 import {
   getCloudSession,
   isCloudConfigured,
@@ -21,7 +21,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260612-source-icons";
+} from "./sync-client.js?v=20260613-reserved-spend";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -794,7 +794,7 @@ function renderHeader(plan) {
         <div><span>Efectivo</span><strong>${formatMoney(liquidity.cash)}</strong></div>
         <div><span>Total real</span><strong>${formatMoney(liquidity.total)}</strong></div>
       </div>
-      <p class="money-help">Libre descuenta reservas y gastos. Total real muestra lo que hay entre cuenta y efectivo.</p>
+      <p class="money-help">Libre ya descuenta las reservas. Solo baja por gastos sin categoria o por exceder un limite. Total real muestra cuenta + efectivo.</p>
     </header>
   `;
 }

@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CLEANUP_RELEASE = "20260612-source-icons";
+const CLEANUP_RELEASE = "20260613-reserved-spend";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());

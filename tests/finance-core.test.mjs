@@ -14,7 +14,7 @@ import {
 test("budget ring allocation is an exact non-overlapping partition of income", () => {
   const ring = budgetRingAllocation({
     income: 1_690_000,
-    reserved: 1_124_000,
+    reservedRemaining: 1_124_000,
     totalSpent: 371_000
   });
 
@@ -30,7 +30,7 @@ test("budget ring allocation is an exact non-overlapping partition of income", (
 test("budget ring reports spending outside the available budget separately", () => {
   const ring = budgetRingAllocation({
     income: 1_000_000,
-    reserved: 800_000,
+    reservedRemaining: 800_000,
     totalSpent: 350_000
   });
 
@@ -200,7 +200,7 @@ test("weekly fields reserve the whole semester from the scholarship budget", () 
   assert.equal(Math.round(gas.ratio), 4);
 });
 
-test("every registered expense reduces the amount available for new spending", () => {
+test("reserved spending does not reduce free money a second time", () => {
   const state = makeState({
     profile: {
       incomeCadence: "semester",
@@ -221,13 +221,14 @@ test("every registered expense reduces the amount available for new spending", (
   assert.equal(summary.freeBudget, 970_000);
   assert.equal(summary.freeSpent, 40_000);
   assert.equal(summary.totalSpent, 70_000);
-  assert.equal(summary.freeRemaining, 900_000);
+  assert.equal(summary.freeImpactSpent, 40_000);
+  assert.equal(summary.freeRemaining, 930_000);
   assert.equal(gas.spent, 30_000);
   assert.equal(summary.reservedRemaining, 750_000);
   assert.equal(summary.categoryOverspent, 0);
 });
 
-test("a planned cash expense reduces free semester money from 317000 to 287000", () => {
+test("a planned cash expense within its category leaves free semester money unchanged", () => {
   const state = makeState({
     profile: {
       incomeCadence: "semester",
@@ -245,10 +246,43 @@ test("a planned cash expense reduces free semester money from 317000 to 287000",
 
   assert.equal(summary.freeBudget, 317_000);
   assert.equal(summary.totalSpent, 30_000);
-  assert.equal(summary.freeRemaining, 287_000);
+  assert.equal(summary.freeImpactSpent, 0);
+  assert.equal(summary.freeRemaining, 317_000);
 });
 
-test("category spending and overspending both reduce money available for new expenses", () => {
+test("gasoline reserved spending does not lower the screenshot free balance", () => {
+  const state = makeState({
+    profile: {
+      incomeCadence: "semester",
+      incomeAmount: 1_705_000,
+      periodStart: "2026-06-01"
+    },
+    budgetJobs: [
+      { id: "gas", name: "Gasolina", amount: 780_000, cadence: "period" },
+      { id: "soat", name: "Soat", amount: 344_000, cadence: "period" }
+    ],
+    transactions: [
+      { date: "2026-06-05", amount: 351_000, category: "free", labeled: true },
+      { date: "2026-06-06", amount: 60_000, category: "gas", labeled: true }
+    ]
+  });
+
+  const summary = budgetSummary(state, "2026-06-10");
+  const ring = budgetRingAllocation(summary);
+
+  assert.equal(summary.freeBudget, 581_000);
+  assert.equal(summary.freeImpactSpent, 351_000);
+  assert.equal(summary.freeRemaining, 230_000);
+  assert.deepEqual(ring, {
+    reserved: 1_064_000,
+    spent: 411_000,
+    free: 230_000,
+    outside: 0,
+    total: 1_705_000
+  });
+});
+
+test("only category overspending and free spending reduce money available for new expenses", () => {
   const state = makeState({
     profile: {
       incomeCadence: "semester",
@@ -268,8 +302,8 @@ test("category spending and overspending both reduce money available for new exp
   assert.equal(summary.freeSpent, 20_000);
   assert.equal(summary.categoryOverspent, 10_000);
   assert.equal(summary.totalSpent, 60_000);
-  assert.equal(summary.freeImpactSpent, 60_000);
-  assert.equal(summary.freeRemaining, 1_660_000);
+  assert.equal(summary.freeImpactSpent, 30_000);
+  assert.equal(summary.freeRemaining, 1_690_000);
 });
 
 test("unlabeled spending reduces free budget until it is classified", () => {
@@ -290,8 +324,26 @@ test("unlabeled spending reduces free budget until it is classified", () => {
   assert.equal(budgetSummary(pending, "2026-06-05").freeSpent, 30_000);
   assert.equal(budgetSummary(pending, "2026-06-05").freeRemaining, 1_630_000);
   assert.equal(budgetSummary(classified, "2026-06-05").freeSpent, 0);
-  assert.equal(budgetSummary(classified, "2026-06-05").freeRemaining, 1_630_000);
+  assert.equal(budgetSummary(classified, "2026-06-05").freeRemaining, 1_660_000);
   assert.equal(categoryStatus(classified, "2026-06-05").find((category) => category.id === "gas").spent, 30_000);
+});
+
+test("spending assigned to a missing category is treated as free spending", () => {
+  const state = makeState({
+    profile: {
+      incomeCadence: "monthly",
+      incomeAmount: 1_000_000,
+      periodStart: "2026-06-01"
+    },
+    budgetJobs: [{ id: "gas", name: "Gasolina", amount: 200_000, cadence: "period" }],
+    transactions: [{ date: "2026-06-05", amount: 50_000, category: "deleted-category", labeled: true }]
+  });
+
+  const summary = budgetSummary(state, "2026-06-05");
+
+  assert.equal(summary.freeBudget, 800_000);
+  assert.equal(summary.freeSpent, 50_000);
+  assert.equal(summary.freeRemaining, 750_000);
 });
 
 test("income cadence can be weekly biweekly monthly semester or yearly", () => {

@@ -29,7 +29,7 @@ export function calculatePlan(state, today) {
   const protectedExpenses = Math.max(summary.expenseReserved, committedForPeriod);
   const availableAdditional = Math.min(
     summary.freeRemaining,
-    Math.max(0, summary.income - protectedExpenses - summary.savingsReserved - summary.totalSpent)
+    Math.max(0, summary.income - protectedExpenses - summary.savingsReserved - summary.freeImpactSpent)
   );
   const suggestedPeriodSavings = Math.round(
     Math.min(Math.max(0, idealPeriodSavings - summary.savingsRemaining), availableAdditional)
@@ -145,7 +145,7 @@ export function budgetSummary(state, today) {
   const freeBudget = Math.max(0, income - reserved);
   const freeSpent = spent[FREE_CATEGORY_ID] || 0;
   const totalSpent = Object.values(spent).reduce((sum, amount) => sum + Number(amount || 0), 0);
-  const freeImpactSpent = totalSpent;
+  const freeImpactSpent = freeSpent + categoryOverspent;
   return {
     baseIncome,
     extraIncome,
@@ -173,7 +173,7 @@ export function budgetSummary(state, today) {
 
 export function budgetRingAllocation(summary) {
   const income = Math.max(0, Number(summary?.income || 0));
-  const reserved = Math.min(income, Math.max(0, Number(summary?.reserved || 0)));
+  const reserved = Math.min(income, Math.max(0, Number((summary?.reservedRemaining ?? summary?.reserved) || 0)));
   const spent = Math.min(Math.max(0, income - reserved), Math.max(0, Number(summary?.totalSpent || 0)));
   const free = Math.max(0, income - reserved - spent);
   return {
@@ -213,10 +213,14 @@ export function categoryStatus(state, today) {
 }
 
 export function spendByCategory(state, today) {
+  const validCategoryIds = new Set((state.budgetJobs || []).map((job) => job.id));
   return state.transactions
     .filter((transaction) => isInBudgetWindow(transaction.date, state.profile, today))
     .reduce((acc, transaction) => {
-      const category = transaction.labeled && transaction.category ? transaction.category : FREE_CATEGORY_ID;
+      const category =
+        transaction.labeled && validCategoryIds.has(transaction.category)
+          ? transaction.category
+          : FREE_CATEGORY_ID;
       acc[category] = (acc[category] || 0) + Number(transaction.amount || 0);
       return acc;
     }, {});
