@@ -10,7 +10,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260613-reserved-spend";
+} from "./finance-core.js?v=20260613-extra-movements";
 import {
   getCloudSession,
   isCloudConfigured,
@@ -21,7 +21,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260613-reserved-spend";
+} from "./sync-client.js?v=20260613-extra-movements";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -695,7 +695,8 @@ function renderIcon(name) {
     receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6M9 16h4"/>',
     menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
     account: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 9h18M7 15h3"/>',
-    cash: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 9.5a3 3 0 0 1-1.5 1.5A3 3 0 0 1 7 14.5M17 9.5a3 3 0 0 0 1.5 1.5 3 3 0 0 0-1.5 3.5"/><circle cx="12" cy="12" r="2.25"/>'
+    cash: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 9.5a3 3 0 0 1-1.5 1.5A3 3 0 0 1 7 14.5M17 9.5a3 3 0 0 0 1.5 1.5 3 3 0 0 0-1.5 3.5"/><circle cx="12" cy="12" r="2.25"/>',
+    income: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v10M8.5 10h5.25a2.25 2.25 0 0 1 0 4.5H10.5a2.25 2.25 0 0 1-2-1.25"/>'
   };
   return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">${paths[name] || paths.menu}</svg>`;
 }
@@ -1600,18 +1601,20 @@ function renderLocationOptions(selected) {
 
 function renderMovements() {
   const summary = budgetSummary();
+  const movements = movementsForSummary(summary);
+  const movementCountLabel = movements.length === 1 ? "movimiento" : "movimientos";
   return `
     <section class="screen-view movements-view" aria-label="Movimientos">
       <div class="screen-title-row movements-heading">
         <div><p class="eyebrow">Historial del periodo</p><h1>Movimientos</h1></div>
-        <span class="period-chip">${transactionsForSummary(summary).length} gastos</span>
+        <span class="period-chip">${movements.length} ${movementCountLabel}</span>
       </div>
       <article class="movements-card">
         <label class="history-sort">
           Ordenar por
           <select id="transaction-history-sort">
             <option value="recent" ${transactionHistorySort === "recent" ? "selected" : ""}>Mas recientes</option>
-            <option value="amount" ${transactionHistorySort === "amount" ? "selected" : ""}>Mayor cantidad gastada</option>
+            <option value="amount" ${transactionHistorySort === "amount" ? "selected" : ""}>Mayor cantidad</option>
           </select>
         </label>
         ${renderTransactionHistory(summary, transactionHistorySort)}
@@ -1621,7 +1624,7 @@ function renderMovements() {
 }
 
 function renderTransactionHistory(summary = budgetSummary(), sort = "recent") {
-  const transactions = transactionsForSummary(summary)
+  const movements = movementsForSummary(summary)
     .slice()
     .sort((a, b) =>
       sort === "amount"
@@ -1629,27 +1632,43 @@ function renderTransactionHistory(summary = budgetSummary(), sort = "recent") {
         : compareTransactionsByRecent(a, b)
     );
 
-  if (!transactions.length) {
+  if (!movements.length) {
     return `<div class="empty-state actionable-empty">
       <span class="empty-icon" aria-hidden="true">+</span>
       <strong>Todavia no hay movimientos</strong>
-      <span>Cuando registres un gasto aparecera aqui para revisarlo o corregirlo.</span>
+      <span>Cuando registres un gasto o sumes dinero extra aparecera aqui.</span>
       <button class="btn primary" type="button" data-action="open-expense">Registrar gasto</button>
     </div>`;
   }
 
-  const groups = transactions.reduce((acc, transaction) => {
-    const date = String(transaction.date || todayKey()).slice(0, 10);
-    (acc[date] ||= []).push(transaction);
+  const groups = movements.reduce((acc, movement) => {
+    const date = String(movement.date || todayKey()).slice(0, 10);
+    (acc[date] ||= []).push(movement);
     return acc;
   }, {});
 
   return `
     <div class="transaction-history">
-      ${Object.entries(groups).map(([date, dayTransactions]) => `
+      ${Object.entries(groups).map(([date, dayMovements]) => `
         <section class="movement-day">
-          <div class="movement-day-heading"><strong>${movementDayLabel(date)}</strong><span>${formatMoney(dayTransactions.reduce((sum, item) => sum + Number(item.amount || 0), 0))}</span></div>
-          ${dayTransactions.map((transaction) => {
+          <div class="movement-day-heading"><strong>${movementDayLabel(date)}</strong><span>${dayMovements.length} ${dayMovements.length === 1 ? "movimiento" : "movimientos"}</span></div>
+          ${dayMovements.map((movement) => {
+            if (movement.kind === "income") {
+              const extra = movement.extra;
+              const savingsAmount = Number(extra.allocation?.savingsAmount || 0);
+              const allocationText = savingsAmount > 0 ? ` &middot; ${formatMoney(savingsAmount)} para ahorro` : "";
+              return `
+                <div class="history-row is-income">
+                  <span class="movement-type-icon income" aria-hidden="true">${renderIcon("income")}</span>
+                  <span class="movement-copy">
+                    <strong>${escapeHtml(extra.source)}</strong>
+                    <small>Dinero extra &middot; ${locationLabel(extra.location)}${allocationText}</small>
+                  </span>
+                  <span class="movement-amount income-amount"><strong>+${formatMoney(extra.amount)}</strong><small>Ingreso</small></span>
+                </div>
+              `;
+            }
+            const transaction = movement.transaction;
             const unlabeled = !transaction.labeled || !transaction.category || transaction.category === FREE_CATEGORY_ID;
             return `
               <button class="history-row ${unlabeled ? "is-unclassified" : ""}" type="button" data-action="edit-transaction" data-id="${escapeAttr(transaction.id)}">
@@ -3675,6 +3694,26 @@ function transactionsForSummary(summary = budgetSummary()) {
     const date = String(transaction.date || "").slice(0, 10);
     return date >= summary.window.start && date < summary.window.end;
   });
+}
+
+function movementsForSummary(summary = budgetSummary()) {
+  const expenses = transactionsForSummary(summary).map((transaction) => ({
+    id: transaction.id,
+    kind: "expense",
+    date: transaction.date,
+    amount: transaction.amount,
+    updated_at: transaction.updated_at || transaction.createdAt || transaction.date,
+    transaction
+  }));
+  const income = budgetExtrasForSummary(summary).map((extra) => ({
+    id: extra.id,
+    kind: "income",
+    date: extra.date,
+    amount: extra.amount,
+    updated_at: extra.updated_at || extra.date,
+    extra
+  }));
+  return [...expenses, ...income];
 }
 
 function categoryStatus() {

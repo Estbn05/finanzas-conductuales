@@ -7,7 +7,7 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
   const iconSizes = manifest.icons.map((icon) => icon.sizes);
 
   assert.equal(manifest.display, "standalone");
-  assert.equal(manifest.start_url, "./?pwa-cleanup=20260613-reserved-spend");
+  assert.equal(manifest.start_url, "./?pwa-cleanup=20260613-extra-movements");
   assert.equal(manifest.scope, "./");
   assert.equal(manifest.orientation, "portrait-primary");
   assert.ok(iconSizes.includes("192x192"));
@@ -18,7 +18,7 @@ test("service worker removes stale PWA caches and unregisters itself", async () 
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
   assert.ok(worker.includes('CACHE_PREFIX = "finanzas-conductuales-"'));
-  assert.ok(worker.includes('CLEANUP_RELEASE = "20260613-reserved-spend"'));
+  assert.ok(worker.includes('CLEANUP_RELEASE = "20260613-extra-movements"'));
   assert.ok(worker.includes("caches.delete(key)"));
   assert.ok(worker.includes("self.registration.unregister()"));
   assert.ok(worker.includes('includeUncontrolled: true'));
@@ -63,10 +63,19 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(styles.includes("@media (prefers-color-scheme: dark)"));
 });
 
-test("movements has its own section and can sort by recent date or highest amount", async () => {
+test("movements combines expenses and extra income and can sort the full history", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
 
   assert.ok(app.includes("function renderMovements()"));
+  assert.ok(app.includes("function movementsForSummary(summary = budgetSummary())"));
+  assert.ok(app.includes('kind: "expense"'));
+  assert.ok(app.includes('kind: "income"'));
+  assert.ok(app.includes('movement.kind === "income"'));
+  assert.ok(app.includes("Dinero extra"));
+  assert.ok(app.includes('renderIcon("income")'));
+  assert.ok(app.includes('const movementCountLabel = movements.length === 1 ? "movimiento" : "movimientos"'));
+  assert.ok(app.includes("${movements.length} ${movementCountLabel}"));
   assert.ok(app.includes('id="transaction-history-sort"'));
   assert.ok(app.includes('value="recent"'));
   assert.ok(app.includes('value="amount"'));
@@ -76,6 +85,9 @@ test("movements has its own section and can sort by recent date or highest amoun
   assert.ok(app.includes("function compareTransactionsByRecent(a, b)"));
   assert.ok(app.includes('String(b.date || "").localeCompare(String(a.date || ""))'));
   assert.ok(app.includes('movements: "movimientos"'));
+  assert.ok(styles.includes(".history-row.is-income"));
+  assert.ok(styles.includes(".movement-type-icon.income"));
+  assert.ok(styles.includes(".income-amount strong"));
 
   const profile = app.slice(app.indexOf("function renderProfile"), app.indexOf("function renderStudentContextPanel"));
   assert.equal(profile.includes("renderTransactionHistory"), false);
@@ -188,10 +200,10 @@ test("static startup fallback retries automatically without manual controls", as
   assert.ok(html.includes("caches.delete(key)"));
   assert.ok(html.includes("Comprobando tu sesion"));
   assert.ok(html.includes("Estamos verificando automaticamente si ya tienes una sesion iniciada."));
-  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260613-reserved-spend")'));
+  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260613-extra-movements")'));
   assert.ok(html.includes("window.setTimeout(finish, timeoutMs)"));
   assert.equal(html.includes("cdn.jsdelivr.net/npm/@supabase/supabase-js"), false);
-  assert.ok(html.includes('await import("./app.js?v=20260613-reserved-spend")'));
+  assert.ok(html.includes('await import("./app.js?v=20260613-extra-movements")'));
   assert.equal(html.includes("Continuar al acceso"), false);
   assert.equal(html.includes("Recargar aplicacion"), false);
   assert.equal(html.includes('onclick="window.location.reload()"'), false);
