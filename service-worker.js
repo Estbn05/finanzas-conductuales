@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CLEANUP_RELEASE = "20260613-income-editor";
+const CLEANUP_RELEASE = "20260613-centered-icons";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
