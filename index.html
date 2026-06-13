@@ -13,14 +13,14 @@
       content="App personal de finanzas conductuales con monitoreo diario, presupuesto por periodos y simulador de ahorro."
     >
     <title>Finanzas Conductuales</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20260613-extra-movements">
+    <link rel="manifest" href="manifest.webmanifest?v=20260613-income-editor">
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="styles.css?v=20260613-extra-movements">
+    <link rel="stylesheet" href="styles.css?v=20260613-income-editor">
     <script>
       const pwaCleanupTask = (async () => {
         const cachePrefix = "finanzas-conductuales-";
-        const release = "20260613-extra-movements";
+        const release = "20260613-income-editor";
         const retryKey = `finanzas-pwa-cleanup:${release}`;
         let needsFreshLoad = Boolean(navigator.serviceWorker?.controller);
 
@@ -113,9 +113,9 @@
             document.body.append(script);
           });
 
-        await loadScript("sync-config.js?v=20260613-extra-movements");
-        await loadScript("vendor/supabase-2.108.1.min.js?v=20260613-extra-movements");
-        await import("./app.js?v=20260613-extra-movements");
+        await loadScript("sync-config.js?v=20260613-income-editor");
+        await loadScript("vendor/supabase-2.108.1.min.js?v=20260613-income-editor");
+        await import("./app.js?v=20260613-income-editor");
       });
     </script>
   </body>

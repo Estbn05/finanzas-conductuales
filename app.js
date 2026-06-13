@@ -10,7 +10,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260613-extra-movements";
+} from "./finance-core.js?v=20260613-income-editor";
 import {
   getCloudSession,
   isCloudConfigured,
@@ -21,7 +21,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260613-extra-movements";
+} from "./sync-client.js?v=20260613-income-editor";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -65,6 +65,7 @@ let pendingExtraAllocation = null;
 let planSheet = "";
 let pendingJobRemovalId = "";
 let editingTransactionId = "";
+let editingExtraId = "";
 let diagnosisValidation = { field: "", message: "" };
 let cloudState = {
   configured: isCloudConfigured(),
@@ -441,6 +442,8 @@ function applyRemoteState(remoteState, remoteUpdatedAt, alert) {
   state = migrateState(remoteState);
   state.showDiagnosis = false;
   pendingExtraAllocation = null;
+  editingTransactionId = "";
+  editingExtraId = "";
   clearSnackbar({ renderNow: false });
   activateView(DEFAULT_VIEW);
   state.lastAlert = alert;
@@ -542,7 +545,7 @@ function renderCloudStatusChange() {
     render();
     return;
   }
-  if (quickExpenseOpen || state.showDiagnosis || pendingExtraAllocation) {
+  if (quickExpenseOpen || state.showDiagnosis || pendingExtraAllocation || editingTransactionId || editingExtraId) {
     return;
   }
   render();
@@ -642,6 +645,7 @@ function render() {
     ${planSheet ? renderPlanSheet() : ""}
     ${pendingJobRemovalId ? renderJobRemovalConfirmation() : ""}
     ${editingTransactionId ? renderTransactionEditor() : ""}
+    ${editingExtraId ? renderExtraEditor() : ""}
     ${!state.profile.completed || state.showDiagnosis ? renderDiagnosisModal() : ""}
     ${pendingExtraAllocation ? renderExtraAllocationModal() : ""}
     ${renderSnackbar()}
@@ -1658,14 +1662,14 @@ function renderTransactionHistory(summary = budgetSummary(), sort = "recent") {
               const savingsAmount = Number(extra.allocation?.savingsAmount || 0);
               const allocationText = savingsAmount > 0 ? ` &middot; ${formatMoney(savingsAmount)} para ahorro` : "";
               return `
-                <div class="history-row is-income">
+                <button class="history-row is-income" type="button" data-action="edit-extra" data-id="${escapeAttr(extra.id)}">
                   <span class="movement-type-icon income" aria-hidden="true">${renderIcon("income")}</span>
                   <span class="movement-copy">
                     <strong>${escapeHtml(extra.source)}</strong>
                     <small>Dinero extra &middot; ${locationLabel(extra.location)}${allocationText}</small>
                   </span>
-                  <span class="movement-amount income-amount"><strong>+${formatMoney(extra.amount)}</strong><small>Ingreso</small></span>
-                </div>
+                  <span class="movement-amount income-amount"><strong>+${formatMoney(extra.amount)}</strong><small>Editar</small></span>
+                </button>
               `;
             }
             const transaction = movement.transaction;
@@ -1715,6 +1719,58 @@ function renderTransactionEditor() {
           </div>
           <button class="btn primary" type="submit">Guardar cambios</button>
           <button class="btn danger subtle-danger" type="button" data-action="remove-transaction" data-id="${escapeAttr(transaction.id)}">Eliminar gasto y devolver saldo</button>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function renderExtraEditor() {
+  const extra = state.budgetExtras.find((item) => item.id === editingExtraId);
+  if (!extra) {
+    return "";
+  }
+  const savingsPercent = clamp(Number(extra.allocation?.savingsPercent || 0), 0, 100);
+  const savingsAmount = Math.round(Number(extra.amount || 0) * savingsPercent / 100);
+  return `
+    <div class="sheet-backdrop" role="presentation">
+      <section class="bottom-sheet transaction-editor" role="dialog" aria-modal="true" aria-labelledby="extra-editor-title">
+        <div class="sheet-handle"></div>
+        <div class="sheet-heading">
+          <div><p class="eyebrow">Corregir ingreso</p><h2 id="extra-editor-title">${escapeHtml(extra.source)}</h2></div>
+          <button class="icon-btn muted" type="button" data-action="close-extra-editor" aria-label="Cerrar">x</button>
+        </div>
+        <div class="editor-amount income-editor-amount">+${formatMoney(extra.amount)}<span>${formatDate(extra.date)}</span></div>
+        <form class="sheet-form" id="extra-edit-form">
+          <label>
+            Origen
+            <input name="source" type="text" maxlength="36" value="${escapeAttr(extra.source)}" required>
+          </label>
+          <label>
+            Monto
+            <input name="amount" type="number" min="1000" step="1000" value="${Number(extra.amount || 0)}" required>
+          </label>
+          <label>
+            Fecha
+            <input name="date" type="date" value="${escapeAttr(extra.date)}" required>
+          </label>
+          <div class="sheet-field">
+            <span class="sheet-label">Entra a</span>
+            ${renderChoicePills("location", [
+              { value: "account", label: "Cuenta" },
+              { value: "cash", label: "Efectivo" }
+            ], normalizeLocation(extra.location))}
+          </div>
+          <label>
+            Porcentaje para ahorro
+            <input name="savingsPercent" type="range" min="0" max="100" step="5" value="${savingsPercent}" data-extra-edit-range>
+          </label>
+          <div class="extra-edit-allocation" aria-live="polite">
+            <span><strong data-extra-edit-savings>${formatMoney(savingsAmount)}</strong> para ahorro</span>
+            <span><strong data-extra-edit-free>${formatMoney(Number(extra.amount || 0) - savingsAmount)}</strong> libre</span>
+          </div>
+          <button class="btn primary" type="submit">Guardar cambios</button>
+          <button class="btn danger subtle-danger" type="button" data-action="remove-extra-from-editor" data-id="${escapeAttr(extra.id)}">Eliminar ingreso y devolver saldo</button>
         </form>
       </section>
     </div>
@@ -2318,6 +2374,12 @@ function bindEvents() {
     transactionEditForm.addEventListener("submit", handleTransactionEditSubmit);
   }
 
+  const extraEditForm = document.querySelector("#extra-edit-form");
+  if (extraEditForm) {
+    bindExtraEditPreview(extraEditForm);
+    extraEditForm.addEventListener("submit", handleExtraEditSubmit);
+  }
+
   const extraAllocationForm = document.querySelector("#extra-allocation-form");
   if (extraAllocationForm) {
     bindExtraAllocationPreview(extraAllocationForm);
@@ -2699,6 +2761,27 @@ function bindExtraAllocationPreview(form) {
   update();
 }
 
+function bindExtraEditPreview(form) {
+  const amount = form.elements.namedItem("amount");
+  const range = form.querySelector("[data-extra-edit-range]");
+  const savingsNode = form.querySelector("[data-extra-edit-savings]");
+  const freeNode = form.querySelector("[data-extra-edit-free]");
+  if (!amount || !range || !savingsNode || !freeNode) {
+    return;
+  }
+
+  const update = () => {
+    const nextAmount = numberFrom(amount.value);
+    const percent = clamp(Number(range.value), 0, 100);
+    const savingsAmount = Math.round(nextAmount * percent / 100);
+    savingsNode.textContent = formatMoney(savingsAmount);
+    freeNode.textContent = formatMoney(nextAmount - savingsAmount);
+  };
+  amount.addEventListener("input", update);
+  range.addEventListener("input", update);
+  update();
+}
+
 function bindPlanCategoryPreview(form) {
   const conversion = form.querySelector("[data-category-conversion]");
   const warning = form.querySelector("[data-category-limit-warning]");
@@ -2759,6 +2842,8 @@ function handleAction(event) {
     "cancel-remove-job",
     "edit-transaction",
     "close-transaction-editor",
+    "edit-extra",
+    "close-extra-editor",
     "open-diagnosis",
     "close-diagnosis",
     "cancel-extra-allocation"
@@ -2798,9 +2883,17 @@ function handleAction(event) {
     },
     "edit-transaction": () => {
       editingTransactionId = id;
+      editingExtraId = "";
     },
     "close-transaction-editor": () => {
       editingTransactionId = "";
+    },
+    "edit-extra": () => {
+      editingExtraId = id;
+      editingTransactionId = "";
+    },
+    "close-extra-editor": () => {
+      editingExtraId = "";
     },
     "open-diagnosis": () => {
       diagnosisValidation = { field: "", message: "" };
@@ -2825,6 +2918,10 @@ function handleAction(event) {
       clearSnackbar({ renderNow: false });
     },
     "remove-extra": () => removeBudgetExtra(id),
+    "remove-extra-from-editor": () => {
+      removeBudgetExtra(id);
+      editingExtraId = "";
+    },
     "clear-period-extras": clearCurrentPeriodExtras,
     "extra-all-free": () => applyPendingExtraAllocation(0),
     "cancel-extra-allocation": () => {
@@ -3261,6 +3358,35 @@ function handleTransactionEditSubmit(event) {
   render();
 }
 
+function handleExtraEditSubmit(event) {
+  event.preventDefault();
+  const extra = state.budgetExtras.find((item) => item.id === editingExtraId);
+  if (!extra) {
+    editingExtraId = "";
+    render();
+    return;
+  }
+
+  const data = new FormData(event.currentTarget);
+  const amount = numberFrom(data.get("amount"));
+  if (amount <= 0) {
+    showNoticeSnackbar("El dinero extra debe ser mayor que cero.", { kind: "error" });
+    return;
+  }
+
+  updateBudgetExtra(extra, {
+    source: cleanText(data.get("source"), "Dinero extra"),
+    amount,
+    date: cleanDate(data.get("date"), extra.date),
+    location: normalizeLocation(data.get("location")),
+    savingsPercent: clamp(numberFrom(data.get("savingsPercent")), 0, 100)
+  });
+  state.lastAlert = `${extra.source} quedo actualizado y el saldo se ajusto.`;
+  editingExtraId = "";
+  saveState();
+  render();
+}
+
 function validateTransactionDraft({ amount, category, source }) {
   if (amount <= 0) {
     return "El monto del gasto debe ser mayor que cero.";
@@ -3356,6 +3482,7 @@ function clearLocalUserState() {
   planSheet = "";
   pendingJobRemovalId = "";
   editingTransactionId = "";
+  editingExtraId = "";
   clearSnackbar({ renderNow: false });
 }
 
@@ -3467,13 +3594,70 @@ function clearTemplateBudget(target = state) {
 function removeBudgetExtra(id) {
   const extra = state.budgetExtras.find((item) => item.id === id);
   state.budgetExtras = state.budgetExtras.filter((item) => item.id !== id);
-  if (extra && state.liquidity?.initialized) {
-    adjustLiquidity(extra.location, -Number(extra.amount || 0), "remove-extra");
+  reverseBudgetExtra(extra);
+  state.lastAlert = extra ? `${extra.source} ya no suma al presupuesto.` : "Dinero extra eliminado.";
+}
+
+function updateBudgetExtra(extra, next) {
+  const window = budgetSummary().window;
+  const oldAppliesNow = dateIsInWindow(extra.date, window);
+  const nextAppliesNow = dateIsInWindow(next.date, window);
+  const oldLocation = normalizeLocation(extra.location);
+  const nextLocation = normalizeLocation(next.location);
+  const liquidityDeltas = { account: 0, cash: 0 };
+
+  if (oldAppliesNow) {
+    liquidityDeltas[oldLocation] -= Number(extra.amount || 0);
   }
-  if (extra?.allocation?.savingsJobId && Number(extra.allocation.savingsAmount || 0) > 0) {
+  if (nextAppliesNow) {
+    liquidityDeltas[nextLocation] += Number(next.amount || 0);
+  }
+
+  if (state.liquidity?.initialized) {
+    Object.entries(liquidityDeltas).forEach(([location, delta]) => {
+      if (delta) {
+        adjustLiquidity(location, delta, "edit-extra");
+      }
+    });
+  } else if (nextAppliesNow) {
+    adjustLiquidity(nextLocation, Number(next.amount || 0), "extra");
+  }
+
+  if (extra.allocation?.savingsJobId && Number(extra.allocation.savingsAmount || 0) > 0) {
     reduceSavingsAllocation(extra.allocation.savingsJobId, Number(extra.allocation.savingsAmount || 0));
   }
-  state.lastAlert = extra ? `${extra.source} ya no suma al presupuesto.` : "Dinero extra eliminado.";
+
+  const now = new Date().toISOString();
+  const savingsAmount = nextAppliesNow ? Math.round(Number(next.amount || 0) * Number(next.savingsPercent || 0) / 100) : 0;
+  const savingsJob = nextAppliesNow ? applySavingsAllocation(savingsAmount, now) : null;
+  extra.source = next.source;
+  extra.amount = next.amount;
+  extra.date = next.date;
+  extra.location = nextLocation;
+  extra.allocation = {
+    savingsPercent: next.savingsPercent,
+    savingsAmount,
+    freeAmount: nextAppliesNow ? Number(next.amount || 0) - savingsAmount : Number(next.amount || 0),
+    savingsJobId: savingsJob?.id || ""
+  };
+  extra.updated_at = now;
+}
+
+function reverseBudgetExtra(extra) {
+  if (!extra) {
+    return;
+  }
+  if (dateIsInWindow(extra.date, budgetSummary().window) && state.liquidity?.initialized) {
+    adjustLiquidity(extra.location, -Number(extra.amount || 0), "remove-extra");
+  }
+  if (extra.allocation?.savingsJobId && Number(extra.allocation.savingsAmount || 0) > 0) {
+    reduceSavingsAllocation(extra.allocation.savingsJobId, Number(extra.allocation.savingsAmount || 0));
+  }
+}
+
+function dateIsInWindow(dateValue, window) {
+  const date = String(dateValue || "").slice(0, 10);
+  return date >= window.start && date < window.end;
 }
 
 function clearCurrentPeriodExtras() {
@@ -3492,12 +3676,7 @@ function clearCurrentPeriodExtras() {
 
   const ids = new Set(extras.map((extra) => extra.id));
   extras.forEach((extra) => {
-    if (state.liquidity?.initialized) {
-      adjustLiquidity(extra.location, -Number(extra.amount || 0), "remove-extra");
-    }
-    if (extra?.allocation?.savingsJobId && Number(extra.allocation.savingsAmount || 0) > 0) {
-      reduceSavingsAllocation(extra.allocation.savingsJobId, Number(extra.allocation.savingsAmount || 0));
-    }
+    reverseBudgetExtra(extra);
   });
   state.budgetExtras = state.budgetExtras.filter((extra) => !ids.has(extra.id));
   state.lastAlert = `Quite ${formatMoney(total)} de dinero extra del periodo.`;
