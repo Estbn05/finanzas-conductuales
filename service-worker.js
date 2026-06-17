@@ -1,15 +1,15 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CACHE_NAME = `${CACHE_PREFIX}20260617-auth-landing`;
+const CACHE_NAME = `${CACHE_PREFIX}20260617-pwa-refresh`;
 const APP_SHELL = [
   "./",
   "index.html",
-  "styles.css?v=20260617-auth-landing",
-  "app.js?v=20260617-auth-landing",
-  "finance-core.js?v=20260617-auth-landing",
-  "sync-client.js?v=20260617-auth-landing",
-  "sync-config.js?v=20260617-auth-landing",
-  "vendor/supabase-2.108.1.min.js?v=20260617-auth-landing",
-  "manifest.webmanifest?v=20260617-auth-landing",
+  "styles.css?v=20260617-pwa-refresh",
+  "app.js?v=20260617-pwa-refresh",
+  "finance-core.js?v=20260617-pwa-refresh",
+  "sync-client.js?v=20260617-pwa-refresh",
+  "sync-config.js?v=20260617-pwa-refresh",
+  "vendor/supabase-2.108.1.min.js?v=20260617-pwa-refresh",
+  "manifest.webmanifest?v=20260617-pwa-refresh",
   "assets/icon.svg",
   "assets/icon-192.png",
   "assets/icon-512.png",
@@ -39,6 +39,23 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") {
+    return;
+  }
+
+  if (request.mode === "navigate") {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          const copy = response.clone();
+          if (response.ok && new URL(request.url).origin === self.location.origin) {
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          }
+          return response;
+        })
+        .catch(() =>
+          caches.match(request).then((cached) => cached || caches.match("./").then((fallback) => fallback || caches.match("index.html")))
+        )
+    );
     return;
   }
 
