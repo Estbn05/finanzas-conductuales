@@ -103,3 +103,20 @@ test("sign in persists the backup and explicit sign out removes it", async () =>
   await syncClient.signOutFromCloud();
   assert.equal(storage.getItem(backupKey), null);
 });
+
+test("stored cloud session can be cleared without a network round trip", async () => {
+  const backupKey = "finanzas-conductuales:cloud-session:v1";
+  const storage = createStorage({
+    [backupKey]: JSON.stringify({
+      access_token: "saved",
+      refresh_token: "refresh",
+      user: { id: "user-3", email: "clear@example.com" }
+    })
+  });
+  installCloudMock({ auth: {} }, storage);
+
+  const syncClient = await import(`../sync-client.js?clear-test=${Date.now()}`);
+  syncClient.clearStoredCloudSession();
+
+  assert.equal(storage.getItem(backupKey), null);
+});

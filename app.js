@@ -10,8 +10,9 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260613-centered-icons";
+} from "./finance-core.js?v=20260615-qa-fixes";
 import {
+  clearStoredCloudSession,
   getCloudSession,
   isCloudConfigured,
   isCloudLibraryLoaded,
@@ -21,7 +22,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260613-centered-icons";
+} from "./sync-client.js?v=20260615-qa-fixes";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -46,6 +47,7 @@ const NAV_ITEMS = [
   { id: "movements", label: "Movimientos", icon: "04" },
   { id: "profile", label: "Datos", icon: "05" }
 ];
+const APP_VIEWS = new Set([...NAV_ITEMS.map((item) => item.id), "spending"]);
 
 const app = document.querySelector("#app");
 let state = loadState();
@@ -258,6 +260,14 @@ async function initializeCloudSync() {
         if (cloudState.status !== "syncing") {
           pullCloudAfterLogin();
         }
+      } else {
+        clearLocalUserState();
+        cloudState.signedIn = false;
+        cloudState.email = "";
+        cloudState.sessionReady = true;
+        cloudState.status = "signed-out";
+        cloudState.error = "";
+        renderCloudStatusChange();
       }
     });
 
@@ -905,7 +915,7 @@ function renderPrimaryActionButton(action) {
 function renderToday(plan) {
   const visibleCategoryCount = Math.max(1, Math.min(6, state.budgetJobs.length + 1));
   const homeSummary = budgetSummary();
-  return `
+  const homeSection = `
     <section class="home-view" aria-label="Resumen del periodo">
       <div class="home-section-heading">
         <div>
@@ -939,6 +949,7 @@ function renderToday(plan) {
   const overBudget = categoryStatus().filter((category) => category.ratio > 100);
 
   return `
+    ${homeSection}
     <section class="content-grid today-grid">
       <article class="card focus-card wide-card">
         <div class="focus-copy">
@@ -1424,7 +1435,10 @@ function renderQuickExpensePanel() {
             <span>Monto</span>
             <input name="amount" type="number" min="1000" step="1000" inputmode="numeric" placeholder="$0" required>
           </label>
-          <input name="budgeted" type="hidden" value="on">
+          <label class="check-row quick-check-row">
+            <input name="budgeted" type="checkbox" checked>
+            Ya estaba previsto en el plan
+          </label>
           <button class="btn primary quick-submit" type="submit">Registrar gasto</button>
         </form>
       </section>
@@ -1441,12 +1455,12 @@ function categoryChoiceOptions() {
 
 function renderChoicePills(name, options, selected) {
   return `
-    <div class="choice-pills" data-choice-group="${escapeAttr(name)}">
+    <div class="choice-pills" data-choice-group="${escapeAttr(name)}" role="radiogroup">
       <input type="hidden" name="${escapeAttr(name)}" value="${escapeAttr(selected)}">
       ${options
         .map(
           (option) => `
-            <button class="choice-pill ${option.value === selected ? "is-active" : ""}" type="button" data-choice-name="${escapeAttr(name)}" data-choice-value="${escapeAttr(option.value)}">
+            <button class="choice-pill ${option.value === selected ? "is-active" : ""}" type="button" role="radio" aria-checked="${option.value === selected ? "true" : "false"}" tabindex="${option.value === selected ? "0" : "-1"}" data-choice-name="${escapeAttr(name)}" data-choice-value="${escapeAttr(option.value)}">
               ${escapeHtml(option.label)}
             </button>
           `
@@ -2320,7 +2334,12 @@ function bindEvents() {
         return;
       }
       input.value = button.dataset.choiceValue;
-      group.querySelectorAll("[data-choice-value]").forEach((choice) => choice.classList.toggle("is-active", choice === button));
+      group.querySelectorAll("[data-choice-value]").forEach((choice) => {
+        const active = choice === button;
+        choice.classList.toggle("is-active", active);
+        choice.setAttribute("aria-checked", active ? "true" : "false");
+        choice.tabIndex = active ? 0 : -1;
+      });
     });
   });
 
@@ -2405,6 +2424,119 @@ function bindEvents() {
     });
   }
 
+  bindDialogBehavior();
+}
+
+function bindDialogBehavior() {
+  const dialog = document.querySelector('[role="dialog"], [role="alertdialog"]');
+  const modalOpen = Boolean(dialog);
+  document.querySelectorAll(".sidebar, .main-panel, .bottom-nav, .drawer-scrim").forEach((element) => {
+    if (modalOpen) {
+      element.inert = true;
+      element.setAttribute("aria-hidden", "true");
+    } else {
+      element.inert = false;
+      element.removeAttribute("aria-hidden");
+    }
+  });
+
+  if (!dialog) {
+    app.onkeydown = null;
+    return;
+  }
+
+  if (!dialog.contains(document.activeElement)) {
+    window.setTimeout(() => {
+      if (!dialog.isConnected || dialog.contains(document.activeElement)) {
+        return;
+      }
+      firstFocusable(dialog)?.focus({ preventScroll: true });
+    }, 0);
+  }
+
+  app.onkeydown = handleDialogKeydown;
+}
+
+function handleDialogKeydown(event) {
+  const dialog = document.querySelector('[role="dialog"], [role="alertdialog"]');
+  if (!dialog) {
+    return;
+  }
+
+  if (event.key === "Escape" && closeTopDialog()) {
+    event.preventDefault();
+    return;
+  }
+
+  if (event.key !== "Tab") {
+    return;
+  }
+
+  const focusable = focusableElements(dialog);
+  if (!focusable.length) {
+    event.preventDefault();
+    return;
+  }
+
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function closeTopDialog() {
+  if (quickExpenseOpen) {
+    closeQuickExpense();
+    render();
+    return true;
+  }
+  if (editingTransactionId) {
+    editingTransactionId = "";
+    render();
+    return true;
+  }
+  if (editingExtraId) {
+    editingExtraId = "";
+    render();
+    return true;
+  }
+  if (pendingJobRemovalId) {
+    pendingJobRemovalId = "";
+    render();
+    return true;
+  }
+  if (pendingExtraAllocation) {
+    pendingExtraAllocation = null;
+    state.lastAlert = "Dinero extra sin guardar.";
+    render();
+    return true;
+  }
+  if (planSheet) {
+    planSheet = "";
+    render();
+    return true;
+  }
+  if (state.showDiagnosis && state.profile.completed) {
+    diagnosisValidation = { field: "", message: "" };
+    state.showDiagnosis = false;
+    render();
+    return true;
+  }
+  return false;
+}
+
+function firstFocusable(root) {
+  return focusableElements(root)[0] || null;
+}
+
+function focusableElements(root) {
+  return [...root.querySelectorAll('button, [href], input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])')]
+    .filter((element) => !element.disabled && element.offsetParent !== null);
 }
 
 function bindOnboardingFlow(form) {
@@ -2417,6 +2549,7 @@ function bindOnboardingFlow(form) {
   const balanceHint = form.querySelector("[data-onboarding-balance]");
   const categoryList = form.querySelector(".onboarding-categories");
   const addCategoryButton = form.querySelector("[data-add-onboarding-category]");
+  const progress = modal.querySelector(".onboarding-progress");
 
   const updateBalanceHint = () => {
     const data = new FormData(form);
@@ -2434,6 +2567,7 @@ function bindOnboardingFlow(form) {
     modal.dataset.onboardingStep = String(step);
     form.querySelectorAll("[data-step]").forEach((section) => section.classList.toggle("is-active", Number(section.dataset.step) === step));
     modal.querySelectorAll(".onboarding-progress span").forEach((dot, index) => dot.classList.toggle("is-active", index < step));
+    progress?.setAttribute("aria-label", `Paso ${step} de 3`);
     backButton.hidden = step === 1 || step === 3;
     nextButton.hidden = step === 3;
     finishButton.hidden = step !== 3;
@@ -2511,6 +2645,7 @@ function bindOnboardingFlowV2(form) {
   const totalPreview = form.querySelector("[data-onboarding-total-preview]");
   const freePreview = form.querySelector("[data-onboarding-free-preview]");
   const categoryCount = form.querySelector("[data-onboarding-category-count]");
+  const progress = modal.querySelector(".onboarding-progress");
 
   const updateBalance = () => {
     const data = new FormData(form);
@@ -2553,6 +2688,7 @@ function bindOnboardingFlowV2(form) {
     modal.dataset.onboardingStep = String(step);
     form.querySelectorAll("[data-step]").forEach((section) => section.classList.toggle("is-active", Number(section.dataset.step) === step));
     modal.querySelectorAll(".onboarding-progress span").forEach((dot, index) => dot.classList.toggle("is-active", index === step - 1));
+    progress?.setAttribute("aria-label", `Paso ${step} de 3`);
     backButton.hidden = step === 1 || step === 3;
     nextButton.hidden = step === 3;
     finishButton.hidden = step !== 3;
@@ -2979,6 +3115,7 @@ function submitDiagnosisForm(form) {
   }
 
   diagnosisValidation = { field: "", message: "" };
+  clearSnackbar({ renderNow: false });
   const data = new FormData(form);
   const wasIncomplete = !state.profile.completed;
   const shouldClearTemplateBudget = shouldClearTemplateBudgetOnPlanSave();
@@ -3454,19 +3591,28 @@ async function handleCloudSignOut() {
   cloudState.sessionReady = false;
   clearTimeout(cloudSaveTimer);
   render();
+  let signOutWarning = "";
   try {
     await saveCloudState(getCloudPayload());
-    await signOutFromCloud();
-    clearLocalUserState();
-    cloudState.signedIn = false;
-    cloudState.email = "";
-    cloudState.sessionReady = true;
-    cloudState.status = "signed-out";
   } catch (error) {
-    cloudState.sessionReady = true;
-    cloudState.status = "error";
-    cloudState.error = friendlyCloudError(error);
+    signOutWarning = friendlyCloudError(error);
   }
+
+  try {
+    await signOutFromCloud();
+  } catch (error) {
+    signOutWarning ||= friendlyCloudError(error);
+  }
+
+  clearStoredCloudSession();
+  clearLocalUserState();
+  cloudState.signedIn = false;
+  cloudState.email = "";
+  cloudState.sessionReady = true;
+  cloudState.status = "signed-out";
+  cloudState.error = signOutWarning
+    ? `Cerraste sesion en este dispositivo. No pude completar la sincronizacion: ${signOutWarning}`
+    : "";
   render();
 }
 
@@ -3572,6 +3718,9 @@ function removeTransaction(id) {
   state.lastAlert = transaction
     ? `${transaction.merchant} eliminado. La categoria se recalculo.`
     : "Gasto eliminado.";
+  if (snackbar?.transactionId === id) {
+    clearSnackbar({ renderNow: false });
+  }
 }
 
 function shouldClearTemplateBudgetOnPlanSave() {
@@ -3695,6 +3844,11 @@ function cancelCooldown(id) {
 function unlockCooldown(id) {
   const cooldown = state.cooldowns.find((item) => item.id === id);
   if (!cooldown || new Date(cooldown.unlockAt).getTime() > Date.now()) {
+    return;
+  }
+  const available = liquiditySummary()[normalizeLocation(cooldown.source)];
+  if (Number(cooldown.amount || 0) > available) {
+    showNoticeSnackbar(`${locationLabel(cooldown.source)} solo tiene ${formatMoney(available)} disponible. Actualiza tus datos antes de registrarla.`, { kind: "error", renderNow: false });
     return;
   }
   addTransaction({
@@ -4021,11 +4175,11 @@ function viewFromHash(fallback) {
     profile: "profile"
   };
   const view = aliases[rawHash] || rawHash;
-  return NAV_ITEMS.some((item) => item.id === view) ? view : fallback;
+  return APP_VIEWS.has(view) ? view : fallback;
 }
 
 function activateView(view) {
-  if (!NAV_ITEMS.some((item) => item.id === view)) {
+  if (!APP_VIEWS.has(view)) {
     return;
   }
   state.activeView = view;

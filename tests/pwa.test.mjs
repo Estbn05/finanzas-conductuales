@@ -7,22 +7,25 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
   const iconSizes = manifest.icons.map((icon) => icon.sizes);
 
   assert.equal(manifest.display, "standalone");
-  assert.equal(manifest.start_url, "./?pwa-cleanup=20260613-centered-icons");
+  assert.equal(manifest.start_url, "./");
   assert.equal(manifest.scope, "./");
   assert.equal(manifest.orientation, "portrait-primary");
   assert.ok(iconSizes.includes("192x192"));
   assert.ok(iconSizes.includes("512x512"));
 });
 
-test("service worker removes stale PWA caches and unregisters itself", async () => {
+test("service worker caches the app shell and serves an offline navigation fallback", async () => {
   const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
 
   assert.ok(worker.includes('CACHE_PREFIX = "finanzas-conductuales-"'));
-  assert.ok(worker.includes('CLEANUP_RELEASE = "20260613-centered-icons"'));
+  assert.ok(worker.includes("CACHE_NAME"));
+  assert.ok(worker.includes("cache.addAll(APP_SHELL)"));
+  assert.ok(worker.includes('app.js?v=20260615-qa-fixes'));
   assert.ok(worker.includes("caches.delete(key)"));
-  assert.ok(worker.includes("self.registration.unregister()"));
-  assert.ok(worker.includes('includeUncontrolled: true'));
-  assert.equal(worker.includes('addEventListener("fetch"'), false);
+  assert.ok(worker.includes("self.clients.claim()"));
+  assert.ok(worker.includes("addEventListener(\"fetch\""));
+  assert.ok(worker.includes('request.mode === "navigate"'));
+  assert.equal(worker.includes("self.registration.unregister()"), false);
 });
 
 test("mobile-first shell prioritizes free money and fast expense registration", async () => {
@@ -38,6 +41,11 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(app.includes('class="quick-expense-panel"'));
   assert.ok(app.includes('id="transaction-form"'));
   assert.ok(app.includes('data-choice-value="${escapeAttr(option.value)}"'));
+  assert.ok(app.includes('role="radio" aria-checked='));
+  assert.ok(app.includes('const APP_VIEWS = new Set'));
+  assert.ok(app.includes('APP_VIEWS.has(view)'));
+  assert.ok(app.includes('data-view="spending"'));
+  assert.ok(app.includes('name="budgeted" type="checkbox" checked'));
   assert.ok(app.includes("money-location-chips"));
   assert.ok(app.includes("Cuenta"));
   assert.ok(app.includes("Efectivo"));
@@ -50,6 +58,10 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.equal(todayView.includes("Movimientos del periodo"), false);
   assert.equal(todayView.includes("Fondo inicial"), false);
   assert.equal(todayView.includes("Pago recomendado"), false);
+
+  const fullTodayView = app.slice(app.indexOf("function renderToday"), app.indexOf("function renderTransactionLabeler"));
+  assert.ok(fullTodayView.includes("Pausa de 24 horas"));
+  assert.ok(fullTodayView.includes("complete-checkin"));
 
   assert.ok(app.includes('renderIcon("receipt")'));
   assert.ok(app.includes('class="bottom-nav-icon plus-icon"'));
@@ -174,6 +186,7 @@ test("authentication gates onboarding and signed-in users can close their sessio
   assert.ok(app.includes(">Ya tengo cuenta: iniciar sesion</button>"));
   assert.ok(app.includes('data-action="cloud-sign-out">Cerrar sesion'));
   assert.ok(app.includes("function clearLocalUserState()"));
+  assert.ok(app.includes("clearStoredCloudSession()"));
   assert.ok(app.includes("previousEmail !== nextEmail"));
   assert.ok(app.includes("cloudState.sessionReady = true"));
   const pullCloud = app.slice(app.indexOf("async function pullCloudAfterLogin"), app.indexOf("function scheduleCloudSave"));
@@ -188,10 +201,10 @@ test("authentication gates onboarding and signed-in users can close their sessio
   assert.ok(syncClient.includes("cloud.auth.setSession(backup)"));
   assert.ok(syncClient.includes("return backup;"));
   assert.ok(syncClient.includes("persistSessionBackup(data.session)"));
+  assert.ok(syncClient.includes("export function clearStoredCloudSession()"));
   assert.ok(syncClient.includes("setTimeout(() => callback(session, event), 0)"));
-  assert.equal(syncClient.includes('event === "SIGNED_OUT"'), false);
   const authChange = app.slice(app.indexOf("authUnsubscribe = onCloudAuthChange"), app.indexOf("if (session) {", app.indexOf("authUnsubscribe = onCloudAuthChange")));
-  assert.equal(authChange.includes("clearLocalUserState()"), false);
+  assert.ok(authChange.includes("clearLocalUserState()"));
   assert.ok(syncClient.includes("withCloudTimeout"));
   assert.ok(syncClient.includes("Comprobar la sesion"));
   assert.ok(styles.includes(".auth-gate"));
@@ -208,16 +221,16 @@ test("static startup fallback retries automatically without manual controls", as
   assert.ok(html.includes('const retryKey = "finanzas-startup-retry"'));
   assert.ok(html.includes("window.location.reload()"));
   assert.ok(html.includes("window.pwaCleanupReady"));
-  assert.ok(html.includes("window.pwaCleanupReady = Promise.race"));
-  assert.ok(html.includes("window.setTimeout(resolve, 1500)"));
-  assert.ok(html.includes("registration.unregister()"));
-  assert.ok(html.includes("caches.delete(key)"));
+  assert.ok(html.includes("window.pwaCleanupReady = Promise.resolve()"));
+  assert.ok(html.includes('navigator.serviceWorker.register("service-worker.js?v=20260615-qa-fixes")'));
+  assert.equal(html.includes("registration.unregister()"), false);
+  assert.equal(html.includes("caches.delete(key)"), false);
   assert.ok(html.includes("Comprobando tu sesion"));
   assert.ok(html.includes("Estamos verificando automaticamente si ya tienes una sesion iniciada."));
-  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260613-centered-icons")'));
+  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260615-qa-fixes")'));
   assert.ok(html.includes("window.setTimeout(finish, timeoutMs)"));
   assert.equal(html.includes("cdn.jsdelivr.net/npm/@supabase/supabase-js"), false);
-  assert.ok(html.includes('await import("./app.js?v=20260613-centered-icons")'));
+  assert.ok(html.includes('await import("./app.js?v=20260615-qa-fixes")'));
   assert.equal(html.includes("Continuar al acceso"), false);
   assert.equal(html.includes("Recargar aplicacion"), false);
   assert.equal(html.includes('onclick="window.location.reload()"'), false);

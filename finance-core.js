@@ -246,8 +246,9 @@ export function budgetWindow(profile, today) {
   const fallbackStart = monthStartKey(todayKey);
   let start = parseDateOnly(profile.periodStart || profile.semesterStart || fallbackStart);
   const current = parseDateOnly(todayKey);
+  const anchorDay = start.getDate();
   const advance = (date, direction = 1) =>
-    cadence.days ? addDays(date, cadence.days * direction) : addMonths(date, cadence.monthsInterval * direction);
+    cadence.days ? addDays(date, cadence.days * direction) : addMonths(date, cadence.monthsInterval * direction, anchorDay);
 
   while (advance(start) <= current) {
     start = advance(start);
@@ -279,8 +280,14 @@ function parseDateOnly(value) {
   return new Date(year || 1970, (month || 1) - 1, day || 1);
 }
 
-function addMonths(date, months) {
-  return new Date(date.getFullYear(), date.getMonth() + months, date.getDate());
+function addMonths(date, months, preferredDay = date.getDate()) {
+  const target = new Date(date.getFullYear(), date.getMonth() + months, 1);
+  const day = Math.min(preferredDay, daysInMonth(target.getFullYear(), target.getMonth()));
+  return new Date(target.getFullYear(), target.getMonth(), day);
+}
+
+function daysInMonth(year, monthIndex) {
+  return new Date(year, monthIndex + 1, 0).getDate();
 }
 
 function addDays(date, days) {

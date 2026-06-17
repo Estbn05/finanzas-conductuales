@@ -57,6 +57,10 @@ function clearSessionBackup() {
   } catch {}
 }
 
+export function clearStoredCloudSession() {
+  clearSessionBackup();
+}
+
 export function isCloudConfigured() {
   return Boolean(config.supabaseUrl && config.supabaseAnonKey);
 }

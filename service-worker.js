@@ -1,8 +1,28 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CLEANUP_RELEASE = "20260613-centered-icons";
+const CACHE_NAME = `${CACHE_PREFIX}20260615-qa-fixes`;
+const APP_SHELL = [
+  "./",
+  "index.html",
+  "styles.css?v=20260615-qa-fixes",
+  "app.js?v=20260615-qa-fixes",
+  "finance-core.js?v=20260615-qa-fixes",
+  "sync-client.js?v=20260615-qa-fixes",
+  "sync-config.js?v=20260615-qa-fixes",
+  "vendor/supabase-2.108.1.min.js?v=20260615-qa-fixes",
+  "manifest.webmanifest?v=20260615-qa-fixes",
+  "assets/icon.svg",
+  "assets/icon-192.png",
+  "assets/icon-512.png",
+  "assets/apple-touch-icon.png"
+];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(self.skipWaiting());
+  event.waitUntil(
+    caches
+      .open(CACHE_NAME)
+      .then((cache) => cache.addAll(APP_SHELL))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener("activate", (event) => {
@@ -10,18 +30,38 @@ self.addEventListener("activate", (event) => {
     caches
       .keys()
       .then((keys) =>
-        Promise.all(keys.filter((key) => key.startsWith(CACHE_PREFIX)).map((key) => caches.delete(key)))
+        Promise.all(keys.filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME).map((key) => caches.delete(key)))
       )
-      .then(() => self.registration.unregister())
-      .then(() => self.clients.matchAll({ type: "window", includeUncontrolled: true }))
-      .then((clients) =>
-        Promise.all(
-          clients.map((client) => {
-            const url = new URL(client.url);
-            url.searchParams.set("pwa-cleanup", CLEANUP_RELEASE);
-            return client.navigate(url.href);
-          })
-        )
-      )
+      .then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener("fetch", (event) => {
+  const request = event.request;
+  if (request.method !== "GET") {
+    return;
+  }
+
+  event.respondWith(
+    caches.match(request).then((cached) => {
+      if (cached) {
+        return cached;
+      }
+
+      return fetch(request)
+        .then((response) => {
+          const copy = response.clone();
+          if (response.ok && new URL(request.url).origin === self.location.origin) {
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          }
+          return response;
+        })
+        .catch(() => {
+          if (request.mode === "navigate") {
+            return caches.match("./").then((fallback) => fallback || caches.match("index.html"));
+          }
+          throw new Error("Offline asset unavailable");
+        });
+    })
   );
 });

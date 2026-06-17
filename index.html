@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#2d9b6f">
+    <meta name="theme-color" content="#0f6e56">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Finanzas">
@@ -13,50 +13,17 @@
       content="App personal de finanzas conductuales con monitoreo diario, presupuesto por periodos y simulador de ahorro."
     >
     <title>Finanzas Conductuales</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20260613-centered-icons">
+    <link rel="manifest" href="manifest.webmanifest?v=20260615-qa-fixes">
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="styles.css?v=20260613-centered-icons">
+    <link rel="stylesheet" href="styles.css?v=20260615-qa-fixes">
     <script>
-      const pwaCleanupTask = (async () => {
-        const cachePrefix = "finanzas-conductuales-";
-        const release = "20260613-centered-icons";
-        const retryKey = `finanzas-pwa-cleanup:${release}`;
-        let needsFreshLoad = Boolean(navigator.serviceWorker?.controller);
-
-        try {
-          const registrations = await navigator.serviceWorker?.getRegistrations();
-          const appRegistrations = (registrations || []).filter((registration) =>
-            registration.scope.includes("/finanzas-conductuales/")
-          );
-          const results = await Promise.all(appRegistrations.map((registration) => registration.unregister()));
-          needsFreshLoad ||= results.some(Boolean);
-        } catch {}
-
-        try {
-          const keys = await caches.keys();
-          const appKeys = keys.filter((key) => key.startsWith(cachePrefix));
-          await Promise.all(appKeys.map((key) => caches.delete(key)));
-          needsFreshLoad ||= appKeys.length > 0;
-        } catch {}
-
-        let alreadyRetried = false;
-        try {
-          alreadyRetried = sessionStorage.getItem(retryKey) === "done";
-          sessionStorage.setItem(retryKey, "done");
-        } catch {}
-
-        if (needsFreshLoad && !alreadyRetried) {
-          const url = new URL(window.location.href);
-          url.searchParams.set("pwa-cleanup", release);
-          window.location.replace(url.href);
-          await new Promise(() => {});
-        }
-      })();
-      window.pwaCleanupReady = Promise.race([
-        pwaCleanupTask,
-        new Promise((resolve) => window.setTimeout(resolve, 1500))
-      ]);
+      window.pwaCleanupReady = Promise.resolve();
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("service-worker.js?v=20260615-qa-fixes").catch(() => {});
+        });
+      }
     </script>
   </head>
   <body>
@@ -113,9 +80,9 @@
             document.body.append(script);
           });
 
-        await loadScript("sync-config.js?v=20260613-centered-icons");
-        await loadScript("vendor/supabase-2.108.1.min.js?v=20260613-centered-icons");
-        await import("./app.js?v=20260613-centered-icons");
+        await loadScript("sync-config.js?v=20260615-qa-fixes");
+        await loadScript("vendor/supabase-2.108.1.min.js?v=20260615-qa-fixes");
+        await import("./app.js?v=20260615-qa-fixes");
       });
     </script>
   </body>

@@ -4,6 +4,7 @@ import {
   budgetAmountForJob,
   budgetRingAllocation,
   budgetSummary,
+  budgetWindow,
   calculatePlan,
   categoryStatus,
   extraIncomeForPeriod,
@@ -365,6 +366,17 @@ test("income cadence can be weekly biweekly monthly semester or yearly", () => {
   assert.equal(budgetAmountForJob(state.budgetJobs[1], state.profile), 276_923);
   assert.equal(summary.window.start, "2026-05-15");
   assert.equal(summary.window.end, "2026-05-29");
+});
+
+test("monthly budget windows clamp end-of-month starts instead of skipping the next month", () => {
+  assert.deepEqual(
+    budgetWindow({ incomeCadence: "monthly", incomeAmount: 1_000_000, periodStart: "2026-01-31" }, "2026-02-15"),
+    { start: "2026-01-31", end: "2026-02-28" }
+  );
+  assert.deepEqual(
+    budgetWindow({ incomeCadence: "monthly", incomeAmount: 1_000_000, periodStart: "2026-01-31" }, "2026-03-01"),
+    { start: "2026-02-28", end: "2026-03-31" }
+  );
 });
 
 test("extra money increases only the current period budget", () => {

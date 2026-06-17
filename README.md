@@ -8,7 +8,7 @@ Aplicacion personal de finanzas basada en economia conductual. El objetivo no es
 
 - Traduce un PRD con investigacion conductual a una experiencia de producto funcional.
 - Usa arquitectura frontend sin dependencias externas, ideal para GitHub Pages.
-- Incluye cuentas con Supabase, persistencia local, importacion/exportacion JSON, PWA basica y diseno responsive.
+- Incluye cuentas con Supabase, persistencia local, PWA basica con cache offline y diseno responsive.
 - Muestra decisiones de UX orientadas a cambio de comportamiento, no solo CRUD.
 
 ## Funcionalidades principales
@@ -20,7 +20,7 @@ Aplicacion personal de finanzas basada en economia conductual. El objetivo no es
 - **Jerarquia de dinero clara:** el libre del periodo es el numero protagonista; cuenta, efectivo y total real aparecen como datos secundarios.
 - **Cuenta y efectivo:** separa el disponible entre dinero en cuenta y dinero fisico sin perder el total.
 - **Acceso antes del onboarding:** cada usuario crea una cuenta o inicia sesion antes de configurar presupuesto, cuenta/efectivo y campos habituales.
-- **Cierre de sesion:** disponible desde el menu y desde Datos; limpia la informacion local antes de permitir el acceso de otra cuenta.
+- **Cierre de sesion:** disponible desde el menu y desde Datos; intenta guardar en nube y limpia la informacion local del dispositivo aun si la conexion falla.
 - **Tema automatico:** adapta la interfaz clara u oscura segun el sistema.
 - **Correccion de errores:** los gastos registrados se pueden eliminar desde el historial o deshacer directamente desde su categoria.
 - **Dinero extra:** permite sumar regalos, bonos o ayudas al presupuesto del periodo sin cambiar el presupuesto base recurrente.
@@ -72,7 +72,7 @@ Tambien puedes abrir `index.html` directamente, aunque el service worker requier
 
 ## PWA y movil
 
-La app incluye manifest, service worker, iconos PNG/SVG, soporte iOS con `apple-touch-icon` y cache offline de los archivos principales. Para instalarla en movil debe servirse por HTTPS; GitHub Pages cumple ese requisito.
+La app incluye manifest, service worker, iconos PNG/SVG, soporte iOS con `apple-touch-icon` y cache offline de los archivos principales. Si pierdes conexion, puedes abrir la app instalada y usar la copia local; la sincronizacion con Supabase se reintenta cuando vuelve internet. Para instalarla en movil debe servirse por HTTPS; GitHub Pages cumple ese requisito.
 
 En Android/Chrome: abre la demo publicada y elige "Instalar app" o "Agregar a pantalla principal".
 
@@ -80,7 +80,7 @@ En iPhone/Safari: abre la demo, toca compartir y luego "Agregar a pantalla de in
 
 ## Cuentas y sincronizacion
 
-Supabase es obligatorio para entrar a la aplicacion. Despues de iniciar sesion, `localStorage` mantiene una copia para uso offline y la nube comparte los datos entre computador y celular:
+Supabase es obligatorio para entrar a la aplicacion. Despues de iniciar sesion, `localStorage` mantiene una copia para uso offline y Supabase guarda una copia del estado financiero para compartir los datos entre computador y celular:
 
 - Usuario nuevo: crea su cuenta y luego completa el onboarding financiero.
 - Usuario existente: inicia sesion y descarga automaticamente sus datos.
@@ -130,4 +130,4 @@ Este repositorio incluye `.github/workflows/pages.yml`. Cuando el proyecto se su
 
 ## Nota de privacidad
 
-Esta version no envia datos a servidores. Toda la informacion se guarda en el navegador del usuario y puede exportarse o reiniciarse desde la pantalla de perfil.
+La app guarda una copia local en el navegador para uso offline. Cuando inicias sesion, tambien sincroniza tu estado financiero con Supabase bajo las politicas RLS de [docs/supabase-schema.sql](docs/supabase-schema.sql), de modo que solo tu usuario pueda leer o escribir su registro.
