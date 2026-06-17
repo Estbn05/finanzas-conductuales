@@ -20,7 +20,7 @@ test("service worker caches the app shell and serves an offline navigation fallb
   assert.ok(worker.includes('CACHE_PREFIX = "finanzas-conductuales-"'));
   assert.ok(worker.includes("CACHE_NAME"));
   assert.ok(worker.includes("cache.addAll(APP_SHELL)"));
-  assert.ok(worker.includes('app.js?v=20260615-qa-fixes'));
+  assert.ok(worker.includes('app.js?v=20260617-auth-landing'));
   assert.ok(worker.includes("caches.delete(key)"));
   assert.ok(worker.includes("self.clients.claim()"));
   assert.ok(worker.includes("addEventListener(\"fetch\""));
@@ -60,8 +60,15 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.equal(todayView.includes("Pago recomendado"), false);
 
   const fullTodayView = app.slice(app.indexOf("function renderToday"), app.indexOf("function renderTransactionLabeler"));
-  assert.ok(fullTodayView.includes("Pausa de 24 horas"));
+  assert.ok(fullTodayView.includes("Revision rapida"));
   assert.ok(fullTodayView.includes("complete-checkin"));
+  assert.equal(fullTodayView.includes("Gasto del mes"), false);
+  assert.equal(fullTodayView.includes("Fondo inicial"), false);
+  assert.equal(fullTodayView.includes("Ahorro recomendado"), false);
+  assert.equal(fullTodayView.includes("Gastos por categoria"), false);
+  assert.equal(fullTodayView.includes("Pausa de 24 horas"), false);
+  assert.equal(fullTodayView.includes("Ajuste sin culpa"), false);
+  assert.equal(fullTodayView.includes("Patron dominante"), false);
 
   assert.ok(app.includes('renderIcon("receipt")'));
   assert.ok(app.includes('class="bottom-nav-icon plus-icon"'));
@@ -180,10 +187,20 @@ test("authentication gates onboarding and signed-in users can close their sessio
   assert.ok(renderFunction.indexOf("if (shouldShowAuthGate())") < renderFunction.indexOf("const plan = calculatePlan();"));
   const sessionCheck = app.slice(app.indexOf("function renderSessionCheck()"), app.indexOf("function renderAuthGate()"));
   assert.equal(sessionCheck.includes("cloud-login-form"), false);
+  assert.ok(app.includes("Entiende tu dinero antes de gastarlo"));
+  assert.ok(app.includes("Dinero libre visible"));
+  assert.ok(app.includes("Plan por categorias"));
+  assert.ok(app.includes("Sincronizacion segura"));
+  assert.ok(app.includes('id="cloud-signin-form"'));
+  assert.ok(app.includes('id="cloud-signup-form"'));
+  assert.ok(app.includes("document.querySelectorAll(\"[data-cloud-auth-form]\")"));
+  assert.ok(app.includes("event.currentTarget.dataset.cloudMode"));
   assert.ok(app.includes('data-cloud-mode="signup"'));
-  assert.ok(app.includes(">Crear cuenta</button>"));
+  assert.ok(app.includes(">Registrarse</button>"));
   assert.ok(app.includes('data-cloud-mode="signin"'));
-  assert.ok(app.includes(">Ya tengo cuenta: iniciar sesion</button>"));
+  assert.ok(app.includes(">Iniciar sesion</button>"));
+  assert.equal(app.includes('id="cloud-login-form"'), false);
+  assert.equal(app.includes(">Ya tengo cuenta: iniciar sesion</button>"), false);
   assert.ok(app.includes('data-action="cloud-sign-out">Cerrar sesion'));
   assert.ok(app.includes("function clearLocalUserState()"));
   assert.ok(app.includes("clearStoredCloudSession()"));
@@ -208,6 +225,9 @@ test("authentication gates onboarding and signed-in users can close their sessio
   assert.ok(syncClient.includes("withCloudTimeout"));
   assert.ok(syncClient.includes("Comprobar la sesion"));
   assert.ok(styles.includes(".auth-gate"));
+  assert.ok(styles.includes(".auth-landing"));
+  assert.ok(styles.includes(".auth-benefits"));
+  assert.ok(styles.includes(".auth-actions"));
   assert.ok(styles.includes(".auth-card"));
   assert.ok(styles.includes(".session-check"));
   assert.equal(styles.includes(".auth-recovery-actions"), false);
@@ -222,15 +242,15 @@ test("static startup fallback retries automatically without manual controls", as
   assert.ok(html.includes("window.location.reload()"));
   assert.ok(html.includes("window.pwaCleanupReady"));
   assert.ok(html.includes("window.pwaCleanupReady = Promise.resolve()"));
-  assert.ok(html.includes('navigator.serviceWorker.register("service-worker.js?v=20260615-qa-fixes")'));
+  assert.ok(html.includes('navigator.serviceWorker.register("service-worker.js?v=20260617-auth-landing")'));
   assert.equal(html.includes("registration.unregister()"), false);
   assert.equal(html.includes("caches.delete(key)"), false);
   assert.ok(html.includes("Comprobando tu sesion"));
   assert.ok(html.includes("Estamos verificando automaticamente si ya tienes una sesion iniciada."));
-  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260615-qa-fixes")'));
+  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260617-auth-landing")'));
   assert.ok(html.includes("window.setTimeout(finish, timeoutMs)"));
   assert.equal(html.includes("cdn.jsdelivr.net/npm/@supabase/supabase-js"), false);
-  assert.ok(html.includes('await import("./app.js?v=20260615-qa-fixes")'));
+  assert.ok(html.includes('await import("./app.js?v=20260617-auth-landing")'));
   assert.equal(html.includes("Continuar al acceso"), false);
   assert.equal(html.includes("Recargar aplicacion"), false);
   assert.equal(html.includes('onclick="window.location.reload()"'), false);

@@ -10,7 +10,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260615-qa-fixes";
+} from "./finance-core.js?v=20260617-auth-landing";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -22,7 +22,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260615-qa-fixes";
+} from "./sync-client.js?v=20260617-auth-landing";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -752,34 +752,82 @@ function renderAuthGate() {
 
   return `
     <main class="auth-gate">
-      <section class="auth-card" aria-labelledby="auth-title">
-        <div class="auth-brand">
-          <span class="brand-mark">FC</span>
-          <div>
-            <p class="eyebrow">Finanzas Conductuales</p>
-            <h1 id="auth-title">Accede para empezar</h1>
+      <section class="auth-landing" aria-labelledby="auth-title">
+        <div class="auth-hero">
+          <div class="auth-brand">
+            <span class="brand-mark">FC</span>
+            <div>
+              <p class="eyebrow">Finanzas Conductuales</p>
+              <h1 id="auth-title">Entiende tu dinero antes de gastarlo</h1>
+            </div>
+          </div>
+          <p class="auth-lead">
+            Una app para registrar gastos, ver cuanto dinero queda libre y separar categorias del periodo sin convertir cada compra en culpa.
+          </p>
+          <div class="auth-benefits" aria-label="Para que sirve la app">
+            <article>
+              <strong>Dinero libre visible</strong>
+              <span>El inicio muestra lo disponible despues de reservas, categorias y gastos reales.</span>
+            </article>
+            <article>
+              <strong>Plan por categorias</strong>
+              <span>Define limites para gasolina, salidas, universidad o cualquier campo que quieras cuidar.</span>
+            </article>
+            <article>
+              <strong>Sincronizacion segura</strong>
+              <span>Tu cuenta guarda una copia en la nube y conserva una copia local para el dia a dia.</span>
+            </article>
           </div>
         </div>
-        ${
-          unavailable
-            ? `<p>La autenticacion no esta disponible. Revisa la configuracion de Supabase y vuelve a cargar la aplicacion.</p>`
-            : `
-              <p>Primero crea una cuenta o inicia sesion. Despues configuraras tu presupuesto y tus campos habituales.</p>
-              <form class="stacked-form auth-form" id="cloud-login-form">
-                <label>
-                  Correo
-                  <input name="email" type="email" autocomplete="email" placeholder="tu@email.com" required>
-                </label>
-                <label>
-                  Contrasena
-                  <input name="password" type="password" autocomplete="current-password" minlength="6" placeholder="Minimo 6 caracteres" required>
-                </label>
-                <button class="btn primary" type="submit" data-cloud-mode="signup" ${submittingAccess ? "disabled" : ""}>Crear cuenta</button>
-                <button class="btn ghost" type="submit" data-cloud-mode="signin" ${submittingAccess ? "disabled" : ""}>Ya tengo cuenta: iniciar sesion</button>
-              </form>
-            `
-        }
-        ${cloudState.error ? `<p class="form-error" role="alert">${escapeHtml(cloudState.error)}</p>` : ""}
+
+        <div class="auth-actions" aria-label="Acceso a la aplicacion">
+          ${
+            unavailable
+              ? `<article class="auth-card">
+                  <h2>Acceso no disponible</h2>
+                  <p>La autenticacion no esta disponible. Revisa la configuracion de Supabase y vuelve a cargar la aplicacion.</p>
+                </article>`
+              : `
+                <article class="auth-card">
+                  <div>
+                    <p class="eyebrow">Ya tengo cuenta</p>
+                    <h2>Iniciar sesion</h2>
+                  </div>
+                  <form class="stacked-form auth-form" id="cloud-signin-form" data-cloud-auth-form data-cloud-mode="signin">
+                    <label>
+                      Correo
+                      <input name="email" type="email" autocomplete="email" placeholder="tu@email.com" required>
+                    </label>
+                    <label>
+                      Contrasena
+                      <input name="password" type="password" autocomplete="current-password" minlength="6" placeholder="Tu contrasena" required>
+                    </label>
+                    <button class="btn primary" type="submit" data-cloud-mode="signin" ${submittingAccess ? "disabled" : ""}>Iniciar sesion</button>
+                  </form>
+                </article>
+
+                <article class="auth-card">
+                  <div>
+                    <p class="eyebrow">Primera vez</p>
+                    <h2>Crear cuenta</h2>
+                  </div>
+                  <p class="auth-form-note">Despues de registrarte configuras tu presupuesto y tus campos habituales.</p>
+                  <form class="stacked-form auth-form" id="cloud-signup-form" data-cloud-auth-form data-cloud-mode="signup">
+                    <label>
+                      Correo
+                      <input name="email" type="email" autocomplete="email" placeholder="tu@email.com" required>
+                    </label>
+                    <label>
+                      Contrasena
+                      <input name="password" type="password" autocomplete="new-password" minlength="6" placeholder="Minimo 6 caracteres" required>
+                    </label>
+                    <button class="btn secondary" type="submit" data-cloud-mode="signup" ${submittingAccess ? "disabled" : ""}>Registrarse</button>
+                  </form>
+                </article>
+              `
+          }
+          ${cloudState.error ? `<p class="form-error auth-error" role="alert">${escapeHtml(cloudState.error)}</p>` : ""}
+        </div>
       </section>
     </main>
   `;
@@ -943,10 +991,7 @@ function renderToday(plan) {
   const unlabeled = state.transactions.filter((transaction) => !transaction.labeled);
   const unlabeledToday = state.transactions.filter((transaction) => transaction.date === today && !transaction.labeled);
   const checkinDone = state.checkins.includes(today);
-  const script = dominantMoneyScript();
   const primaryAction = getPrimaryAction(plan, unlabeled, checkinDone);
-  const summary = budgetSummary();
-  const overBudget = categoryStatus().filter((category) => category.ratio > 100);
 
   return `
     ${homeSection}
@@ -992,96 +1037,6 @@ function renderToday(plan) {
             ? `<p class="helper-text">Quedan gastos de hoy sin categoria.</p>`
             : `<p class="helper-text">Todo lo de hoy ya tiene categoria.</p>`
         }
-      </article>
-
-      <article class="card hero-visual">
-        <div class="paying-visual" style="--spent:${clamp((monthlyLabeledSpend() / plan.expenses) * 100, 0, 100)}">
-          <div class="coin-stack" aria-hidden="true">
-            <span></span><span></span><span></span><span></span><span></span>
-          </div>
-          <div>
-            <p class="eyebrow">Gasto del mes</p>
-            <h2>${formatMoney(monthlyLabeledSpend())}</h2>
-            <p>registrados en categorias del plan</p>
-          </div>
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Fondo inicial</p>
-            <h2>${formatMoney(state.profile.emergencySavings)} guardados</h2>
-          </div>
-          <span class="metric-badge">${formatMoney(plan.emergencyGap)} faltan</span>
-        </div>
-        ${renderProgress(plan.emergencyProgress, "Meta inicial de emergencia")}
-        <p class="helper-text">
-          Referencia del simulador; no modifica tu dinero disponible.
-        </p>
-      </article>
-
-      <article class="card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Ahorro recomendado</p>
-            <h2>${formatMoney(plan.suggestedPeriodSavings)}</h2>
-          </div>
-          <span class="metric-badge">Este periodo</span>
-        </div>
-        <p>Calculado con tu presupuesto, campos reservados, gastos comprometidos y tipo de ingreso.</p>
-        <div class="card-actions">
-          <button class="btn secondary" type="button" data-view="savings">Abrir simulador</button>
-        </div>
-      </article>
-
-      <article class="card wide-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Gastos por categoria</p>
-            <h2>Limites visibles</h2>
-          </div>
-          <button class="icon-btn" type="button" data-action="simulate-alert" aria-label="Simular alerta visual">!</button>
-        </div>
-        ${renderCategoryBars(plan, 6)}
-      </article>
-
-      <article class="card">
-        <p class="eyebrow">Pausa de 24 horas</p>
-        <h2>${state.cooldowns.length} compras pausadas</h2>
-        <div class="cooldown-list">
-          ${
-            state.cooldowns.length
-              ? state.cooldowns.map((cooldown) => renderCooldown(cooldown)).join("")
-              : `<div class="empty-state">Sin compras en pausa.</div>`
-          }
-        </div>
-      </article>
-
-      <article class="card wide-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Cuando te sales del plan</p>
-            <h2>Ajuste sin culpa</h2>
-          </div>
-          <span class="metric-badge">${overBudget.length} categorias excedidas</span>
-        </div>
-        <p class="reframe">
-          Una decision no define tu capacidad. ${overBudget.length ? "Reasigna lo que queda y protege el siguiente pago." : "Mantienes margen para decidir con calma."}
-        </p>
-        <div class="card-actions">
-          <button class="btn secondary" type="button" data-action="add-process-win">Guardar avance</button>
-        </div>
-      </article>
-
-      <article class="card">
-        <p class="eyebrow">Patron dominante</p>
-        <h2>${script.name}</h2>
-        <p>${script.guidance}</p>
-        <div class="micro-task">
-          <strong>Siguiente accion de 5 minutos</strong>
-          <span>${graduatedPresenceTask()}</span>
-        </div>
       </article>
     </section>
   `;
@@ -2411,10 +2366,9 @@ function bindEvents() {
     smartForm.addEventListener("submit", handleSmartSubmit);
   }
 
-  const cloudLoginForm = document.querySelector("#cloud-login-form");
-  if (cloudLoginForm) {
-    cloudLoginForm.addEventListener("submit", handleCloudLoginSubmit);
-  }
+  document.querySelectorAll("[data-cloud-auth-form]").forEach((form) => {
+    form.addEventListener("submit", handleCloudLoginSubmit);
+  });
 
   const historySort = document.querySelector("#transaction-history-sort");
   if (historySort) {
@@ -3558,7 +3512,7 @@ async function handleCloudLoginSubmit(event) {
   const data = new FormData(event.currentTarget);
   const email = cleanText(data.get("email"), "");
   const password = String(data.get("password") || "");
-  const mode = event.submitter?.dataset.cloudMode || "signin";
+  const mode = event.currentTarget.dataset.cloudMode || event.submitter?.dataset.cloudMode || "signin";
 
   cloudState.status = "syncing";
   cloudState.sessionReady = false;
