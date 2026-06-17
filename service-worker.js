@@ -1,15 +1,15 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CACHE_NAME = `${CACHE_PREFIX}20260617-pwa-refresh`;
+const CACHE_NAME = `${CACHE_PREFIX}20260617-home-minimal`;
 const APP_SHELL = [
   "./",
   "index.html",
-  "styles.css?v=20260617-pwa-refresh",
-  "app.js?v=20260617-pwa-refresh",
-  "finance-core.js?v=20260617-pwa-refresh",
-  "sync-client.js?v=20260617-pwa-refresh",
-  "sync-config.js?v=20260617-pwa-refresh",
-  "vendor/supabase-2.108.1.min.js?v=20260617-pwa-refresh",
-  "manifest.webmanifest?v=20260617-pwa-refresh",
+  "styles.css?v=20260617-home-minimal",
+  "app.js?v=20260617-home-minimal",
+  "finance-core.js?v=20260617-home-minimal",
+  "sync-client.js?v=20260617-home-minimal",
+  "sync-config.js?v=20260617-home-minimal",
+  "vendor/supabase-2.108.1.min.js?v=20260617-home-minimal",
+  "manifest.webmanifest?v=20260617-home-minimal",
   "assets/icon.svg",
   "assets/icon-192.png",
   "assets/icon-512.png",

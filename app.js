@@ -10,7 +10,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260617-pwa-refresh";
+} from "./finance-core.js?v=20260617-home-minimal";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -22,7 +22,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260617-pwa-refresh";
+} from "./sync-client.js?v=20260617-home-minimal";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -893,77 +893,10 @@ function renderView(plan) {
   return views[state.activeView](plan);
 }
 
-function getPrimaryAction(plan, unlabeled, checkinDone) {
-  if (!state.profile.completed) {
-    return {
-      title: "Pon tus datos reales",
-      copy: "La app esta usando un ejemplo. Con tu presupuesto y tus gastos cambia toda la recomendacion.",
-      badge: "Primer paso",
-      button: "Empezar",
-      action: "open-diagnosis"
-    };
-  }
-
-  if (unlabeled.length) {
-    return {
-      title: `Clasifica ${unlabeled.length} gastos pendientes`,
-      copy: "Cuando cada gasto tiene categoria, el dinero disponible se vuelve claro.",
-      badge: "Hoy",
-      button: "Clasificar",
-      view: "today"
-    };
-  }
-
-  if (!checkinDone) {
-    return {
-      title: "Cierra tu revision de hoy",
-      copy: "Ya no hay gastos pendientes. Guarda la revision para mantener tu racha.",
-      badge: "Listo",
-      button: "Terminar revision",
-      action: "complete-checkin"
-    };
-  }
-
-  if (plan.suggestedPeriodSavings > 0) {
-    return {
-      title: "Revisa tu recomendacion de ahorro",
-      copy: `El simulador sugiere apartar ${formatMoney(plan.suggestedPeriodSavings)} durante este periodo.`,
-      badge: "Ahorro",
-      button: "Abrir simulador",
-      view: "savings"
-    };
-  }
-
-  if (plan.savingsCapacityGap > 0) {
-    return {
-      title: "Ajusta el plan antes de ahorrar",
-      copy: `La meta ideal supera el dinero libre por ${formatMoney(plan.savingsCapacityGap)}.`,
-      badge: "Simulador",
-      button: "Ver recomendacion",
-      view: "savings"
-    };
-  }
-
-  return {
-    title: "Mantente al dia",
-    copy: "Registra el proximo gasto cuando ocurra y conserva tus limites visibles.",
-    badge: "Sin pendientes",
-    button: "Registrar gasto",
-    view: "spending"
-  };
-}
-
-function renderPrimaryActionButton(action) {
-  if (action.view) {
-    return `<button class="btn primary" type="button" data-view="${escapeAttr(action.view)}">${escapeHtml(action.button)}</button>`;
-  }
-  return `<button class="btn primary" type="button" data-action="${escapeAttr(action.action)}">${escapeHtml(action.button)}</button>`;
-}
-
 function renderToday(plan) {
   const visibleCategoryCount = Math.max(1, Math.min(6, state.budgetJobs.length + 1));
   const homeSummary = budgetSummary();
-  const homeSection = `
+  return `
     <section class="home-view" aria-label="Resumen del periodo">
       <div class="home-section-heading">
         <div>
@@ -987,59 +920,6 @@ function renderToday(plan) {
     </section>
   `;
 
-  const today = todayKey();
-  const unlabeled = state.transactions.filter((transaction) => !transaction.labeled);
-  const unlabeledToday = state.transactions.filter((transaction) => transaction.date === today && !transaction.labeled);
-  const checkinDone = state.checkins.includes(today);
-  const primaryAction = getPrimaryAction(plan, unlabeled, checkinDone);
-
-  return `
-    ${homeSection}
-    <section class="content-grid today-grid">
-      <article class="card focus-card wide-card">
-        <div class="focus-copy">
-          <p class="eyebrow">Ahora</p>
-          <h2>${primaryAction.title}</h2>
-          <p>${primaryAction.copy}</p>
-        </div>
-        <div class="focus-side">
-          <span class="metric-badge">${primaryAction.badge}</span>
-          ${renderPrimaryActionButton(primaryAction)}
-        </div>
-      </article>
-
-      <article class="card ritual-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Revision rapida</p>
-            <h2>Clasifica ${unlabeled.length} gastos</h2>
-          </div>
-          <span class="metric-badge">${checkinDone ? "Hecho hoy" : "Pendiente"}</span>
-        </div>
-        <div class="transaction-list">
-          ${
-            unlabeled.length
-              ? unlabeled
-                  .slice(0, 5)
-                  .map((transaction) => renderTransactionLabeler(transaction))
-                  .join("")
-              : `<div class="empty-state">No hay movimientos pendientes. Tu ancho de banda financiero esta despejado.</div>`
-          }
-        </div>
-        <div class="card-actions">
-          <button class="btn primary" type="button" data-action="complete-checkin" ${checkinDone ? "disabled" : ""}>
-            Terminar revision
-          </button>
-          <button class="btn ghost" type="button" data-view="spending">Registrar gasto</button>
-        </div>
-        ${
-          unlabeledToday.length
-            ? `<p class="helper-text">Quedan gastos de hoy sin categoria.</p>`
-            : `<p class="helper-text">Todo lo de hoy ya tiene categoria.</p>`
-        }
-      </article>
-    </section>
-  `;
 }
 
 function renderTransactionLabeler(transaction) {

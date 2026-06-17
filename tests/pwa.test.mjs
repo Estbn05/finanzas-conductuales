@@ -20,7 +20,7 @@ test("service worker caches the app shell and serves an offline navigation fallb
   assert.ok(worker.includes('CACHE_PREFIX = "finanzas-conductuales-"'));
   assert.ok(worker.includes("CACHE_NAME"));
   assert.ok(worker.includes("cache.addAll(APP_SHELL)"));
-  assert.ok(worker.includes('app.js?v=20260617-pwa-refresh'));
+  assert.ok(worker.includes('app.js?v=20260617-home-minimal'));
   assert.ok(worker.includes('request.mode === "navigate"'));
   assert.ok(worker.includes("fetch(request)"));
   assert.ok(worker.includes("caches.delete(key)"));
@@ -46,24 +46,23 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(app.includes('role="radio" aria-checked='));
   assert.ok(app.includes('const APP_VIEWS = new Set'));
   assert.ok(app.includes('APP_VIEWS.has(view)'));
-  assert.ok(app.includes('data-view="spending"'));
   assert.ok(app.includes('name="budgeted" type="checkbox" checked'));
   assert.ok(app.includes("money-location-chips"));
   assert.ok(app.includes("Cuenta"));
   assert.ok(app.includes("Efectivo"));
   assert.ok(app.includes("Total real"));
 
-  const todayView = app
-    .slice(app.indexOf("function renderToday"), app.indexOf("function renderTransactionLabeler"))
-    .split("const today = todayKey();")[0];
+  const todayView = app.slice(app.indexOf("function renderToday"), app.indexOf("function renderTransactionLabeler"));
   assert.ok(todayView.includes("Categorias del periodo"));
   assert.equal(todayView.includes("Movimientos del periodo"), false);
   assert.equal(todayView.includes("Fondo inicial"), false);
   assert.equal(todayView.includes("Pago recomendado"), false);
 
   const fullTodayView = app.slice(app.indexOf("function renderToday"), app.indexOf("function renderTransactionLabeler"));
-  assert.ok(fullTodayView.includes("Revision rapida"));
-  assert.ok(fullTodayView.includes("complete-checkin"));
+  assert.equal(fullTodayView.includes("Ahora"), false);
+  assert.equal(fullTodayView.includes("Revision rapida"), false);
+  assert.equal(fullTodayView.includes("complete-checkin"), false);
+  assert.equal(fullTodayView.includes("Clasifica"), false);
   assert.equal(fullTodayView.includes("Gasto del mes"), false);
   assert.equal(fullTodayView.includes("Fondo inicial"), false);
   assert.equal(fullTodayView.includes("Ahorro recomendado"), false);
@@ -244,16 +243,16 @@ test("static startup fallback retries automatically without manual controls", as
   assert.ok(html.includes("window.location.reload()"));
   assert.ok(html.includes("window.pwaCleanupReady"));
   assert.ok(html.includes("window.pwaCleanupReady = Promise.resolve()"));
-  assert.ok(html.includes('navigator.serviceWorker.register("service-worker.js?v=20260617-pwa-refresh")'));
+  assert.ok(html.includes('navigator.serviceWorker.register("service-worker.js?v=20260617-home-minimal")'));
   assert.ok(html.includes("registration.update().catch(() => {})"));
   assert.equal(html.includes("registration.unregister()"), false);
   assert.equal(html.includes("caches.delete(key)"), false);
   assert.ok(html.includes("Comprobando tu sesion"));
   assert.ok(html.includes("Estamos verificando automaticamente si ya tienes una sesion iniciada."));
-  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260617-pwa-refresh")'));
+  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260617-home-minimal")'));
   assert.ok(html.includes("window.setTimeout(finish, timeoutMs)"));
   assert.equal(html.includes("cdn.jsdelivr.net/npm/@supabase/supabase-js"), false);
-  assert.ok(html.includes('await import("./app.js?v=20260617-pwa-refresh")'));
+  assert.ok(html.includes('await import("./app.js?v=20260617-home-minimal")'));
   assert.equal(html.includes("Continuar al acceso"), false);
   assert.equal(html.includes("Recargar aplicacion"), false);
   assert.equal(html.includes('onclick="window.location.reload()"'), false);
