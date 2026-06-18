@@ -1,15 +1,15 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CACHE_NAME = `${CACHE_PREFIX}20260617-home-minimal`;
+const CACHE_NAME = `${CACHE_PREFIX}20260618-auth-buttons`;
 const APP_SHELL = [
   "./",
   "index.html",
-  "styles.css?v=20260617-home-minimal",
-  "app.js?v=20260617-home-minimal",
-  "finance-core.js?v=20260617-home-minimal",
-  "sync-client.js?v=20260617-home-minimal",
-  "sync-config.js?v=20260617-home-minimal",
-  "vendor/supabase-2.108.1.min.js?v=20260617-home-minimal",
-  "manifest.webmanifest?v=20260617-home-minimal",
+  "styles.css?v=20260618-auth-buttons",
+  "app.js?v=20260618-auth-buttons",
+  "finance-core.js?v=20260618-auth-buttons",
+  "sync-client.js?v=20260618-auth-buttons",
+  "sync-config.js?v=20260618-auth-buttons",
+  "vendor/supabase-2.108.1.min.js?v=20260618-auth-buttons",
+  "manifest.webmanifest?v=20260618-auth-buttons",
   "assets/icon.svg",
   "assets/icon-192.png",
   "assets/icon-512.png",

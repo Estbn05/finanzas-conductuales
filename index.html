@@ -13,15 +13,15 @@
       content="App personal de finanzas conductuales con monitoreo diario, presupuesto por periodos y simulador de ahorro."
     >
     <title>Finanzas Conductuales</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20260617-home-minimal">
+    <link rel="manifest" href="manifest.webmanifest?v=20260618-auth-buttons">
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="styles.css?v=20260617-home-minimal">
+    <link rel="stylesheet" href="styles.css?v=20260618-auth-buttons">
     <script>
       window.pwaCleanupReady = Promise.resolve();
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
-          navigator.serviceWorker.register("service-worker.js?v=20260617-home-minimal").then((registration) => {
+          navigator.serviceWorker.register("service-worker.js?v=20260618-auth-buttons").then((registration) => {
             registration.update().catch(() => {});
           }).catch(() => {});
         });
@@ -82,9 +82,9 @@
             document.body.append(script);
           });
 
-        await loadScript("sync-config.js?v=20260617-home-minimal");
-        await loadScript("vendor/supabase-2.108.1.min.js?v=20260617-home-minimal");
-        await import("./app.js?v=20260617-home-minimal");
+        await loadScript("sync-config.js?v=20260618-auth-buttons");
+        await loadScript("vendor/supabase-2.108.1.min.js?v=20260618-auth-buttons");
+        await import("./app.js?v=20260618-auth-buttons");
       });
     </script>
   </body>

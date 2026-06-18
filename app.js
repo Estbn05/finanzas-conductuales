@@ -10,7 +10,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260617-home-minimal";
+} from "./finance-core.js?v=20260618-auth-buttons";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -22,7 +22,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260617-home-minimal";
+} from "./sync-client.js?v=20260618-auth-buttons";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -60,6 +60,7 @@ if (quickExpenseOpen) {
 let applyingCloudState = false;
 let cloudSaveTimer;
 let authUnsubscribe = () => {};
+let authMode = "";
 let transactionHistorySort = "recent";
 let snackbar = null;
 let snackbarTimer;
@@ -749,6 +750,48 @@ function renderSessionCheck() {
 function renderAuthGate() {
   const submittingAccess = cloudState.status === "syncing" && !cloudState.sessionReady;
   const unavailable = !cloudState.configured || !cloudState.libraryLoaded;
+  const selectedAuthMode = ["signin", "signup"].includes(authMode) ? authMode : "";
+  const signInForm = `
+    <article class="auth-card">
+      <button class="auth-back" type="button" data-action="back-auth-options">Volver</button>
+      <div>
+        <p class="eyebrow">Ya tengo cuenta</p>
+        <h2>Iniciar sesion</h2>
+      </div>
+      <form class="stacked-form auth-form" id="cloud-signin-form" data-cloud-auth-form data-cloud-mode="signin">
+        <label>
+          Correo
+          <input name="email" type="email" autocomplete="email" placeholder="tu@email.com" required>
+        </label>
+        <label>
+          Contrasena
+          <input name="password" type="password" autocomplete="current-password" minlength="6" placeholder="Tu contrasena" required>
+        </label>
+        <button class="btn primary" type="submit" data-cloud-mode="signin" ${submittingAccess ? "disabled" : ""}>Iniciar sesion</button>
+      </form>
+    </article>
+  `;
+  const signUpForm = `
+    <article class="auth-card">
+      <button class="auth-back" type="button" data-action="back-auth-options">Volver</button>
+      <div>
+        <p class="eyebrow">Primera vez</p>
+        <h2>Crear cuenta</h2>
+      </div>
+      <p class="auth-form-note">Despues de registrarte configuras tu presupuesto y tus campos habituales.</p>
+      <form class="stacked-form auth-form" id="cloud-signup-form" data-cloud-auth-form data-cloud-mode="signup">
+        <label>
+          Correo
+          <input name="email" type="email" autocomplete="email" placeholder="tu@email.com" required>
+        </label>
+        <label>
+          Contrasena
+          <input name="password" type="password" autocomplete="new-password" minlength="6" placeholder="Minimo 6 caracteres" required>
+        </label>
+        <button class="btn secondary" type="submit" data-cloud-mode="signup" ${submittingAccess ? "disabled" : ""}>Registrarse</button>
+      </form>
+    </article>
+  `;
 
   return `
     <main class="auth-gate">
@@ -787,44 +830,20 @@ function renderAuthGate() {
                   <h2>Acceso no disponible</h2>
                   <p>La autenticacion no esta disponible. Revisa la configuracion de Supabase y vuelve a cargar la aplicacion.</p>
                 </article>`
-              : `
-                <article class="auth-card">
-                  <div>
-                    <p class="eyebrow">Ya tengo cuenta</p>
-                    <h2>Iniciar sesion</h2>
-                  </div>
-                  <form class="stacked-form auth-form" id="cloud-signin-form" data-cloud-auth-form data-cloud-mode="signin">
-                    <label>
-                      Correo
-                      <input name="email" type="email" autocomplete="email" placeholder="tu@email.com" required>
-                    </label>
-                    <label>
-                      Contrasena
-                      <input name="password" type="password" autocomplete="current-password" minlength="6" placeholder="Tu contrasena" required>
-                    </label>
-                    <button class="btn primary" type="submit" data-cloud-mode="signin" ${submittingAccess ? "disabled" : ""}>Iniciar sesion</button>
-                  </form>
-                </article>
-
-                <article class="auth-card">
-                  <div>
-                    <p class="eyebrow">Primera vez</p>
-                    <h2>Crear cuenta</h2>
-                  </div>
-                  <p class="auth-form-note">Despues de registrarte configuras tu presupuesto y tus campos habituales.</p>
-                  <form class="stacked-form auth-form" id="cloud-signup-form" data-cloud-auth-form data-cloud-mode="signup">
-                    <label>
-                      Correo
-                      <input name="email" type="email" autocomplete="email" placeholder="tu@email.com" required>
-                    </label>
-                    <label>
-                      Contrasena
-                      <input name="password" type="password" autocomplete="new-password" minlength="6" placeholder="Minimo 6 caracteres" required>
-                    </label>
-                    <button class="btn secondary" type="submit" data-cloud-mode="signup" ${submittingAccess ? "disabled" : ""}>Registrarse</button>
-                  </form>
-                </article>
-              `
+              : selectedAuthMode === "signin"
+                ? signInForm
+                : selectedAuthMode === "signup"
+                  ? signUpForm
+                  : `<article class="auth-card auth-choice-card">
+                      <div>
+                        <p class="eyebrow">Acceso</p>
+                        <h2>Elige como entrar</h2>
+                      </div>
+                      <div class="auth-choice-actions">
+                        <button class="btn primary" type="button" data-action="show-auth-form" data-auth-mode="signin">Iniciar sesion</button>
+                        <button class="btn secondary" type="button" data-action="show-auth-form" data-auth-mode="signup">Registrarse</button>
+                      </div>
+                    </article>`
           }
           ${cloudState.error ? `<p class="form-error auth-error" role="alert">${escapeHtml(cloudState.error)}</p>` : ""}
         </div>
@@ -2805,6 +2824,8 @@ function handleAction(event) {
     "close-menu",
     "open-expense",
     "close-expense",
+    "show-auth-form",
+    "back-auth-options",
     "open-category-sheet",
     "open-extra-sheet",
     "close-plan-sheet",
@@ -2830,6 +2851,13 @@ function handleAction(event) {
     },
     "open-expense": openQuickExpense,
     "close-expense": closeQuickExpense,
+    "show-auth-form": () => {
+      authMode = ["signin", "signup"].includes(event.currentTarget.dataset.authMode) ? event.currentTarget.dataset.authMode : "";
+    },
+    "back-auth-options": () => {
+      authMode = "";
+      cloudState.error = "";
+    },
     "open-category-sheet": () => {
       planSheet = "category";
       menuOpen = false;
@@ -3456,6 +3484,7 @@ function clearLocalUserState() {
   localStorage.removeItem(BACKUP_KEY);
   state = createDefaultState();
   state.activeView = DEFAULT_VIEW;
+  authMode = "";
   menuOpen = false;
   quickExpenseOpen = false;
   pendingExtraAllocation = null;

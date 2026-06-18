@@ -176,6 +176,20 @@ a {
   min-width: 0;
 }
 
+.auth-choice-actions {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-back {
+  justify-self: start;
+  border: 0;
+  padding: 0;
+  color: var(--teal);
+  background: transparent;
+  font-weight: 800;
+}
+
 .auth-card h2 {
   margin: 4px 0 0;
   font-size: 1.35rem;
