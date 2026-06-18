@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260618-ui-system-v4";
+const ASSET_VERSION = "20260618-ui-system-v5";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -90,7 +90,10 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(styles.includes(".bottom-nav"));
   assert.ok(styles.includes(".quick-expense-panel"));
   assert.ok(styles.includes("Design system v3"));
+  assert.ok(styles.includes("Mockup fidelity v5"));
+  assert.ok(styles.includes("color-scheme: light"));
   assert.ok(styles.includes("--ds-bg: #f6f1e7"));
+  assert.ok(styles.includes("--ds-bg: #f7f4ee"));
   assert.ok(styles.includes(":focus-visible"));
   assert.ok(styles.includes("@media (prefers-reduced-motion: reduce)"));
   assert.ok(styles.includes(".expense-impact-preview"));
