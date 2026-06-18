@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260618-visual-redesign";
+const ASSET_VERSION = "20260618-drawer-redesign";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -424,4 +424,19 @@ test("mockup system covers progressive plan, correction and special states", asy
   assert.ok(styles.includes(".connection-banner"));
   assert.ok(styles.includes("Visual redesign 2026"));
   assert.ok(styles.includes("--card-shadow"));
+});
+
+test("drawer visual system keeps menu contrast in mobile themes", async () => {
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  assert.ok(styles.includes("Visual redesign v2: stronger identity, fixed drawer contrast"));
+  assert.ok(styles.includes("--ledger-deep"));
+  assert.ok(styles.includes("--ledger-glow"));
+  assert.match(styles, /\.app-shell\.is-menu-open \.drawer-scrim\s*{[\s\S]*backdrop-filter: blur\(8px\)/);
+  assert.match(styles, /\.sidebar\s*{[\s\S]*linear-gradient\(180deg, #15231f 0%, #0b2c26 58%, #061f1b 100%\)/);
+  assert.match(styles, /\.brand strong\s*{[\s\S]*color: #fff7e8/);
+  assert.match(styles, /\.nav-item\s*{[\s\S]*color: rgba\(255, 247, 232, 0\.68\)/);
+  assert.match(styles, /\.nav-item:hover,[\s\S]*\.nav-item\.is-active\s*{[\s\S]*color: #fff7e8/);
+  assert.match(styles, /\.nav-item\.is-active \.nav-number\s*{[\s\S]*background: linear-gradient\(145deg, #7ee8c4, #47d6a6\)/);
+  assert.match(styles, /\.menu-tools \.btn\.ghost\s*{[\s\S]*color: rgba\(255, 247, 232, 0\.78\)/);
 });

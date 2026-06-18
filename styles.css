@@ -5072,3 +5072,270 @@ body {
     background: rgba(255, 255, 255, 0.05);
   }
 }
+
+/* Visual redesign v2: stronger identity, fixed drawer contrast */
+:root {
+  --ledger-ink: #15231f;
+  --ledger-deep: #061f1b;
+  --ledger-green: #0f8f70;
+  --ledger-glow: #47d6a6;
+  --ledger-gold: #e4b658;
+  --ledger-cream: #fff7e8;
+  --ledger-line: rgba(95, 70, 35, 0.15);
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(115deg, rgba(17, 122, 103, 0.08) 0 1px, transparent 1px 26px),
+    linear-gradient(0deg, rgba(100, 75, 38, 0.05) 0 1px, transparent 1px 34px);
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0.08));
+  content: "";
+}
+
+.app-shell.is-menu-open .drawer-scrim {
+  background:
+    linear-gradient(90deg, rgba(5, 13, 11, 0.72), rgba(5, 13, 11, 0.34)),
+    rgba(5, 13, 11, 0.62);
+  backdrop-filter: blur(8px);
+}
+
+.sidebar {
+  overflow: hidden;
+  color: rgba(255, 247, 232, 0.86);
+  background:
+    radial-gradient(circle at 16% 10%, rgba(71, 214, 166, 0.26), transparent 28%),
+    radial-gradient(circle at 96% 22%, rgba(228, 182, 88, 0.16), transparent 28%),
+    linear-gradient(180deg, #15231f 0%, #0b2c26 58%, #061f1b 100%);
+  border-right: 1px solid rgba(255, 247, 232, 0.12);
+  box-shadow: 24px 0 54px rgba(3, 12, 10, 0.42);
+}
+
+.sidebar::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(120deg, rgba(255, 247, 232, 0.055) 0 1px, transparent 1px 34px),
+    radial-gradient(circle at 18% 92%, rgba(71, 214, 166, 0.16), transparent 26%);
+  content: "";
+}
+
+.sidebar > * {
+  position: relative;
+  z-index: 1;
+}
+
+.sidebar-head {
+  border-bottom-color: rgba(255, 247, 232, 0.12);
+}
+
+.brand-mark {
+  border: 1px solid rgba(255, 247, 232, 0.28);
+  color: rgba(255, 247, 232, 0.96);
+  background:
+    radial-gradient(circle at 30% 24%, rgba(255, 247, 232, 0.34), transparent 24%),
+    linear-gradient(145deg, #38cca0 0%, #0f8f70 48%, #06483f 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 14px 30px rgba(0, 0, 0, 0.24);
+}
+
+.brand strong {
+  color: #fff7e8;
+}
+
+.brand small {
+  color: rgba(255, 247, 232, 0.66);
+}
+
+.drawer-close {
+  border-color: rgba(255, 247, 232, 0.16);
+  color: rgba(255, 247, 232, 0.72);
+  background: rgba(255, 247, 232, 0.06);
+}
+
+.drawer-close:hover {
+  color: #fff7e8;
+  background: rgba(255, 247, 232, 0.12);
+}
+
+.nav-list {
+  gap: 8px;
+  padding-top: 16px;
+}
+
+.nav-item {
+  min-height: 56px;
+  border: 1px solid transparent;
+  border-radius: 18px;
+  color: rgba(255, 247, 232, 0.68);
+  background: transparent;
+  font-size: 0.95rem;
+}
+
+.nav-item span:last-child {
+  color: inherit;
+}
+
+.nav-number {
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(255, 247, 232, 0.12);
+  border-radius: 13px;
+  color: var(--ledger-glow);
+  background: rgba(71, 214, 166, 0.11);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.nav-item:hover,
+.nav-item.is-active {
+  border-color: rgba(71, 214, 166, 0.2);
+  color: #fff7e8;
+  background:
+    linear-gradient(90deg, rgba(71, 214, 166, 0.16), rgba(255, 247, 232, 0.045));
+  box-shadow: inset 3px 0 0 var(--ledger-glow);
+}
+
+.nav-item.is-active .nav-number {
+  color: #05241f;
+  background: linear-gradient(145deg, #7ee8c4, #47d6a6);
+}
+
+.nav-item.is-primary {
+  border-color: rgba(71, 214, 166, 0.3);
+  color: #05241f;
+  background:
+    radial-gradient(circle at 16% 20%, rgba(255, 255, 255, 0.38), transparent 22%),
+    linear-gradient(135deg, #75e4bd, #0f8f70);
+  box-shadow: 0 14px 28px rgba(15, 143, 112, 0.26);
+}
+
+.nav-item.is-primary .nav-number {
+  color: #05241f;
+  background: rgba(255, 247, 232, 0.44);
+}
+
+.menu-tools {
+  margin-top: auto;
+  gap: 10px;
+}
+
+.menu-tools .btn {
+  min-height: 54px;
+  border-radius: 20px;
+}
+
+.menu-tools .btn.primary {
+  color: #06231e;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.36), transparent 24%),
+    linear-gradient(135deg, #6fe1bb, #0f8f70 70%);
+  box-shadow: 0 16px 34px rgba(15, 143, 112, 0.28);
+}
+
+.menu-tools .btn.ghost {
+  border-color: rgba(255, 247, 232, 0.12);
+  color: rgba(255, 247, 232, 0.78);
+  background: rgba(255, 247, 232, 0.07);
+}
+
+.menu-notice {
+  border-color: rgba(228, 182, 88, 0.22);
+  color: rgba(255, 247, 232, 0.84);
+  background: rgba(228, 182, 88, 0.1);
+}
+
+.money-bar,
+.savings-hero,
+.plan-action:first-child {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.money-bar::before,
+.savings-hero::before,
+.plan-action:first-child::before {
+  position: absolute;
+  pointer-events: none;
+  content: "";
+}
+
+.money-bar::before {
+  inset: 14px 16px auto auto;
+  width: 92px;
+  height: 92px;
+  border: 1px solid rgba(255, 247, 232, 0.12);
+  border-radius: 32px;
+  transform: rotate(18deg);
+}
+
+.plan-category-card,
+.category-row,
+.calendar-summary-grid article,
+.data-section,
+.movements-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.plan-category-card::before,
+.category-row::before,
+.calendar-summary-grid article::before,
+.data-section::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, var(--ledger-green), rgba(228, 182, 88, 0.58));
+  content: "";
+}
+
+.screen-title-row h1,
+.home-section-heading h2 {
+  font-weight: 800;
+}
+
+.bottom-nav {
+  background:
+    linear-gradient(180deg, rgba(255, 247, 232, 0.9), rgba(246, 235, 215, 0.94));
+}
+
+.bottom-nav-item.is-active {
+  color: var(--ledger-green);
+}
+
+.bottom-nav-item.is-active .bottom-nav-icon {
+  color: #05241f;
+  background: linear-gradient(145deg, #d9f5ea, #aee9d4);
+}
+
+@media (prefers-color-scheme: dark) {
+  .sidebar,
+  .brand strong,
+  .nav-item,
+  .nav-item span:last-child {
+    color: rgba(255, 247, 232, 0.82);
+  }
+
+  .brand small {
+    color: rgba(255, 247, 232, 0.66);
+  }
+
+  .nav-item:hover,
+  .nav-item.is-active {
+    color: #fff7e8;
+  }
+
+  .menu-tools .btn.primary {
+    color: #06231e;
+  }
+
+  .bottom-nav {
+    background:
+      linear-gradient(180deg, rgba(17, 28, 24, 0.8), rgba(9, 17, 14, 0.92));
+  }
+}
