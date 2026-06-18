@@ -1,15 +1,15 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CACHE_NAME = `${CACHE_PREFIX}20260618-ui-system-v3`;
+const CACHE_NAME = `${CACHE_PREFIX}20260618-ui-system-v4`;
 const APP_SHELL = [
   "./",
   "index.html",
-  "styles.css?v=20260618-ui-system-v3",
-  "app.js?v=20260618-ui-system-v3",
-  "finance-core.js?v=20260618-ui-system-v3",
-  "sync-client.js?v=20260618-ui-system-v3",
-  "sync-config.js?v=20260618-ui-system-v3",
-  "vendor/supabase-2.108.1.min.js?v=20260618-ui-system-v3",
-  "manifest.webmanifest?v=20260618-ui-system-v3",
+  "styles.css?v=20260618-ui-system-v4",
+  "app.js?v=20260618-ui-system-v4",
+  "finance-core.js?v=20260618-ui-system-v4",
+  "sync-client.js?v=20260618-ui-system-v4",
+  "sync-config.js?v=20260618-ui-system-v4",
+  "vendor/supabase-2.108.1.min.js?v=20260618-ui-system-v4",
+  "manifest.webmanifest?v=20260618-ui-system-v4",
   "assets/icon.svg",
   "assets/icon-192.png",
   "assets/icon-512.png",
@@ -23,6 +23,12 @@ self.addEventListener("install", (event) => {
       .then((cache) => cache.addAll(APP_SHELL))
       .then(() => self.skipWaiting())
   );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener("notificationclick", (event) => {

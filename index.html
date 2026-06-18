@@ -13,19 +13,69 @@
       content="App personal de finanzas conductuales con monitoreo diario, presupuesto por periodos y simulador de ahorro."
     >
     <title>Finanzas Conductuales</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20260618-ui-system-v3">
+    <link rel="manifest" href="manifest.webmanifest?v=20260618-ui-system-v4">
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="styles.css?v=20260618-ui-system-v3">
+    <link rel="stylesheet" href="styles.css?v=20260618-ui-system-v4">
     <script>
-      window.pwaCleanupReady = Promise.resolve();
-      if ("serviceWorker" in navigator) {
-        window.addEventListener("load", () => {
-          navigator.serviceWorker.register("service-worker.js?v=20260618-ui-system-v3").then((registration) => {
-            registration.update().catch(() => {});
-          }).catch(() => {});
-        });
-      }
+      const APP_VERSION = "20260618-ui-system-v4";
+      const APP_CACHE_NAME = `finanzas-conductuales-${APP_VERSION}`;
+      const hadServiceWorkerController = Boolean(navigator.serviceWorker?.controller);
+
+      window.pwaCleanupReady = (async () => {
+        if ("caches" in window) {
+          try {
+            const keys = await caches.keys();
+            await Promise.all(
+              keys
+                .filter((key) => key.startsWith("finanzas-conductuales-") && key !== APP_CACHE_NAME)
+                .map((key) => caches.delete(key))
+            );
+          } catch {}
+        }
+
+        if ("serviceWorker" in navigator) {
+          let refreshingForUpdate = false;
+          navigator.serviceWorker.addEventListener("controllerchange", () => {
+            if (!hadServiceWorkerController || refreshingForUpdate) {
+              return;
+            }
+            refreshingForUpdate = true;
+            try {
+              const reloadKey = `finanzas-reloaded-${APP_VERSION}`;
+              if (sessionStorage.getItem(reloadKey) !== "done") {
+                sessionStorage.setItem(reloadKey, "done");
+                window.location.reload();
+              }
+            } catch {
+              window.location.reload();
+            }
+          });
+
+          window.addEventListener("load", () => {
+            navigator.serviceWorker.register(`service-worker.js?v=${APP_VERSION}`).then((registration) => {
+              const activateWaitingWorker = () => {
+                if (registration.waiting) {
+                  registration.waiting.postMessage({ type: "SKIP_WAITING" });
+                }
+              };
+              activateWaitingWorker();
+              registration.addEventListener("updatefound", () => {
+                const worker = registration.installing;
+                if (!worker) {
+                  return;
+                }
+                worker.addEventListener("statechange", () => {
+                  if (worker.state === "installed") {
+                    worker.postMessage({ type: "SKIP_WAITING" });
+                  }
+                });
+              });
+              registration.update().catch(() => {});
+            }).catch(() => {});
+          });
+        }
+      })();
     </script>
   </head>
   <body>
@@ -82,9 +132,9 @@
             document.body.append(script);
           });
 
-        await loadScript("sync-config.js?v=20260618-ui-system-v3");
-        await loadScript("vendor/supabase-2.108.1.min.js?v=20260618-ui-system-v3");
-        await import("./app.js?v=20260618-ui-system-v3");
+        await loadScript(`sync-config.js?v=${APP_VERSION}`);
+        await loadScript(`vendor/supabase-2.108.1.min.js?v=${APP_VERSION}`);
+        await import(`./app.js?v=${APP_VERSION}`);
       });
     </script>
   </body>

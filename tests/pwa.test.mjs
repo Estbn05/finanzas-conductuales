@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260618-ui-system-v3";
+const ASSET_VERSION = "20260618-ui-system-v4";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -28,6 +28,9 @@ test("service worker caches the app shell and serves an offline navigation fallb
   assert.ok(worker.includes("fetch(request)"));
   assert.ok(worker.includes("caches.delete(key)"));
   assert.ok(worker.includes("self.clients.claim()"));
+  assert.ok(worker.includes('addEventListener("message"'));
+  assert.ok(worker.includes('"SKIP_WAITING"'));
+  assert.ok(worker.includes("self.skipWaiting()"));
   assert.ok(worker.includes("addEventListener(\"fetch\""));
   assert.ok(worker.includes('request.mode === "navigate"'));
   assert.equal(worker.includes("self.registration.unregister()"), false);
@@ -267,17 +270,21 @@ test("static startup fallback retries automatically without manual controls", as
   assert.ok(html.includes('const retryKey = "finanzas-startup-retry"'));
   assert.ok(html.includes("window.location.reload()"));
   assert.ok(html.includes("window.pwaCleanupReady"));
-  assert.ok(html.includes("window.pwaCleanupReady = Promise.resolve()"));
-  assert.ok(html.includes(`navigator.serviceWorker.register("service-worker.js?v=${ASSET_VERSION}")`));
+  assert.ok(html.includes(`const APP_VERSION = "${ASSET_VERSION}"`));
+  assert.ok(html.includes("const APP_CACHE_NAME"));
+  assert.ok(html.includes("caches.keys()"));
+  assert.ok(html.includes("controllerchange"));
+  assert.ok(html.includes('"SKIP_WAITING"'));
+  assert.ok(html.includes("service-worker.js?v=${APP_VERSION}"));
   assert.ok(html.includes("registration.update().catch(() => {})"));
   assert.equal(html.includes("registration.unregister()"), false);
-  assert.equal(html.includes("caches.delete(key)"), false);
+  assert.ok(html.includes("caches.delete(key)"));
   assert.ok(html.includes("Comprobando tu sesion"));
   assert.ok(html.includes("Estamos verificando automaticamente si ya tienes una sesion iniciada."));
-  assert.ok(html.includes(`loadScript("vendor/supabase-2.108.1.min.js?v=${ASSET_VERSION}")`));
+  assert.ok(html.includes("loadScript(`vendor/supabase-2.108.1.min.js?v=${APP_VERSION}`)"));
   assert.ok(html.includes("window.setTimeout(finish, timeoutMs)"));
   assert.equal(html.includes("cdn.jsdelivr.net/npm/@supabase/supabase-js"), false);
-  assert.ok(html.includes(`await import("./app.js?v=${ASSET_VERSION}")`));
+  assert.ok(html.includes("await import(`./app.js?v=${APP_VERSION}`)"));
   assert.equal(html.includes("Continuar al acceso"), false);
   assert.equal(html.includes("Recargar aplicacion"), false);
   assert.equal(html.includes('onclick="window.location.reload()"'), false);
