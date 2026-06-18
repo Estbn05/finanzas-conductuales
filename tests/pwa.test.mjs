@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+const ASSET_VERSION = "20260618-calendar-reminder";
+
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
   const iconSizes = manifest.icons.map((icon) => icon.sizes);
@@ -20,7 +22,8 @@ test("service worker caches the app shell and serves an offline navigation fallb
   assert.ok(worker.includes('CACHE_PREFIX = "finanzas-conductuales-"'));
   assert.ok(worker.includes("CACHE_NAME"));
   assert.ok(worker.includes("cache.addAll(APP_SHELL)"));
-  assert.ok(worker.includes('app.js?v=20260618-auth-buttons'));
+  assert.ok(worker.includes(`app.js?v=${ASSET_VERSION}`));
+  assert.ok(worker.includes('addEventListener("notificationclick"'));
   assert.ok(worker.includes('request.mode === "navigate"'));
   assert.ok(worker.includes("fetch(request)"));
   assert.ok(worker.includes("caches.delete(key)"));
@@ -37,7 +40,8 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.match(app, /const DEFAULT_VIEW = "today"/);
   assert.ok(app.includes('class="bottom-nav"'));
   assert.ok(app.includes('class="drawer-scrim"'));
-  assert.ok(app.includes('{ id: "movements", label: "Movimientos", icon: "04" }'));
+  assert.ok(app.includes('{ id: "calendar", label: "Calendario", icon: "04" }'));
+  assert.ok(app.includes('{ id: "movements", label: "Movimientos", icon: "05" }'));
   assert.ok(app.includes('data-action="open-expense"'));
   assert.ok(app.includes('data-action="close-expense"'));
   assert.ok(app.includes('class="quick-expense-panel"'));
@@ -71,7 +75,7 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.equal(fullTodayView.includes("Ajuste sin culpa"), false);
   assert.equal(fullTodayView.includes("Patron dominante"), false);
 
-  assert.ok(app.includes('renderIcon("receipt")'));
+  assert.ok(app.includes('renderIcon("calendar")'));
   assert.ok(app.includes('class="bottom-nav-icon plus-icon"'));
   assert.ok(app.includes('renderIcon(normalizeLocation(transaction.source) === "cash" ? "cash" : "account")'));
   assert.ok(styles.includes(".bottom-nav"));
@@ -253,16 +257,16 @@ test("static startup fallback retries automatically without manual controls", as
   assert.ok(html.includes("window.location.reload()"));
   assert.ok(html.includes("window.pwaCleanupReady"));
   assert.ok(html.includes("window.pwaCleanupReady = Promise.resolve()"));
-  assert.ok(html.includes('navigator.serviceWorker.register("service-worker.js?v=20260618-auth-buttons")'));
+  assert.ok(html.includes(`navigator.serviceWorker.register("service-worker.js?v=${ASSET_VERSION}")`));
   assert.ok(html.includes("registration.update().catch(() => {})"));
   assert.equal(html.includes("registration.unregister()"), false);
   assert.equal(html.includes("caches.delete(key)"), false);
   assert.ok(html.includes("Comprobando tu sesion"));
   assert.ok(html.includes("Estamos verificando automaticamente si ya tienes una sesion iniciada."));
-  assert.ok(html.includes('loadScript("vendor/supabase-2.108.1.min.js?v=20260618-auth-buttons")'));
+  assert.ok(html.includes(`loadScript("vendor/supabase-2.108.1.min.js?v=${ASSET_VERSION}")`));
   assert.ok(html.includes("window.setTimeout(finish, timeoutMs)"));
   assert.equal(html.includes("cdn.jsdelivr.net/npm/@supabase/supabase-js"), false);
-  assert.ok(html.includes('await import("./app.js?v=20260618-auth-buttons")'));
+  assert.ok(html.includes(`await import("./app.js?v=${ASSET_VERSION}")`));
   assert.equal(html.includes("Continuar al acceso"), false);
   assert.equal(html.includes("Recargar aplicacion"), false);
   assert.equal(html.includes('onclick="window.location.reload()"'), false);

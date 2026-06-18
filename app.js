@@ -10,7 +10,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260618-auth-buttons";
+} from "./finance-core.js?v=20260618-calendar-reminder";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -22,13 +22,14 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260618-auth-buttons";
+} from "./sync-client.js?v=20260618-calendar-reminder";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
 const DEFAULT_VIEW = "today";
 const QUICK_EXPENSE_HASH = "registrar-gasto";
 const AUTH_STARTUP_TIMEOUT_MS = 25_000;
+const DEFAULT_REMINDER_TIME = "20:00";
 const STUDENT_SEMESTER_INCOME = 1_750_000;
 const STUDENT_SEMESTER_MONTHS = 6;
 const STUDENT_WEEKLY_GAS = 30_000;
@@ -44,8 +45,9 @@ const NAV_ITEMS = [
   { id: "today", label: "Inicio", icon: "01" },
   { id: "budget", label: "Plan", icon: "02" },
   { id: "savings", label: "Ahorro", icon: "03" },
-  { id: "movements", label: "Movimientos", icon: "04" },
-  { id: "profile", label: "Datos", icon: "05" }
+  { id: "calendar", label: "Calendario", icon: "04" },
+  { id: "movements", label: "Movimientos", icon: "05" },
+  { id: "profile", label: "Datos", icon: "06" }
 ];
 const APP_VIEWS = new Set([...NAV_ITEMS.map((item) => item.id), "spending"]);
 
@@ -69,6 +71,7 @@ let planSheet = "";
 let pendingJobRemovalId = "";
 let editingTransactionId = "";
 let editingExtraId = "";
+let expenseDraft = null;
 let diagnosisValidation = { field: "", message: "" };
 let cloudState = {
   configured: isCloudConfigured(),
@@ -79,10 +82,12 @@ let cloudState = {
   signedIn: false,
   status: isCloudConfigured() ? "checking" : "local"
 };
+let dailyReminderTimer;
 
 render();
 window.setTimeout(recoverAuthStartup, AUTH_STARTUP_TIMEOUT_MS);
 initializeCloudSync();
+scheduleDailyReminder();
 window.addEventListener("hashchange", () => {
   const nextView = viewFromHash(state.activeView || DEFAULT_VIEW);
   let shouldRender = false;
@@ -154,6 +159,13 @@ function createDefaultState() {
       updated_at: now
     },
     budgetExtras: [],
+    calendarEvents: [],
+    dailyReminder: {
+      enabled: false,
+      time: DEFAULT_REMINDER_TIME,
+      lastShownDate: "",
+      updated_at: now
+    },
     liquidity: {
       account: 0,
       cash: 0,
@@ -197,6 +209,8 @@ function migrateState(savedState) {
     },
     transactions: normalizeTransactions(savedState.transactions || defaults.transactions),
     budgetExtras: normalizeBudgetExtras(savedState.budgetExtras || defaults.budgetExtras),
+    calendarEvents: normalizeCalendarEvents(savedState.calendarEvents || defaults.calendarEvents),
+    dailyReminder: normalizeDailyReminder(savedState.dailyReminder || defaults.dailyReminder),
     liquidity: normalizeLiquidity(savedState.liquidity || defaults.liquidity),
     cooldowns: savedState.cooldowns || defaults.cooldowns,
     checkins: savedState.checkins || defaults.checkins,
@@ -225,6 +239,7 @@ function saveState(options = {}) {
   }
   state.meta.cloudUserEmail = cloudState.email || state.meta?.cloudUserEmail || "";
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  scheduleDailyReminder();
   if (sync && !applyingCloudState) {
     scheduleCloudSave();
   }
@@ -499,6 +514,8 @@ function hasMeaningfulLocalData(payload) {
       payload?.liquidity?.initialized ||
       payload?.transactions?.length ||
       payload?.budgetExtras?.length ||
+      payload?.calendarEvents?.length ||
+      payload?.dailyReminder?.enabled ||
       payload?.budgetJobs?.length ||
       payload?.wins?.length
   );
@@ -578,6 +595,7 @@ function seedQuickExpenseBackEntry() {
 
 function closeQuickExpense() {
   quickExpenseOpen = false;
+  expenseDraft = null;
   if (isQuickExpenseLocation()) {
     window.history.back();
   }
@@ -690,11 +708,11 @@ function renderBottomNavigation() {
         <span class="bottom-nav-icon plus-icon" aria-hidden="true">${renderIcon("plus")}</span>
         <span>Registrar</span>
       </button>
-      <button class="bottom-nav-item ${state.activeView === "movements" ? "is-active" : ""}" type="button" data-view="movements">
-        <span class="bottom-nav-icon" aria-hidden="true">${renderIcon("receipt")}</span>
-        <span>Movimientos</span>
+      <button class="bottom-nav-item ${state.activeView === "calendar" ? "is-active" : ""}" type="button" data-view="calendar">
+        <span class="bottom-nav-icon" aria-hidden="true">${renderIcon("calendar")}</span>
+        <span>Calendario</span>
       </button>
-      <button class="bottom-nav-item ${["savings", "profile"].includes(state.activeView) ? "is-active" : ""}" type="button" data-action="toggle-menu">
+      <button class="bottom-nav-item ${["savings", "movements", "profile"].includes(state.activeView) ? "is-active" : ""}" type="button" data-action="toggle-menu">
         <span class="bottom-nav-icon" aria-hidden="true">${renderIcon("menu")}</span>
         <span>Menu</span>
       </button>
@@ -707,6 +725,7 @@ function renderIcon(name) {
     home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/>',
     plan: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 15v2M12 11v6M16 8v9"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
+    calendar: '<rect x="4" y="5" width="16" height="15" rx="3"/><path d="M8 3v4M16 3v4M4 10h16"/><path d="M8 14h2M12 14h2M16 14h1M8 17h2M12 17h2"/>',
     receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6M9 16h4"/>',
     menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
     account: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 9h18M7 15h3"/>',
@@ -905,6 +924,7 @@ function renderView(plan) {
     today: renderToday,
     budget: renderBudget,
     savings: renderSavings,
+    calendar: renderCalendar,
     spending: renderSpending,
     movements: renderMovements,
     profile: renderProfile
@@ -1252,8 +1272,171 @@ function renderSavings(plan) {
   `;
 }
 
+function renderCalendar() {
+  const events = calendarEventsSorted();
+  const upcomingEvents = events.filter((event) => event.date >= todayKey() && !event.spent);
+  const nextEvent = upcomingEvents[0] || null;
+  const nextThirtyTotal = calendarEstimateForDays(30);
+  const reminder = normalizeDailyReminder(state.dailyReminder);
+  const permission = notificationPermissionStatus();
+  const reminderState = reminder.enabled ? "Activo" : "Apagado";
+
+  return `
+    <section class="screen-view calendar-view" aria-label="Calendario financiero">
+      <div class="screen-title-row">
+        <div>
+          <p class="eyebrow">Planes reales</p>
+          <h1>Calendario financiero</h1>
+        </div>
+        <span class="period-chip">${events.length} ${events.length === 1 ? "evento" : "eventos"}</span>
+      </div>
+
+      <div class="calendar-summary-grid">
+        <article>
+          <span>Proximos 30 dias</span>
+          <strong>${formatMoney(nextThirtyTotal)}</strong>
+        </article>
+        <article>
+          <span>Siguiente plan</span>
+          <strong>${nextEvent ? formatShortDate(nextEvent.date) : "Sin fecha"}</strong>
+        </article>
+        <article>
+          <span>Recordatorio</span>
+          <strong>${reminderState} ${reminder.enabled ? reminder.time : ""}</strong>
+        </article>
+      </div>
+
+      <article class="calendar-panel reminder-panel">
+        <div class="calendar-panel-heading">
+          <div>
+            <p class="eyebrow">Revision diaria</p>
+            <h2>Recordatorio de gastos</h2>
+          </div>
+          <span class="metric-badge ${permission === "granted" ? "under" : permission === "denied" ? "danger" : ""}">${notificationStatusLabel(permission)}</span>
+        </div>
+        <form class="calendar-reminder-form" id="daily-reminder-form">
+          <label class="toggle-row">
+            <input name="enabled" type="checkbox" ${reminder.enabled ? "checked" : ""}>
+            <span>
+              <strong>Preguntar cada dia</strong>
+              <small>Mensaje: "Quieres registrar tus gastos de hoy?"</small>
+            </span>
+          </label>
+          <label>
+            Hora
+            <input name="time" type="time" value="${escapeAttr(reminder.time)}" required>
+          </label>
+          <button class="btn primary" type="submit">Guardar recordatorio</button>
+        </form>
+        <div class="reminder-actions">
+          <button class="btn secondary" type="button" data-action="request-reminder-permission" ${permission === "granted" ? "disabled" : ""}>Permitir notificaciones</button>
+          <button class="btn ghost" type="button" data-action="send-test-reminder" ${permission === "granted" ? "" : "disabled"}>Probar</button>
+        </div>
+        <p class="data-note">${reminderSupportNote(permission)}</p>
+      </article>
+
+      <article class="calendar-panel">
+        <div class="calendar-panel-heading">
+          <div>
+            <p class="eyebrow">Nuevo plan</p>
+            <h2>Guardar evento financiero</h2>
+          </div>
+        </div>
+        <form class="financial-event-form" id="financial-event-form">
+          <label>
+            Evento
+            <input name="title" type="text" maxlength="48" placeholder="Ej. Regalo para la novia" required>
+          </label>
+          <label>
+            Fecha
+            <input name="date" type="date" value="${todayKey()}" required>
+          </label>
+          <label>
+            Estimado
+            <input name="amount" type="number" min="0" step="1000" inputmode="numeric" placeholder="$0" required>
+          </label>
+          <label>
+            Categoria
+            <select name="category">
+              ${renderCategoryOptions(FREE_CATEGORY_ID)}
+            </select>
+          </label>
+          <label class="event-notes-field">
+            Nota opcional
+            <input name="notes" type="text" maxlength="90" placeholder="Ej. Comprar antes del viernes">
+          </label>
+          <button class="btn primary" type="submit">Agregar al calendario</button>
+        </form>
+      </article>
+
+      <div class="section-heading">
+        <h2>Eventos guardados</h2>
+        <span>${formatMoney(events.reduce((sum, event) => sum + Number(event.amount || 0), 0))} estimados</span>
+      </div>
+      ${renderFinancialEvents(events)}
+    </section>
+  `;
+}
+
+function renderFinancialEvents(events) {
+  if (!events.length) {
+    return `<div class="empty-state actionable-empty">
+      <span class="empty-icon" aria-hidden="true">+</span>
+      <strong>Aun no hay planes con dinero</strong>
+      <span>Guarda fechas que suelen traer gastos: regalos, viajes, aniversarios o planes especiales.</span>
+    </div>`;
+  }
+
+  return `
+    <div class="financial-event-list">
+      ${events.map((event) => renderFinancialEvent(event)).join("")}
+    </div>
+  `;
+}
+
+function renderFinancialEvent(event) {
+  const isPast = event.date < todayKey() && !event.spent;
+  const category = event.category && event.category !== FREE_CATEGORY_ID ? categoryName(event.category) : "Libre / sin clasificar";
+  return `
+    <article class="financial-event-card ${event.spent ? "is-spent" : ""} ${isPast ? "is-past" : ""}">
+      <div class="event-date-box">
+        <span>${eventMonthLabel(event.date)}</span>
+        <strong>${eventDayLabel(event.date)}</strong>
+      </div>
+      <div class="event-copy">
+        <div class="event-title-line">
+          <strong>${escapeHtml(event.title)}</strong>
+          <span>${event.spent ? "Registrado" : isPast ? "Pendiente" : "Planeado"}</span>
+        </div>
+        <small>${escapeHtml(category)}${event.notes ? ` &middot; ${escapeHtml(event.notes)}` : ""}</small>
+      </div>
+      <div class="event-amount">
+        <strong>${formatMoney(event.amount)}</strong>
+        <small>${formatRelativeEventDate(event.date)}</small>
+      </div>
+      <div class="event-actions">
+        ${
+          event.spent
+            ? `<button class="btn ghost" type="button" data-action="reopen-calendar-event" data-id="${escapeAttr(event.id)}">Reabrir</button>`
+            : `<button class="btn secondary" type="button" data-action="register-calendar-event" data-id="${escapeAttr(event.id)}">Registrar gasto</button>`
+        }
+        <button class="icon-btn muted" type="button" data-action="remove-calendar-event" data-id="${escapeAttr(event.id)}" aria-label="Eliminar ${escapeAttr(event.title)}">x</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderCategoryOptions(selected = FREE_CATEGORY_ID) {
+  return [
+    `<option value="${FREE_CATEGORY_ID}" ${selected === FREE_CATEGORY_ID ? "selected" : ""}>Libre / sin clasificar</option>`,
+    ...state.budgetJobs.map((job) => `<option value="${escapeAttr(job.id)}" ${selected === job.id ? "selected" : ""}>${escapeHtml(job.name)}</option>`)
+  ].join("");
+}
+
 function renderQuickExpensePanel() {
   const summary = budgetSummary();
+  const draft = expenseDraft || {};
+  const selectedCategory = categoryChoiceOptions().some((option) => option.value === draft.category) ? draft.category : FREE_CATEGORY_ID;
   return `
     <div class="quick-expense-backdrop" role="presentation">
       <section class="quick-expense-panel" role="dialog" aria-modal="true" aria-labelledby="quick-expense-title">
@@ -1266,17 +1449,18 @@ function renderQuickExpensePanel() {
           <span class="metric-badge">Libre ${formatMoney(summary.freeRemaining)}</span>
         </div>
         <form class="quick-expense-form" id="transaction-form">
+          ${draft.calendarEventId ? `<input name="calendarEventId" type="hidden" value="${escapeAttr(draft.calendarEventId)}">` : ""}
           <label>
             Comercio
-            <input name="merchant" type="text" maxlength="42" placeholder="Ej. Tienda, Terpel" required>
+            <input name="merchant" type="text" maxlength="42" placeholder="Ej. Tienda, Terpel" value="${escapeAttr(draft.merchant || "")}" required>
           </label>
           <label>
             Descripcion opcional
-            <input name="description" type="text" maxlength="90" placeholder="Ej. Tanqueada, regalo, almuerzo">
+            <input name="description" type="text" maxlength="90" placeholder="Ej. Tanqueada, regalo, almuerzo" value="${escapeAttr(draft.description || "")}">
           </label>
           <div class="quick-field">
             <span class="quick-label">Categoria</span>
-            ${renderChoicePills("category", categoryChoiceOptions(), FREE_CATEGORY_ID)}
+            ${renderChoicePills("category", categoryChoiceOptions(), selectedCategory)}
           </div>
           <div class="quick-field">
             <span class="quick-label">Pagado con</span>
@@ -1287,7 +1471,7 @@ function renderQuickExpensePanel() {
           </div>
           <label class="quick-amount">
             <span>Monto</span>
-            <input name="amount" type="number" min="1000" step="1000" inputmode="numeric" placeholder="$0" required>
+            <input name="amount" type="number" min="1000" step="1000" inputmode="numeric" placeholder="$0" value="${draft.amount ? escapeAttr(draft.amount) : ""}" required>
           </label>
           <label class="check-row quick-check-row">
             <input name="budgeted" type="checkbox" checked>
@@ -2265,6 +2449,16 @@ function bindEvents() {
     smartForm.addEventListener("submit", handleSmartSubmit);
   }
 
+  const dailyReminderForm = document.querySelector("#daily-reminder-form");
+  if (dailyReminderForm) {
+    dailyReminderForm.addEventListener("submit", handleDailyReminderSubmit);
+  }
+
+  const financialEventForm = document.querySelector("#financial-event-form");
+  if (financialEventForm) {
+    financialEventForm.addEventListener("submit", handleFinancialEventSubmit);
+  }
+
   document.querySelectorAll("[data-cloud-auth-form]").forEach((form) => {
     form.addEventListener("submit", handleCloudLoginSubmit);
   });
@@ -2837,7 +3031,10 @@ function handleAction(event) {
     "close-extra-editor",
     "open-diagnosis",
     "close-diagnosis",
-    "cancel-extra-allocation"
+    "cancel-extra-allocation",
+    "request-reminder-permission",
+    "send-test-reminder",
+    "register-calendar-event"
   ]);
 
   const actions = {
@@ -2926,6 +3123,11 @@ function handleAction(event) {
       pendingExtraAllocation = null;
       state.lastAlert = "Dinero extra sin guardar.";
     },
+    "request-reminder-permission": requestReminderPermission,
+    "send-test-reminder": sendTestReminder,
+    "register-calendar-event": () => startCalendarEventExpense(id),
+    "remove-calendar-event": () => removeCalendarEvent(id),
+    "reopen-calendar-event": () => reopenCalendarEvent(id),
     "cancel-cooldown": () => cancelCooldown(id),
     "unlock-cooldown": () => unlockCooldown(id),
     "push-cloud-now": () => pushCloudState(),
@@ -3291,6 +3493,7 @@ function handleTransactionSubmit(event) {
   const category = String(data.get("category"));
   const budgeted = data.get("budgeted") === "on";
   const source = normalizeLocation(data.get("source"));
+  const calendarEventId = cleanText(data.get("calendarEventId"), "");
   const threshold = plan.expenses * LARGE_PURCHASE_RATIO;
   const transactionError = validateTransactionDraft({ amount, category, source });
 
@@ -3314,12 +3517,16 @@ function handleTransactionSubmit(event) {
     });
     state.lastAlert = `${merchant} quedo en pausa 24 horas antes de decidir.`;
   } else {
-    const transaction = addTransaction({ merchant, description, amount, category, budgeted, source });
+    const transaction = addTransaction({ merchant, description, amount, category, budgeted, source, calendarEventId });
+    if (calendarEventId) {
+      markCalendarEventSpent(calendarEventId, transaction.id);
+    }
     state.lastAlert = createSpendAlert(category);
     showUndoSnackbar(transaction.id);
   }
 
   closeQuickExpense();
+  expenseDraft = null;
   saveState();
   render();
 }
@@ -3415,6 +3622,89 @@ function handleSmartSubmit(event) {
   render();
 }
 
+async function handleDailyReminderSubmit(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  const enabled = data.get("enabled") === "on";
+  const time = normalizeReminderTime(data.get("time"));
+  let permission = notificationPermissionStatus();
+
+  if (enabled && permission === "default") {
+    permission = await requestNotificationPermission();
+  }
+
+  state.dailyReminder = {
+    ...normalizeDailyReminder(state.dailyReminder),
+    enabled,
+    time,
+    updated_at: new Date().toISOString()
+  };
+
+  if (enabled && permission === "denied") {
+    state.lastAlert = "Recordatorio guardado, pero las notificaciones estan bloqueadas en el navegador.";
+    showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
+  } else if (enabled && permission === "unsupported") {
+    state.lastAlert = "Este navegador no permite notificaciones desde la app.";
+    showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
+  } else {
+    state.lastAlert = enabled
+      ? `Recordatorio diario activado a las ${time}.`
+      : "Recordatorio diario apagado.";
+  }
+
+  saveState();
+  render();
+}
+
+function handleFinancialEventSubmit(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  const title = cleanText(data.get("title"), "");
+  const amount = numberFrom(data.get("amount"));
+  const date = cleanDate(data.get("date"), todayKey());
+  const category = normalizeEventCategory(data.get("category"));
+
+  if (!title) {
+    showNoticeSnackbar("Escribe un nombre para el evento.", { kind: "error" });
+    return;
+  }
+
+  state.calendarEvents.push({
+    id: uid("event"),
+    title,
+    date,
+    amount,
+    category,
+    notes: cleanText(data.get("notes"), ""),
+    spent: false,
+    transactionId: "",
+    updated_at: new Date().toISOString()
+  });
+  state.lastAlert = `${title} quedo en tu calendario con estimado de ${formatMoney(amount)}.`;
+  saveState();
+  render();
+}
+
+async function requestReminderPermission() {
+  const permission = await requestNotificationPermission();
+  if (permission === "granted") {
+    state.lastAlert = "Notificaciones permitidas. Ya puedes activar o probar el recordatorio.";
+  } else if (permission === "denied") {
+    state.lastAlert = "El navegador bloqueo las notificaciones. Cambialo desde los ajustes del sitio.";
+    showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
+  } else {
+    state.lastAlert = "Notificaciones no disponibles en este navegador.";
+    showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
+  }
+  saveState({ touch: false });
+  render();
+}
+
+function sendTestReminder() {
+  showDailyReminderNotification({ test: true });
+  state.lastAlert = "Notificacion de prueba enviada.";
+}
+
 async function handleCloudLoginSubmit(event) {
   event.preventDefault();
   const data = new FormData(event.currentTarget);
@@ -3480,6 +3770,7 @@ async function handleCloudSignOut() {
 
 function clearLocalUserState() {
   clearTimeout(cloudSaveTimer);
+  clearTimeout(dailyReminderTimer);
   localStorage.removeItem(STORAGE_KEY);
   localStorage.removeItem(BACKUP_KEY);
   state = createDefaultState();
@@ -3561,6 +3852,52 @@ function applyStudentContext() {
   });
 }
 
+function startCalendarEventExpense(id) {
+  const event = state.calendarEvents.find((item) => item.id === id);
+  if (!event) {
+    state.lastAlert = "No encontre ese evento del calendario.";
+    return;
+  }
+
+  expenseDraft = {
+    calendarEventId: event.id,
+    merchant: event.title,
+    description: event.notes ? `Calendario: ${event.notes}` : "Calendario financiero",
+    amount: Number(event.amount || 0),
+    category: event.category || FREE_CATEGORY_ID
+  };
+  state.lastAlert = `${event.title} listo para registrar como gasto.`;
+  openQuickExpense();
+}
+
+function markCalendarEventSpent(id, transactionId) {
+  const event = state.calendarEvents.find((item) => item.id === id);
+  if (!event) {
+    return;
+  }
+  event.spent = true;
+  event.transactionId = transactionId;
+  event.updated_at = new Date().toISOString();
+}
+
+function reopenCalendarEvent(id) {
+  const event = state.calendarEvents.find((item) => item.id === id);
+  if (!event) {
+    state.lastAlert = "No encontre ese evento del calendario.";
+    return;
+  }
+  event.spent = false;
+  event.transactionId = "";
+  event.updated_at = new Date().toISOString();
+  state.lastAlert = `${event.title} volvio a quedar pendiente.`;
+}
+
+function removeCalendarEvent(id) {
+  const event = state.calendarEvents.find((item) => item.id === id);
+  state.calendarEvents = state.calendarEvents.filter((item) => item.id !== id);
+  state.lastAlert = event ? `${event.title} salio del calendario.` : "Evento eliminado.";
+}
+
 function removeBudgetJob(id) {
   state.budgetJobs = state.budgetJobs.filter((job) => job.id !== id);
   state.transactions.forEach((transaction) => {
@@ -3577,6 +3914,9 @@ function removeTransaction(id) {
   state.transactions = state.transactions.filter((item) => item.id !== id);
   if (transaction && state.liquidity?.initialized) {
     adjustLiquidity(transaction.source, Number(transaction.amount || 0), "refund");
+  }
+  if (transaction?.calendarEventId) {
+    reopenCalendarEvent(transaction.calendarEventId);
   }
   state.lastAlert = transaction
     ? `${transaction.merchant} eliminado. La categoria se recalculo.`
@@ -3726,7 +4066,7 @@ function unlockCooldown(id) {
   state.lastAlert = createSpendAlert(cooldown.category);
 }
 
-function addTransaction({ merchant, description = "", amount, category, budgeted, source = "account" }) {
+function addTransaction({ merchant, description = "", amount, category, budgeted, source = "account", calendarEventId = "" }) {
   const location = normalizeLocation(source);
   const now = new Date().toISOString();
   adjustLiquidity(location, -Number(amount || 0), "expense");
@@ -3740,6 +4080,7 @@ function addTransaction({ merchant, description = "", amount, category, budgeted
     labeled: Boolean(category),
     budgeted,
     source: location,
+    calendarEventId,
     updated_at: now
   };
   state.transactions.push(transaction);
@@ -3842,6 +4183,154 @@ function calculatePlan() {
 
 function budgetSummary() {
   return getBudgetSummary(state, todayKey());
+}
+
+function calendarEventsSorted() {
+  return (state.calendarEvents || [])
+    .slice()
+    .sort((a, b) => {
+      const statusDelta = Number(a.spent) - Number(b.spent);
+      return statusDelta || String(a.date).localeCompare(String(b.date)) || String(a.title).localeCompare(String(b.title));
+    });
+}
+
+function calendarEstimateForDays(days) {
+  const start = todayKey();
+  const endDate = new Date(`${start}T12:00:00`);
+  endDate.setDate(endDate.getDate() + Number(days || 0));
+  const end = todayKey(endDate);
+  return (state.calendarEvents || [])
+    .filter((event) => !event.spent && event.date >= start && event.date <= end)
+    .reduce((sum, event) => sum + Number(event.amount || 0), 0);
+}
+
+function scheduleDailyReminder() {
+  clearTimeout(dailyReminderTimer);
+  const reminder = normalizeDailyReminder(state.dailyReminder);
+  if (!reminder.enabled) {
+    return;
+  }
+
+  const delay = Math.max(1_000, nextReminderDate(reminder.time).getTime() - Date.now());
+  dailyReminderTimer = window.setTimeout(handleDailyReminderDue, delay);
+}
+
+function nextReminderDate(timeValue) {
+  const [hours, minutes] = normalizeReminderTime(timeValue).split(":").map(Number);
+  const next = new Date();
+  next.setHours(hours, minutes, 0, 0);
+  if (next.getTime() <= Date.now()) {
+    next.setDate(next.getDate() + 1);
+  }
+  return next;
+}
+
+function handleDailyReminderDue() {
+  const reminder = normalizeDailyReminder(state.dailyReminder);
+  if (!reminder.enabled) {
+    return;
+  }
+
+  const today = todayKey();
+  if (reminder.lastShownDate !== today) {
+    showDailyReminderNotification();
+    state.dailyReminder = {
+      ...reminder,
+      lastShownDate: today,
+      updated_at: new Date().toISOString()
+    };
+    saveState({ touch: false });
+  } else {
+    scheduleDailyReminder();
+  }
+}
+
+function notificationPermissionStatus() {
+  if (!("Notification" in window)) {
+    return "unsupported";
+  }
+  return Notification.permission;
+}
+
+async function requestNotificationPermission() {
+  if (!("Notification" in window)) {
+    return "unsupported";
+  }
+  if (Notification.permission !== "default") {
+    return Notification.permission;
+  }
+  try {
+    return await Notification.requestPermission();
+  } catch {
+    return "unsupported";
+  }
+}
+
+async function showDailyReminderNotification(options = {}) {
+  const permission = notificationPermissionStatus();
+  if (permission !== "granted") {
+    return;
+  }
+
+  const title = options.test ? "Prueba de recordatorio" : "Revision de gastos";
+  const body = "Quieres registrar tus gastos de hoy?";
+  const data = { url: `${selfLocationOrigin()}#${QUICK_EXPENSE_HASH}` };
+  try {
+    const registration = navigator.serviceWorker ? await navigator.serviceWorker.ready : null;
+    if (registration?.showNotification) {
+      await registration.showNotification(title, {
+        body,
+        tag: "daily-expense-reminder",
+        renotify: false,
+        data,
+        icon: "assets/icon-192.png",
+        badge: "assets/icon-192.png"
+      });
+      return;
+    }
+  } catch {
+    // Fall back to the page Notification API below.
+  }
+
+  try {
+    const notification = new Notification(title, {
+      body,
+      tag: "daily-expense-reminder",
+      data,
+      icon: "assets/icon-192.png"
+    });
+    notification.onclick = () => {
+      window.focus();
+      window.location.hash = QUICK_EXPENSE_HASH;
+    };
+  } catch {}
+}
+
+function selfLocationOrigin() {
+  return `${window.location.origin}${window.location.pathname}`;
+}
+
+function notificationStatusLabel(permission) {
+  const labels = {
+    granted: "Permiso activo",
+    denied: "Bloqueado",
+    default: "Permiso pendiente",
+    unsupported: "No soportado"
+  };
+  return labels[permission] || labels.default;
+}
+
+function reminderSupportNote(permission) {
+  if (permission === "granted") {
+    return "El recordatorio queda programado localmente en este dispositivo. Si el sistema cierra la app por completo, se reprograma al volver a abrirla.";
+  }
+  if (permission === "denied") {
+    return "El horario queda guardado, pero el navegador no mostrara avisos hasta que cambies el permiso del sitio.";
+  }
+  if (permission === "unsupported") {
+    return "Este navegador no expone notificaciones web para esta app.";
+  }
+  return "Activa el permiso para que el aviso pueda aparecer fuera de la pantalla actual.";
 }
 
 function liquiditySummary(summary = budgetSummary()) {
@@ -4029,6 +4518,8 @@ function viewFromHash(fallback) {
     plan: "budget",
     presupuesto: "budget",
     ahorro: "savings",
+    calendario: "calendar",
+    eventos: "calendar",
     registrar: "spending",
     gastos: "spending",
     movimientos: "movements",
@@ -4058,6 +4549,7 @@ function hashFromView(view) {
     today: "inicio",
     budget: "plan",
     savings: "ahorro",
+    calendar: "calendario",
     spending: "registrar",
     movements: "movimientos",
     profile: "datos"
@@ -4205,8 +4697,32 @@ function normalizeTransactions(transactions) {
     labeled: Boolean(transaction.category || transaction.labeled),
     budgeted: Boolean(transaction.budgeted),
     source: normalizeLocation(transaction.source),
+    calendarEventId: transaction.calendarEventId || "",
     updated_at: transaction.updated_at || transaction.createdAt || transaction.date || ""
   }));
+}
+
+function normalizeCalendarEvents(events) {
+  return events.map((event) => ({
+    id: event.id || uid("event"),
+    title: cleanText(event.title || event.name, "Plan especial"),
+    date: cleanDate(event.date, todayKey()),
+    amount: Number(event.amount || event.estimatedAmount || 0),
+    category: normalizeEventCategory(event.category),
+    notes: cleanText(event.notes || event.description, ""),
+    spent: Boolean(event.spent),
+    transactionId: event.transactionId || "",
+    updated_at: event.updated_at || event.date || ""
+  }));
+}
+
+function normalizeDailyReminder(reminder = {}) {
+  return {
+    enabled: Boolean(reminder.enabled),
+    time: normalizeReminderTime(reminder.time),
+    lastShownDate: cleanDate(reminder.lastShownDate, ""),
+    updated_at: reminder.updated_at || ""
+  };
 }
 
 function isTemplateBudgetJobs(jobs) {
@@ -4244,6 +4760,16 @@ function normalizeLiquidity(liquidity) {
 
 function normalizeLocation(value) {
   return value === "cash" ? "cash" : "account";
+}
+
+function normalizeEventCategory(value) {
+  const category = String(value || "");
+  return category || FREE_CATEGORY_ID;
+}
+
+function normalizeReminderTime(value) {
+  const text = String(value || "").trim();
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(text) ? text : DEFAULT_REMINDER_TIME;
 }
 
 function locationLabel(location) {
@@ -4322,6 +4848,29 @@ function formatShortDate(dateValue) {
     month: "short",
     day: "numeric"
   }).format(new Date(`${dateValue}T12:00:00`)).replace(".", "");
+}
+
+function eventMonthLabel(dateValue) {
+  return new Intl.DateTimeFormat("es-CO", {
+    month: "short"
+  }).format(new Date(`${dateValue}T12:00:00`)).replace(".", "");
+}
+
+function eventDayLabel(dateValue) {
+  return new Intl.DateTimeFormat("es-CO", {
+    day: "2-digit"
+  }).format(new Date(`${dateValue}T12:00:00`));
+}
+
+function formatRelativeEventDate(dateValue) {
+  const date = new Date(`${dateValue}T12:00:00`);
+  const today = new Date(`${todayKey()}T12:00:00`);
+  const days = Math.round((date.getTime() - today.getTime()) / 86_400_000);
+  if (days === 0) return "Hoy";
+  if (days === 1) return "Manana";
+  if (days === -1) return "Ayer";
+  if (days > 1) return `En ${days} dias`;
+  return `Hace ${Math.abs(days)} dias`;
 }
 
 function movementDayLabel(dateValue) {

@@ -1,15 +1,15 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CACHE_NAME = `${CACHE_PREFIX}20260618-auth-buttons`;
+const CACHE_NAME = `${CACHE_PREFIX}20260618-calendar-reminder`;
 const APP_SHELL = [
   "./",
   "index.html",
-  "styles.css?v=20260618-auth-buttons",
-  "app.js?v=20260618-auth-buttons",
-  "finance-core.js?v=20260618-auth-buttons",
-  "sync-client.js?v=20260618-auth-buttons",
-  "sync-config.js?v=20260618-auth-buttons",
-  "vendor/supabase-2.108.1.min.js?v=20260618-auth-buttons",
-  "manifest.webmanifest?v=20260618-auth-buttons",
+  "styles.css?v=20260618-calendar-reminder",
+  "app.js?v=20260618-calendar-reminder",
+  "finance-core.js?v=20260618-calendar-reminder",
+  "sync-client.js?v=20260618-calendar-reminder",
+  "sync-config.js?v=20260618-calendar-reminder",
+  "vendor/supabase-2.108.1.min.js?v=20260618-calendar-reminder",
+  "manifest.webmanifest?v=20260618-calendar-reminder",
   "assets/icon.svg",
   "assets/icon-192.png",
   "assets/icon-512.png",
@@ -22,6 +22,24 @@ self.addEventListener("install", (event) => {
       .open(CACHE_NAME)
       .then((cache) => cache.addAll(APP_SHELL))
       .then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = event.notification.data?.url || new URL("./#registrar-gasto", self.location.href).href;
+
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      const target = new URL(targetUrl, self.location.href);
+      for (const client of clientList) {
+        const clientUrl = new URL(client.url);
+        if (clientUrl.origin === target.origin && clientUrl.pathname === target.pathname) {
+          return client.navigate(target.href).then((navigatedClient) => (navigatedClient || client).focus());
+        }
+      }
+      return self.clients.openWindow(target.href);
+    })
   );
 });
 

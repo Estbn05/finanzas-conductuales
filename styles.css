@@ -4306,6 +4306,267 @@ input[type="range"] {
   }
 }
 
+/* Calendar */
+.calendar-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.calendar-summary-grid article,
+.calendar-panel,
+.financial-event-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.calendar-summary-grid article {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 11px;
+}
+
+.calendar-summary-grid span,
+.calendar-panel-heading p,
+.financial-event-card small,
+.event-amount small,
+.toggle-row small {
+  color: var(--muted);
+}
+
+.calendar-summary-grid span {
+  font-size: 0.62rem;
+}
+
+.calendar-summary-grid strong {
+  overflow-wrap: anywhere;
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.calendar-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.calendar-panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.calendar-panel-heading h2 {
+  margin: 3px 0 0;
+  font-size: 0.96rem;
+  font-weight: 650;
+}
+
+.calendar-reminder-form,
+.financial-event-form {
+  display: grid;
+  gap: 10px;
+}
+
+.calendar-reminder-form {
+  grid-template-columns: minmax(0, 1fr) minmax(118px, 150px) auto;
+  align-items: end;
+}
+
+.financial-event-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.event-notes-field,
+.financial-event-form .btn {
+  grid-column: 1 / -1;
+}
+
+.calendar-reminder-form input:not([type="checkbox"]),
+.financial-event-form input,
+.financial-event-form select {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 11px;
+  color: var(--ink) !important;
+  background: var(--soft) !important;
+  font-size: 0.92rem;
+  font-weight: 550;
+  -webkit-text-fill-color: var(--ink) !important;
+}
+
+.toggle-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  min-height: 44px;
+  gap: 8px;
+  color: var(--ink);
+}
+
+.toggle-row input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--teal);
+}
+
+.toggle-row span {
+  display: grid;
+  gap: 2px;
+}
+
+.toggle-row strong {
+  font-size: 0.78rem;
+}
+
+.toggle-row small {
+  font-size: 0.66rem;
+  line-height: 1.35;
+}
+
+.reminder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.reminder-actions .btn {
+  flex: 1 1 160px;
+}
+
+.financial-event-list {
+  display: grid;
+  gap: 8px;
+}
+
+.financial-event-card {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) minmax(96px, auto) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+}
+
+.financial-event-card.is-past {
+  border-color: rgba(240, 113, 103, 0.34);
+}
+
+.financial-event-card.is-spent {
+  opacity: 0.72;
+}
+
+.event-date-box {
+  display: grid;
+  width: 46px;
+  min-height: 46px;
+  place-items: center;
+  border-radius: 10px;
+  color: var(--teal-dark);
+  background: var(--teal-2);
+}
+
+.event-date-box span {
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.event-date-box strong {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.event-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.event-title-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.event-title-line strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.event-title-line span {
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: var(--muted);
+  background: var(--soft);
+  font-size: 0.6rem;
+  font-weight: 650;
+}
+
+.event-copy small {
+  overflow-wrap: anywhere;
+  font-size: 0.66rem;
+  line-height: 1.35;
+}
+
+.event-amount {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.event-amount strong {
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.event-amount small {
+  font-size: 0.61rem;
+}
+
+.event-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.event-actions .btn {
+  min-height: 36px;
+  padding-inline: 10px;
+  white-space: nowrap;
+}
+
+@media (max-width: 620px) {
+  .calendar-summary-grid,
+  .calendar-reminder-form,
+  .financial-event-form {
+    grid-template-columns: 1fr;
+  }
+
+  .financial-event-card {
+    grid-template-columns: 46px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .event-amount,
+  .event-actions {
+    grid-column: 2;
+    justify-items: start;
+  }
+
+  .event-actions {
+    flex-wrap: wrap;
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
