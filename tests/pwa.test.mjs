@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260618-calendar-reminder";
+const ASSET_VERSION = "20260618-visual-redesign";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -422,4 +422,6 @@ test("mockup system covers progressive plan, correction and special states", asy
   assert.ok(styles.includes(".destructive-consequence"));
   assert.ok(styles.includes(".history-row.is-unclassified"));
   assert.ok(styles.includes(".connection-banner"));
+  assert.ok(styles.includes("Visual redesign 2026"));
+  assert.ok(styles.includes("--card-shadow"));
 });
