@@ -10,7 +10,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260618-drawer-redesign";
+} from "./finance-core.js?v=20260618-ui-system-v3";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -22,7 +22,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260618-drawer-redesign";
+} from "./sync-client.js?v=20260618-ui-system-v3";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -708,11 +708,11 @@ function renderBottomNavigation() {
         <span class="bottom-nav-icon plus-icon" aria-hidden="true">${renderIcon("plus")}</span>
         <span>Registrar</span>
       </button>
-      <button class="bottom-nav-item ${state.activeView === "calendar" ? "is-active" : ""}" type="button" data-view="calendar">
-        <span class="bottom-nav-icon" aria-hidden="true">${renderIcon("calendar")}</span>
-        <span>Calendario</span>
+      <button class="bottom-nav-item ${state.activeView === "movements" ? "is-active" : ""}" type="button" data-view="movements">
+        <span class="bottom-nav-icon" aria-hidden="true">${renderIcon("receipt")}</span>
+        <span>Movimientos</span>
       </button>
-      <button class="bottom-nav-item ${["savings", "movements", "profile"].includes(state.activeView) ? "is-active" : ""}" type="button" data-action="toggle-menu">
+      <button class="bottom-nav-item ${["savings", "calendar", "profile"].includes(state.activeView) ? "is-active" : ""}" type="button" data-action="toggle-menu">
         <span class="bottom-nav-icon" aria-hidden="true">${renderIcon("menu")}</span>
         <span>Menu</span>
       </button>
@@ -1435,6 +1435,7 @@ function renderCategoryOptions(selected = FREE_CATEGORY_ID) {
 
 function renderQuickExpensePanel() {
   const summary = budgetSummary();
+  const liquidity = liquiditySummary();
   const draft = expenseDraft || {};
   const selectedCategory = categoryChoiceOptions().some((option) => option.value === draft.category) ? draft.category : FREE_CATEGORY_ID;
   return `
@@ -1450,6 +1451,10 @@ function renderQuickExpensePanel() {
         </div>
         <form class="quick-expense-form" id="transaction-form">
           ${draft.calendarEventId ? `<input name="calendarEventId" type="hidden" value="${escapeAttr(draft.calendarEventId)}">` : ""}
+          <label class="quick-amount">
+            <span>Monto</span>
+            <input name="amount" type="number" min="1000" step="1000" inputmode="numeric" placeholder="$0" value="${draft.amount ? escapeAttr(draft.amount) : ""}" required>
+          </label>
           <label>
             Comercio
             <input name="merchant" type="text" maxlength="42" placeholder="Ej. Tienda, Terpel" value="${escapeAttr(draft.merchant || "")}" required>
@@ -1465,14 +1470,14 @@ function renderQuickExpensePanel() {
           <div class="quick-field">
             <span class="quick-label">Pagado con</span>
             ${renderChoicePills("source", [
-              { value: "account", label: "Cuenta" },
-              { value: "cash", label: "Efectivo" }
+              { value: "account", label: `Cuenta · ${formatCompactMoney(liquidity.account)}` },
+              { value: "cash", label: `Efectivo · ${formatCompactMoney(liquidity.cash)}` }
             ], "account")}
           </div>
-          <label class="quick-amount">
-            <span>Monto</span>
-            <input name="amount" type="number" min="1000" step="1000" inputmode="numeric" placeholder="$0" value="${draft.amount ? escapeAttr(draft.amount) : ""}" required>
-          </label>
+          <div class="expense-impact-preview" aria-live="polite">
+            <span>Disponible antes de registrar</span>
+            <strong>${formatMoney(summary.freeRemaining)} libre · ${formatMoney(liquidity.total)} total real</strong>
+          </div>
           <label class="check-row quick-check-row">
             <input name="budgeted" type="checkbox" checked>
             Ya estaba previsto en el plan

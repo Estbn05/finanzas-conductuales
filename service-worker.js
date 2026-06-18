@@ -1,15 +1,15 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CACHE_NAME = `${CACHE_PREFIX}20260618-drawer-redesign`;
+const CACHE_NAME = `${CACHE_PREFIX}20260618-ui-system-v3`;
 const APP_SHELL = [
   "./",
   "index.html",
-  "styles.css?v=20260618-drawer-redesign",
-  "app.js?v=20260618-drawer-redesign",
-  "finance-core.js?v=20260618-drawer-redesign",
-  "sync-client.js?v=20260618-drawer-redesign",
-  "sync-config.js?v=20260618-drawer-redesign",
-  "vendor/supabase-2.108.1.min.js?v=20260618-drawer-redesign",
-  "manifest.webmanifest?v=20260618-drawer-redesign",
+  "styles.css?v=20260618-ui-system-v3",
+  "app.js?v=20260618-ui-system-v3",
+  "finance-core.js?v=20260618-ui-system-v3",
+  "sync-client.js?v=20260618-ui-system-v3",
+  "sync-config.js?v=20260618-ui-system-v3",
+  "vendor/supabase-2.108.1.min.js?v=20260618-ui-system-v3",
+  "manifest.webmanifest?v=20260618-ui-system-v3",
   "assets/icon.svg",
   "assets/icon-192.png",
   "assets/icon-512.png",

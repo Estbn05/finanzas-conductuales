@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260618-drawer-redesign";
+const ASSET_VERSION = "20260618-ui-system-v3";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -44,6 +44,9 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(app.includes('{ id: "movements", label: "Movimientos", icon: "05" }'));
   assert.ok(app.includes('data-action="open-expense"'));
   assert.ok(app.includes('data-action="close-expense"'));
+  assert.ok(app.includes('data-view="movements"'));
+  assert.ok(app.includes('renderIcon("receipt")'));
+  assert.ok(app.includes('["savings", "calendar", "profile"].includes(state.activeView)'));
   assert.ok(app.includes('class="quick-expense-panel"'));
   assert.ok(app.includes('id="transaction-form"'));
   assert.ok(app.includes('data-choice-value="${escapeAttr(option.value)}"'));
@@ -55,6 +58,10 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(app.includes("Cuenta"));
   assert.ok(app.includes("Efectivo"));
   assert.ok(app.includes("Total real"));
+  assert.ok(app.includes("const liquidity = liquiditySummary();"));
+  assert.ok(app.includes("formatCompactMoney(liquidity.account)"));
+  assert.ok(app.includes("formatCompactMoney(liquidity.cash)"));
+  assert.ok(app.includes('class="expense-impact-preview" aria-live="polite"'));
 
   const todayView = app.slice(app.indexOf("function renderToday"), app.indexOf("function renderTransactionLabeler"));
   assert.ok(todayView.includes("Categorias del periodo"));
@@ -75,11 +82,15 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.equal(fullTodayView.includes("Ajuste sin culpa"), false);
   assert.equal(fullTodayView.includes("Patron dominante"), false);
 
-  assert.ok(app.includes('renderIcon("calendar")'));
   assert.ok(app.includes('class="bottom-nav-icon plus-icon"'));
   assert.ok(app.includes('renderIcon(normalizeLocation(transaction.source) === "cash" ? "cash" : "account")'));
   assert.ok(styles.includes(".bottom-nav"));
   assert.ok(styles.includes(".quick-expense-panel"));
+  assert.ok(styles.includes("Design system v3"));
+  assert.ok(styles.includes("--ds-bg: #f6f1e7"));
+  assert.ok(styles.includes(":focus-visible"));
+  assert.ok(styles.includes("@media (prefers-reduced-motion: reduce)"));
+  assert.ok(styles.includes(".expense-impact-preview"));
   assert.ok(styles.includes(".money-location-chips"));
   assert.ok(styles.includes("grid-template-columns: repeat(5"));
   assert.ok(styles.includes(".money-context"));
