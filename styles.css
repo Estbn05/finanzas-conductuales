@@ -6907,3 +6907,309 @@ textarea,
     --field-text: #202622;
   }
 }
+
+/* Theme switcher v6: explicit light/dark modes, no accidental system override */
+.theme-switcher {
+  display: grid;
+  gap: 10px;
+  padding: 12px 0 14px;
+  border-top: 1px solid rgba(109, 86, 51, 0.1);
+  border-bottom: 1px solid rgba(109, 86, 51, 0.1);
+}
+
+.theme-switcher > span {
+  color: var(--ds-muted) !important;
+  font-size: 0.74rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.theme-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 4px;
+  border: 1px solid var(--ds-line);
+  border-radius: 18px;
+  background: rgba(255, 253, 248, 0.76);
+}
+
+.theme-choice {
+  min-height: 42px;
+  border: 0;
+  border-radius: 14px;
+  color: var(--ds-muted);
+  background: transparent;
+  font-weight: 850;
+}
+
+.theme-choice.is-active {
+  color: #083f35;
+  background: linear-gradient(135deg, #c7f3df, #68d8b5);
+  box-shadow: 0 10px 24px rgba(21, 144, 111, 0.18);
+}
+
+.nav-item span:last-child,
+.nav-item.is-active span:last-child,
+.nav-item:hover span:last-child {
+  color: currentColor !important;
+  text-shadow: none !important;
+}
+
+.nav-item:not(.is-active):not(.is-primary) span:last-child {
+  color: var(--ds-muted) !important;
+}
+
+.nav-item.is-active span:last-child {
+  color: var(--ds-ink) !important;
+}
+
+.nav-item.is-primary span:last-child {
+  color: #083f35 !important;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --ds-bg: #101412;
+  --ds-bg-soft: #141b18;
+  --ds-surface: #171d1a;
+  --ds-surface-strong: #1f2723;
+  --ds-ink: #f1f8f3;
+  --ds-muted: #b6c2ba;
+  --ds-subtle: #8c9990;
+  --ds-line: rgba(255, 255, 255, 0.14);
+  --ds-line-strong: rgba(255, 255, 255, 0.24);
+  --ds-primary: #67d9b5;
+  --ds-primary-strong: #9ff0d2;
+  --ds-primary-soft: rgba(103, 217, 181, 0.16);
+  --ds-amber: #f2c56c;
+  --ds-amber-soft: rgba(242, 197, 108, 0.16);
+  --ds-danger: #ff9d91;
+  --ds-danger-soft: rgba(255, 157, 145, 0.16);
+  --paper: var(--ds-bg);
+  --panel: var(--ds-surface);
+  --ink: var(--ds-ink);
+  --muted: var(--ds-muted);
+  --line: var(--ds-line);
+  --soft: #18201c;
+  --teal: var(--ds-primary);
+  --teal-dark: var(--ds-primary);
+  --teal-deep: var(--ds-primary-strong);
+  --teal-2: var(--ds-primary-soft);
+  --teal-mid: #67d9b5;
+  --amber: var(--ds-amber);
+  --amber-2: var(--ds-amber-soft);
+  --coral: var(--ds-danger);
+  --coral-2: var(--ds-danger-soft);
+  --field-bg: #202823;
+  --field-text: #f1f8f3;
+  --field-placeholder: #95a49b;
+  --field-arrow: #b6c2ba;
+}
+
+html[data-theme="dark"],
+html[data-theme="dark"] body,
+html[data-theme="dark"] .app-shell {
+  color: var(--ds-ink) !important;
+  background:
+    radial-gradient(circle at 14% -8%, rgba(103, 217, 181, 0.16), transparent 30%),
+    radial-gradient(circle at 88% 2%, rgba(242, 197, 108, 0.08), transparent 28%),
+    linear-gradient(180deg, #101412 0%, #141b18 58%, #0b100e 100%) !important;
+}
+
+html[data-theme="dark"] body::before {
+  opacity: 0.3;
+  background:
+    linear-gradient(120deg, rgba(103, 217, 181, 0.055) 0 1px, transparent 1px 32px),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.032) 0 1px, transparent 1px 36px);
+}
+
+html[data-theme="dark"] .money-bar {
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: var(--ds-radius-xl) !important;
+  padding: 24px 20px 18px !important;
+  color: rgba(241, 248, 243, 0.78) !important;
+  background:
+    radial-gradient(circle at 88% 14%, rgba(103, 217, 181, 0.18), transparent 30%),
+    linear-gradient(145deg, #1d2b26 0%, #123e36 60%, #08231f 100%) !important;
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.24) !important;
+  overflow: hidden;
+}
+
+html[data-theme="dark"] .money-bar > strong,
+html[data-theme="dark"] .money-location-chips strong,
+html[data-theme="dark"] .screen-title-row h1,
+html[data-theme="dark"] .home-section-heading h2,
+html[data-theme="dark"] .section-heading h2,
+html[data-theme="dark"] .movement-day-heading strong,
+html[data-theme="dark"] .category-top strong,
+html[data-theme="dark"] .category-card-top strong,
+html[data-theme="dark"] .movement-copy strong,
+html[data-theme="dark"] .movement-amount strong,
+html[data-theme="dark"] .data-section-heading strong {
+  color: var(--ds-ink) !important;
+}
+
+html[data-theme="dark"] .money-context,
+html[data-theme="dark"] .money-bar .money-caption,
+html[data-theme="dark"] .money-bar .money-help,
+html[data-theme="dark"] .money-bar .money-split,
+html[data-theme="dark"] .movement-copy small,
+html[data-theme="dark"] .movement-amount small,
+html[data-theme="dark"] .category-card-foot,
+html[data-theme="dark"] .category-numbers,
+html[data-theme="dark"] .category-status,
+html[data-theme="dark"] .home-period-note,
+html[data-theme="dark"] .screen-title-row span {
+  color: var(--ds-muted) !important;
+}
+
+html[data-theme="dark"] .money-location-chips div,
+html[data-theme="dark"] .balance-card,
+html[data-theme="dark"] .data-metrics div,
+html[data-theme="dark"] .savings-metrics div,
+html[data-theme="dark"] .expense-impact-preview,
+html[data-theme="dark"] .conversion-box,
+html[data-theme="dark"] .limit-warning,
+html[data-theme="dark"] .onboarding-preview,
+html[data-theme="dark"] .plan-distribution,
+html[data-theme="dark"] .movements-card,
+html[data-theme="dark"] .savings-hero,
+html[data-theme="dark"] .raise-simulator,
+html[data-theme="dark"] .reference-fund,
+html[data-theme="dark"] .data-section,
+html[data-theme="dark"] .calendar-panel,
+html[data-theme="dark"] .calendar-summary-grid article,
+html[data-theme="dark"] .financial-event-card,
+html[data-theme="dark"] .plan-category-card,
+html[data-theme="dark"] .category-row,
+html[data-theme="dark"] .actionable-empty,
+html[data-theme="dark"] .extra-suggestion-card,
+html[data-theme="dark"] .destructive-consequence,
+html[data-theme="dark"] .auth-card,
+html[data-theme="dark"] .startup-fallback-card,
+html[data-theme="dark"] .bottom-sheet,
+html[data-theme="dark"] .quick-expense-panel,
+html[data-theme="dark"] .modal:not(.onboarding-modal) {
+  color: var(--ds-ink) !important;
+  border-color: var(--ds-line) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025)),
+    var(--ds-surface) !important;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.22) !important;
+}
+
+html[data-theme="dark"] .history-row.is-unclassified {
+  color: var(--ds-ink) !important;
+  border-color: rgba(242, 197, 108, 0.28) !important;
+  background: linear-gradient(180deg, rgba(242, 197, 108, 0.18), rgba(255, 255, 255, 0.035)) !important;
+}
+
+html[data-theme="dark"] .history-row.is-income {
+  color: var(--ds-ink) !important;
+  border-color: rgba(103, 217, 181, 0.24) !important;
+  background: linear-gradient(180deg, rgba(103, 217, 181, 0.16), rgba(255, 255, 255, 0.035)) !important;
+}
+
+html[data-theme="dark"] .history-row .movement-type-icon {
+  color: var(--ds-primary-strong) !important;
+  background: var(--ds-primary-soft) !important;
+}
+
+html[data-theme="dark"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]),
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] .quick-expense-form input[type="text"],
+html[data-theme="dark"] .quick-expense-form input[type="number"],
+html[data-theme="dark"] .quick-expense-form input[data-money-input="true"],
+html[data-theme="dark"] .sheet-form input:not([type="range"]),
+html[data-theme="dark"] .sheet-form select,
+html[data-theme="dark"] .financial-event-form input,
+html[data-theme="dark"] .financial-event-form select,
+html[data-theme="dark"] .stacked-form input,
+html[data-theme="dark"] .stacked-form select,
+html[data-theme="dark"] .inline-form input,
+html[data-theme="dark"] .inline-form select,
+html[data-theme="dark"] .onboarding-form input:not([type="hidden"]),
+html[data-theme="dark"] .onboarding-form select {
+  color: var(--field-text) !important;
+  background: var(--field-bg) !important;
+  border-color: var(--ds-line) !important;
+  color-scheme: dark !important;
+  -webkit-text-fill-color: var(--field-text) !important;
+}
+
+html[data-theme="dark"] .sidebar {
+  color: var(--ds-ink) !important;
+  background:
+    radial-gradient(circle at 18% 10%, rgba(103, 217, 181, 0.2), transparent 30%),
+    linear-gradient(180deg, #19231f 0%, #102d27 58%, #071b18 100%) !important;
+  box-shadow: 24px 0 54px rgba(0, 0, 0, 0.3) !important;
+}
+
+html[data-theme="dark"] .brand strong,
+html[data-theme="dark"] .menu-tools .btn.ghost {
+  color: var(--ds-ink) !important;
+}
+
+html[data-theme="dark"] .brand small,
+html[data-theme="dark"] .menu-summary,
+html[data-theme="dark"] .nav-item:not(.is-active):not(.is-primary) span:last-child,
+html[data-theme="dark"] .theme-switcher > span {
+  color: var(--ds-muted) !important;
+}
+
+html[data-theme="dark"] .nav-number {
+  color: var(--ds-primary-strong) !important;
+  background: rgba(103, 217, 181, 0.14) !important;
+}
+
+html[data-theme="dark"] .nav-item:hover,
+html[data-theme="dark"] .nav-item.is-active {
+  color: var(--ds-ink) !important;
+  background: rgba(103, 217, 181, 0.12) !important;
+}
+
+html[data-theme="dark"] .nav-item.is-active span:last-child {
+  color: var(--ds-ink) !important;
+}
+
+html[data-theme="dark"] .nav-item.is-primary {
+  color: #06251f !important;
+  background: linear-gradient(135deg, #8ceacb, #22b58d) !important;
+}
+
+html[data-theme="dark"] .nav-item.is-primary span:last-child {
+  color: #06251f !important;
+}
+
+html[data-theme="dark"] .theme-options {
+  border-color: var(--ds-line) !important;
+  background: rgba(255, 255, 255, 0.055) !important;
+}
+
+html[data-theme="dark"] .theme-choice {
+  color: var(--ds-muted) !important;
+}
+
+html[data-theme="dark"] .theme-choice.is-active {
+  color: #06251f !important;
+  background: linear-gradient(135deg, #94efcf, #32c097) !important;
+}
+
+html[data-theme="dark"] .bottom-nav {
+  color: var(--ds-muted) !important;
+  border-top-color: rgba(255, 255, 255, 0.12) !important;
+  background: rgba(12, 20, 17, 0.94) !important;
+  box-shadow: 0 -16px 34px rgba(0, 0, 0, 0.28) !important;
+}
+
+html[data-theme="dark"] .bottom-nav-item.is-active,
+html[data-theme="dark"] .bottom-nav-item.is-active .bottom-nav-icon {
+  color: var(--ds-primary-strong) !important;
+}

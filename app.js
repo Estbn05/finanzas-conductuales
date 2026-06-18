@@ -10,7 +10,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260618-ui-system-v5";
+} from "./finance-core.js?v=20260618-ui-system-v6";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -22,7 +22,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260618-ui-system-v5";
+} from "./sync-client.js?v=20260618-ui-system-v6";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -84,6 +84,7 @@ let cloudState = {
 };
 let dailyReminderTimer;
 
+applyThemePreference();
 render();
 window.setTimeout(recoverAuthStartup, AUTH_STARTUP_TIMEOUT_MS);
 initializeCloudSync();
@@ -156,6 +157,7 @@ function createDefaultState() {
     settings: {
       monthlyRaisePct: 8,
       escalationPct: 50,
+      theme: "light",
       updated_at: now
     },
     budgetExtras: [],
@@ -205,6 +207,7 @@ function migrateState(savedState) {
     settings: {
       monthlyRaisePct: Number(savedState.settings?.monthlyRaisePct ?? defaults.settings.monthlyRaisePct),
       escalationPct: Number(savedState.settings?.escalationPct ?? defaults.settings.escalationPct),
+      theme: normalizeTheme(savedState.settings?.theme || defaults.settings.theme),
       updated_at: savedState.settings?.updated_at || defaults.settings.updated_at
     },
     transactions: normalizeTransactions(savedState.transactions || defaults.transactions),
@@ -620,6 +623,7 @@ function syncQuickExpenseWithLocation(options = {}) {
 }
 
 function render() {
+  const currentTheme = applyThemePreference();
   if (shouldShowSessionCheck()) {
     app.classList.remove("is-menu-open", "is-expense-open");
     app.innerHTML = renderSessionCheck();
@@ -657,6 +661,7 @@ function render() {
           </button>
           ${NAV_ITEMS.map((item) => renderNavItem(item)).join("")}
         </nav>
+        ${renderThemeSwitcher(currentTheme)}
         <div class="menu-tools">
           <button class="btn primary" type="button" data-action="open-diagnosis">Mis datos</button>
           <button class="btn ghost" type="button" data-action="cloud-sign-out">Cerrar sesion</button>
@@ -683,6 +688,22 @@ function render() {
   bindEvents();
 }
 
+function renderThemeSwitcher(currentTheme = themePreference()) {
+  return `
+    <div class="theme-switcher" role="group" aria-label="Cambiar tema">
+      <span>Apariencia</span>
+      <div class="theme-options">
+        <button class="theme-choice ${currentTheme === "light" ? "is-active" : ""}" type="button" data-action="set-theme" data-theme-choice="light" aria-pressed="${currentTheme === "light" ? "true" : "false"}">
+          Claro
+        </button>
+        <button class="theme-choice ${currentTheme === "dark" ? "is-active" : ""}" type="button" data-action="set-theme" data-theme-choice="dark" aria-pressed="${currentTheme === "dark" ? "true" : "false"}">
+          Oscuro
+        </button>
+      </div>
+    </div>
+  `;
+}
+
 function renderNavItem(item) {
   const active = state.activeView === item.id ? "is-active" : "";
   return `
@@ -691,6 +712,22 @@ function renderNavItem(item) {
       <span>${item.label}</span>
     </button>
   `;
+}
+
+function normalizeTheme(theme) {
+  return theme === "dark" ? "dark" : "light";
+}
+
+function themePreference() {
+  return normalizeTheme(state.settings?.theme);
+}
+
+function applyThemePreference() {
+  const theme = themePreference();
+  document.documentElement.dataset.theme = theme;
+  app.dataset.theme = theme;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#101412" : "#0b6f5b");
+  return theme;
 }
 
 function renderBottomNavigation() {
@@ -3039,7 +3076,8 @@ function handleAction(event) {
     "cancel-extra-allocation",
     "request-reminder-permission",
     "send-test-reminder",
-    "register-calendar-event"
+    "register-calendar-event",
+    "set-theme"
   ]);
 
   const actions = {
@@ -3131,6 +3169,15 @@ function handleAction(event) {
     "request-reminder-permission": requestReminderPermission,
     "send-test-reminder": sendTestReminder,
     "register-calendar-event": () => startCalendarEventExpense(id),
+    "set-theme": () => {
+      state.settings = {
+        ...(state.settings || {}),
+        theme: normalizeTheme(event.currentTarget.dataset.themeChoice),
+        updated_at: new Date().toISOString()
+      };
+      saveState({ sync: false, touch: false });
+      applyThemePreference();
+    },
     "remove-calendar-event": () => removeCalendarEvent(id),
     "reopen-calendar-event": () => reopenCalendarEvent(id),
     "cancel-cooldown": () => cancelCooldown(id),

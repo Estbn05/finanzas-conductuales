@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260618-ui-system-v5";
+const ASSET_VERSION = "20260618-ui-system-v6";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -47,6 +47,12 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(app.includes('{ id: "movements", label: "Movimientos", icon: "05" }'));
   assert.ok(app.includes('data-action="open-expense"'));
   assert.ok(app.includes('data-action="close-expense"'));
+  assert.ok(app.includes('data-action="set-theme"'));
+  assert.ok(app.includes('data-theme-choice="light"'));
+  assert.ok(app.includes('data-theme-choice="dark"'));
+  assert.ok(app.includes("function applyThemePreference()"));
+  assert.ok(app.includes('document.documentElement.dataset.theme = theme'));
+  assert.ok(app.includes('theme: normalizeTheme'));
   assert.ok(app.includes('data-view="movements"'));
   assert.ok(app.includes('renderIcon("receipt")'));
   assert.ok(app.includes('["savings", "calendar", "profile"].includes(state.activeView)'));
@@ -91,7 +97,12 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(styles.includes(".quick-expense-panel"));
   assert.ok(styles.includes("Design system v3"));
   assert.ok(styles.includes("Mockup fidelity v5"));
+  assert.ok(styles.includes("Theme switcher v6"));
   assert.ok(styles.includes("color-scheme: light"));
+  assert.ok(styles.includes('html[data-theme="dark"]'));
+  assert.ok(styles.includes(".theme-switcher"));
+  assert.ok(styles.includes(".theme-choice.is-active"));
+  assert.ok(styles.includes(".nav-item span:last-child"));
   assert.ok(styles.includes("--ds-bg: #f6f1e7"));
   assert.ok(styles.includes("--ds-bg: #f7f4ee"));
   assert.ok(styles.includes(":focus-visible"));
