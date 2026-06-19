@@ -6,6 +6,10 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
+    "build:mobile": "node scripts/build-mobile.mjs",
+    "android:sync": "npm run build:mobile && npx cap sync android",
+    "android:apk": "npm run android:sync && cd android && gradlew.bat assembleDebug",
+    "android:open": "npm run android:sync && npx cap open android",
     "check": "node --check app.js && node --check finance-core.js && node --check sync-client.js && node --check server.mjs && node --check tests/finance-core.test.mjs && node --check tests/pwa.test.mjs && node --check tests/sync-client.test.mjs",
     "test": "node --test",
     "verify": "npm run check && npm test"
@@ -18,5 +22,12 @@
     "pwa"
   ],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@capacitor/android": "^8.4.0",
+    "@capacitor/core": "^8.4.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.4.0"
+  }
 }

@@ -50,6 +50,8 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(app.includes('data-action="close-expense"'));
   assert.ok(app.includes('data-action="set-theme"'));
   assert.ok(app.includes("function renderBrandMark()"));
+  assert.ok(app.includes(`finance-core.js?v=${ASSET_VERSION}`));
+  assert.ok(app.includes(`sync-client.js?v=${ASSET_VERSION}`));
   assert.ok(app.includes('class="brand-mark-icon"'));
   assert.equal(app.includes("brand-ring-spark"), false);
   assert.equal(app.includes('<span class="brand-mark">FC</span>'), false);
@@ -187,6 +189,35 @@ test("movements combines expenses and extra income and can sort the full history
   const profile = app.slice(app.indexOf("function renderProfile"), app.indexOf("function renderStudentContextPanel"));
   assert.equal(profile.includes("renderTransactionHistory"), false);
   assert.equal(profile.includes("Movimientos del periodo"), false);
+});
+
+test("period forecast, period close and merchant rules are exposed in the app shell", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const core = await readFile(new URL("../finance-core.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  assert.ok(core.includes("export function predictPeriodEnd"));
+  assert.ok(core.includes("projectedFreeAtEnd"));
+  assert.ok(app.includes("predictPeriodEnd as getPeriodForecast"));
+  assert.ok(app.includes("function renderForecastCard"));
+  assert.ok(app.includes("Hasta el proximo periodo"));
+  assert.ok(app.includes("function renderPeriodCloseCard"));
+  assert.ok(app.includes('data-action="save-period-close"'));
+  assert.ok(app.includes("function savePeriodClosure"));
+  assert.ok(app.includes("periodClosures: []"));
+  assert.ok(app.includes("normalizePeriodClosures"));
+  assert.ok(app.includes("function renderMerchantRulesPanel"));
+  assert.ok(app.includes("function renderMerchantRuleSuggestion"));
+  assert.ok(app.includes("function rememberMerchantRule"));
+  assert.ok(app.includes("function findMerchantRule"));
+  assert.ok(app.includes("merchantRules: []"));
+  assert.ok(app.includes("data-apply-merchant-rule"));
+  assert.ok(app.includes('data-action="remove-merchant-rule"'));
+  assert.ok(styles.includes("Forecast, period close and merchant rules v19"));
+  assert.ok(styles.includes(".forecast-card"));
+  assert.ok(styles.includes(".period-close-card"));
+  assert.ok(styles.includes(".merchant-rule-suggestion"));
+  assert.ok(styles.includes(".merchant-rules-panel"));
 });
 
 test("authenticated new users get a three-step financial onboarding", async () => {

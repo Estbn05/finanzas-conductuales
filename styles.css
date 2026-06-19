@@ -7529,3 +7529,226 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
     -webkit-text-fill-color: var(--ds-muted) !important;
   }
 }
+
+/* Forecast, period close and merchant rules v19 */
+.forecast-card,
+.period-close-card,
+.merchant-rules-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--ds-line);
+  border-radius: var(--ds-radius-lg);
+  background:
+    linear-gradient(180deg, rgba(255, 250, 240, 0.9), rgba(255, 255, 255, 0.72)),
+    var(--ds-surface);
+  box-shadow: var(--ds-shadow-xs);
+}
+
+.forecast-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 14px;
+}
+
+.forecast-card h2,
+.period-close-card h2,
+.merchant-rules-heading h2 {
+  margin: 2px 0 0;
+  color: var(--ds-ink);
+  font-size: 0.98rem;
+  font-weight: 780;
+  letter-spacing: 0;
+}
+
+.forecast-card span,
+.period-close-card p,
+.merchant-rules-heading span,
+.merchant-rule-chip span,
+.period-close-saved {
+  color: var(--ds-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.forecast-number {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+  min-width: 118px;
+  font-variant-numeric: tabular-nums;
+}
+
+.forecast-number strong {
+  color: var(--ds-primary-strong);
+  font-size: 1.16rem;
+  font-weight: 850;
+}
+
+.forecast-number small,
+.period-close-saved {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  border: 1px solid rgba(11, 111, 91, 0.16);
+  border-radius: 999px;
+  padding: 3px 9px;
+  color: var(--ds-primary-strong);
+  background: var(--ds-primary-soft);
+  font-weight: 760;
+}
+
+.forecast-card.tight .forecast-number strong,
+.forecast-card.short .forecast-number strong,
+.forecast-card.over_reserved .forecast-number strong {
+  color: var(--amber);
+}
+
+.forecast-card.short .forecast-number small,
+.forecast-card.over_reserved .forecast-number small,
+.period-close-card.short .period-close-saved,
+.period-close-card.over_reserved .period-close-saved {
+  border-color: rgba(184, 67, 60, 0.18);
+  color: var(--coral);
+  background: var(--coral-2);
+}
+
+.period-close-card {
+  padding: 14px;
+}
+
+.period-close-heading,
+.merchant-rules-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.period-close-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.period-close-metrics div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid rgba(100, 75, 38, 0.1);
+  border-radius: var(--ds-radius-md);
+  padding: 10px;
+  background: rgba(255, 250, 240, 0.66);
+}
+
+.period-close-metrics span {
+  color: var(--ds-muted);
+  font-size: 0.66rem;
+}
+
+.period-close-metrics strong {
+  overflow-wrap: anywhere;
+  color: var(--ds-ink);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.period-close-card .btn {
+  justify-self: start;
+  width: auto;
+}
+
+.merchant-rule-suggestion {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(11, 111, 91, 0.15);
+  border-radius: var(--ds-radius-md);
+  padding: 10px 12px;
+  color: var(--ds-muted);
+  background: var(--ds-primary-soft);
+  font-size: 0.72rem;
+}
+
+.merchant-rule-suggestion[hidden] {
+  display: none;
+}
+
+.merchant-rule-suggestion strong {
+  color: var(--ds-primary-strong);
+}
+
+.merchant-rule-suggestion .btn {
+  width: auto;
+  min-height: 36px;
+  padding: 7px 11px;
+  white-space: nowrap;
+}
+
+.merchant-rules-panel {
+  padding: 14px;
+}
+
+.merchant-rule-list {
+  display: grid;
+  gap: 8px;
+}
+
+.merchant-rule-chip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  border: 1px solid rgba(100, 75, 38, 0.1);
+  border-radius: var(--ds-radius-md);
+  padding: 8px 8px 8px 11px;
+  background: rgba(255, 250, 240, 0.62);
+}
+
+.merchant-rule-chip strong {
+  color: var(--ds-ink);
+}
+
+html[data-theme="dark"] .forecast-card,
+html[data-theme="dark"] .period-close-card,
+html[data-theme="dark"] .merchant-rules-panel,
+#app[data-theme="dark"] .forecast-card,
+#app[data-theme="dark"] .period-close-card,
+#app[data-theme="dark"] .merchant-rules-panel {
+  color: var(--ds-ink) !important;
+  border-color: var(--ds-line) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025)),
+    var(--ds-surface) !important;
+}
+
+html[data-theme="dark"] .period-close-metrics div,
+html[data-theme="dark"] .merchant-rule-chip,
+#app[data-theme="dark"] .period-close-metrics div,
+#app[data-theme="dark"] .merchant-rule-chip {
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+
+html[data-theme="dark"] .merchant-rule-suggestion,
+#app[data-theme="dark"] .merchant-rule-suggestion {
+  border-color: rgba(103, 217, 181, 0.2) !important;
+  background: rgba(103, 217, 181, 0.12) !important;
+}
+
+@media (max-width: 520px) {
+  .forecast-card,
+  .merchant-rule-suggestion {
+    grid-template-columns: 1fr;
+  }
+
+  .forecast-number {
+    justify-items: start;
+    min-width: 0;
+  }
+
+  .period-close-metrics {
+    grid-template-columns: 1fr;
+  }
+}

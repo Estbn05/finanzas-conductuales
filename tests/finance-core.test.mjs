@@ -9,7 +9,8 @@ import {
   categoryStatus,
   extraIncomeForPeriod,
   getEmergencyTarget,
-  isLargeUnbudgetedPurchase
+  isLargeUnbudgetedPurchase,
+  predictPeriodEnd
 } from "../finance-core.js";
 
 test("budget ring allocation is an exact non-overlapping partition of income", () => {
@@ -405,4 +406,49 @@ test("extra money increases only the current period budget", () => {
 test("large unbudgeted purchases use the 8 percent cooling-off threshold", () => {
   assert.equal(isLargeUnbudgetedPurchase(159_000, 2_000_000), false);
   assert.equal(isLargeUnbudgetedPurchase(160_000, 2_000_000), true);
+});
+
+test("period forecast projects free money at the current spending pace", () => {
+  const state = makeState({
+    profile: {
+      incomeCadence: "monthly",
+      incomeAmount: 1_000_000,
+      periodStart: "2026-06-01"
+    },
+    budgetJobs: [{ id: "gas", name: "Gasolina", amount: 300_000, cadence: "period" }],
+    transactions: [
+      { date: "2026-06-01", amount: 100_000, category: "free", labeled: true },
+      { date: "2026-06-05", amount: 50_000, category: "gas", labeled: true }
+    ]
+  });
+
+  const forecast = predictPeriodEnd(state, "2026-06-10");
+
+  assert.equal(forecast.totalDays, 30);
+  assert.equal(forecast.elapsedDays, 10);
+  assert.equal(forecast.remainingDays, 20);
+  assert.equal(forecast.projectedAdditionalImpact, 200_000);
+  assert.equal(forecast.projectedFreeAtEnd, 400_000);
+  assert.equal(forecast.status, "steady");
+});
+
+test("period forecast flags a likely shortfall", () => {
+  const state = makeState({
+    profile: {
+      incomeCadence: "monthly",
+      incomeAmount: 1_000_000,
+      periodStart: "2026-06-01"
+    },
+    budgetJobs: [{ id: "fixed", name: "Fijos", amount: 600_000, cadence: "period" }],
+    transactions: [
+      { date: "2026-06-01", amount: 250_000, category: "free", labeled: true },
+      { date: "2026-06-02", amount: 150_000, category: "free", labeled: true }
+    ]
+  });
+
+  const forecast = predictPeriodEnd(state, "2026-06-02");
+
+  assert.equal(forecast.projectedFreeAtEnd < 0, true);
+  assert.equal(forecast.status, "short");
+  assert.equal(forecast.shortage, 5_600_000);
 });

@@ -9,8 +9,9 @@ import {
   getPeriodIncome,
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
+  predictPeriodEnd as getPeriodForecast,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260618-ui-system-v15";
+} from "./finance-core.js?v=20260619-ui-system-v19";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -22,7 +23,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260618-ui-system-v15";
+} from "./sync-client.js?v=20260619-ui-system-v19";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -177,6 +178,8 @@ function createDefaultState() {
     budgetJobs: [],
     transactions: [],
     cooldowns: [],
+    periodClosures: [],
+    merchantRules: [],
     checkins: [],
     wins: []
   };
@@ -216,6 +219,8 @@ function migrateState(savedState) {
     dailyReminder: normalizeDailyReminder(savedState.dailyReminder || defaults.dailyReminder),
     liquidity: normalizeLiquidity(savedState.liquidity || defaults.liquidity),
     cooldowns: savedState.cooldowns || defaults.cooldowns,
+    periodClosures: normalizePeriodClosures(savedState.periodClosures || defaults.periodClosures),
+    merchantRules: normalizeMerchantRules(savedState.merchantRules || defaults.merchantRules, savedState.transactions || defaults.transactions),
     checkins: savedState.checkins || defaults.checkins,
     wins: savedState.wins || defaults.wins
   };
@@ -224,6 +229,7 @@ function migrateState(savedState) {
   migrated.profile.semesterStart = migrated.profile.semesterStart || migrated.profile.periodStart;
   migrated.profile.payday = normalizePayday(migrated.profile.payday ?? defaults.profile.payday);
   migrated.budgetJobs = normalizeBudgetJobs(savedState.budgetJobs || defaults.budgetJobs);
+  migrated.merchantRules = filterMerchantRulesForJobs(migrated.merchantRules, migrated.budgetJobs);
   if (migrated.profile.completed && migrated.meta.budgetPreset !== "student" && isTemplateBudgetJobs(migrated.budgetJobs)) {
     clearTemplateBudget(migrated);
     migrated.lastAlert = "Quite los campos de plantilla. Crea solo los campos que si usas.";
@@ -1004,6 +1010,7 @@ function renderToday(plan) {
   const homeSummary = budgetSummary();
   return `
     <section class="home-view" aria-label="Resumen del periodo">
+      ${renderForecastCard(homeSummary)}
       <div class="home-section-heading">
         <div>
           <p class="eyebrow">Categorias del periodo</p>
@@ -1026,6 +1033,67 @@ function renderToday(plan) {
     </section>
   `;
 
+}
+
+function renderForecastCard(summary = budgetSummary()) {
+  const forecast = periodForecast();
+  const statusLabel = forecastStatusLabel(forecast.status);
+  const endDate = formatShortDate(previousDay(summary.window.end));
+  const projected = forecast.projectedFreeAtEnd;
+  return `
+    <article class="forecast-card ${forecast.status}" aria-label="Prediccion hasta el proximo periodo">
+      <div>
+        <p class="eyebrow">Hasta el proximo periodo</p>
+        <h2>${forecastHeadline(forecast)}</h2>
+        <span>${forecastCopy(forecast, endDate)}</span>
+      </div>
+      <div class="forecast-number">
+        <strong>${formatMoney(projected)}</strong>
+        <small>${statusLabel}</small>
+      </div>
+    </article>
+  `;
+}
+
+function forecastHeadline(forecast) {
+  if (forecast.status === "over_reserved") {
+    return "Hay mas reservado que presupuesto";
+  }
+  if (forecast.status === "short") {
+    return `Podrian faltar ${formatMoney(forecast.shortage)}`;
+  }
+  if (forecast.status === "tight") {
+    return "El margen viene justo";
+  }
+  if (forecast.confidence === "empty") {
+    return "Aun no hay ritmo de gasto";
+  }
+  return "El dinero parece alcanzar";
+}
+
+function forecastCopy(forecast, endDate) {
+  if (forecast.remainingDays <= 0) {
+    return `El periodo termina hoy. Cierra con el dato real antes de ajustar.`;
+  }
+  if (forecast.confidence === "empty") {
+    return `Quedan ${formatDays(forecast.remainingDays)} hasta ${endDate}. Sin gastos todavia, la proyeccion conserva tu libre actual.`;
+  }
+  return `Quedan ${formatDays(forecast.remainingDays)}. Ritmo usado: ${formatMoney(forecast.dailyFreeImpact)} diarios de dinero libre.`;
+}
+
+function forecastStatusLabel(status) {
+  const labels = {
+    steady: "Sostenible",
+    tight: "Ajustado",
+    short: "Riesgo",
+    over_reserved: "Revisar plan"
+  };
+  return labels[status] || labels.steady;
+}
+
+function formatDays(days) {
+  const count = Math.max(0, Math.round(Number(days || 0)));
+  return `${count} ${count === 1 ? "dia" : "dias"}`;
 }
 
 function renderTransactionLabeler(transaction) {
@@ -1086,6 +1154,8 @@ function renderBudget(plan) {
         ${ring.outside > 0 ? `<p class="inline-warning">Gastos fuera del presupuesto: ${formatMoney(ring.outside)}.</p>` : ""}
       </article>
 
+      ${renderPeriodCloseCard(summary)}
+
       <div class="plan-actions">
         <button class="plan-action" type="button" data-action="open-extra-sheet">
           <span class="plan-action-icon extra-icon" aria-hidden="true">+</span>
@@ -1123,6 +1193,55 @@ function renderBudget(plan) {
       </div>
     </section>
   `;
+}
+
+function renderPeriodCloseCard(summary = budgetSummary()) {
+  const forecast = periodForecast();
+  const closure = periodClosureForWindow(summary.window);
+  const movements = movementsForSummary(summary);
+  const endDate = formatShortDate(previousDay(summary.window.end));
+  const closedLine = closure
+    ? `<span class="period-close-saved">Guardado ${formatShortDate(String(closure.closedAt || "").slice(0, 10) || todayKey())}</span>`
+    : "";
+
+  return `
+    <article class="period-close-card ${forecast.status}">
+      <div class="period-close-heading">
+        <div>
+          <p class="eyebrow">Cierre del periodo</p>
+          <h2>${periodCloseHeadline(forecast)}</h2>
+        </div>
+        ${closedLine}
+      </div>
+      <div class="period-close-metrics">
+        <div><span>Libre actual</span><strong>${formatMoney(summary.freeRemaining)}</strong></div>
+        <div><span>Proyeccion ${endDate}</span><strong>${formatMoney(forecast.projectedFreeAtEnd)}</strong></div>
+        <div><span>Movimientos</span><strong>${movements.length}</strong></div>
+      </div>
+      <p>${periodCloseInsight(summary, forecast)}</p>
+      <button class="btn secondary" type="button" data-action="save-period-close">${closure ? "Actualizar cierre" : "Guardar cierre"}</button>
+    </article>
+  `;
+}
+
+function periodCloseHeadline(forecast) {
+  if (forecast.remainingDays <= 0) {
+    return "Listo para guardar el resultado";
+  }
+  return `Faltan ${formatDays(forecast.remainingDays)}`;
+}
+
+function periodCloseInsight(summary, forecast) {
+  if (summary.overReserved > 0) {
+    return `Hay ${formatMoney(summary.overReserved)} sobreasignados. Ajusta categorias antes de usar este cierre como referencia.`;
+  }
+  if (forecast.shortage > 0) {
+    return `Al ritmo actual faltarian ${formatMoney(forecast.shortage)}. Baja gasto libre o mueve limites antes del proximo pago.`;
+  }
+  if (summary.categoryOverspent > 0) {
+    return `Hay ${formatMoney(summary.categoryOverspent)} por encima de limites. El cierre lo deja visible sin castigar el historial.`;
+  }
+  return `Este cierre guarda una foto del periodo; no mueve saldos ni borra movimientos.`;
 }
 
 function renderBudgetJobForm() {
@@ -1526,6 +1645,7 @@ function renderQuickExpensePanel() {
             Comercio
             <input name="merchant" type="text" maxlength="42" placeholder="Ej. Tienda, Terpel" value="${escapeAttr(draft.merchant || "")}" required>
           </label>
+          ${renderMerchantRuleSuggestion(draft.merchant || "")}
           <label>
             Descripcion opcional
             <input name="description" type="text" maxlength="90" placeholder="Ej. Tanqueada, regalo, almuerzo" value="${escapeAttr(draft.description || "")}">
@@ -1561,6 +1681,49 @@ function categoryChoiceOptions() {
     { value: FREE_CATEGORY_ID, label: "Libre" },
     ...state.budgetJobs.map((job) => ({ value: job.id, label: job.name }))
   ];
+}
+
+function renderMerchantRuleSuggestion(merchant = "") {
+  const rule = findMerchantRule(merchant);
+  return `
+    <div class="merchant-rule-suggestion" data-merchant-rule-suggestion ${rule ? "" : "hidden"}>
+      ${rule ? merchantRuleSuggestionMarkup(rule) : ""}
+    </div>
+  `;
+}
+
+function merchantRuleSuggestionMarkup(rule) {
+  return `
+    <span>Este comercio suele ir en <strong>${escapeHtml(categoryName(rule.category))}</strong> con ${locationLabel(rule.source)}.</span>
+    <button class="btn ghost" type="button" data-apply-merchant-rule="${escapeAttr(rule.id)}">Usar sugerencia</button>
+  `;
+}
+
+function renderMerchantRulesPanel() {
+  const rules = activeMerchantRules().slice(0, 4);
+  if (!rules.length) {
+    return "";
+  }
+
+  return `
+    <article class="merchant-rules-panel">
+      <div class="merchant-rules-heading">
+        <div>
+          <p class="eyebrow">Reglas por comercio</p>
+          <h2>Atajos aprendidos</h2>
+        </div>
+        <span>${state.merchantRules.length} ${state.merchantRules.length === 1 ? "regla" : "reglas"}</span>
+      </div>
+      <div class="merchant-rule-list">
+        ${rules.map((rule) => `
+          <div class="merchant-rule-chip">
+            <span><strong>${escapeHtml(rule.merchant)}</strong> -> ${escapeHtml(categoryName(rule.category))} · ${locationLabel(rule.source)}</span>
+            <button class="icon-btn muted" type="button" data-action="remove-merchant-rule" data-id="${escapeAttr(rule.id)}" aria-label="Quitar regla de ${escapeAttr(rule.merchant)}">x</button>
+          </div>
+        `).join("")}
+      </div>
+    </article>
+  `;
 }
 
 function renderChoicePills(name, options, selected) {
@@ -1599,6 +1762,7 @@ function renderSpending(plan) {
             Comercio
             <input name="merchant" type="text" maxlength="42" placeholder="Ej. Tienda" required>
           </label>
+          ${renderMerchantRuleSuggestion()}
           <label>
             Descripcion opcional
             <input name="description" type="text" maxlength="90" placeholder="Ej. Tanqueada, regalo, almuerzo">
@@ -1737,6 +1901,7 @@ function renderMovements() {
         <div><p class="eyebrow">Historial del periodo</p><h1>Movimientos</h1></div>
         <span class="period-chip">${movements.length} ${movementCountLabel}</span>
       </div>
+      ${renderMerchantRulesPanel()}
       <article class="movements-card">
         <label class="history-sort">
           Ordenar por
@@ -2462,6 +2627,7 @@ function bindEvents() {
       transaction.category = select.value;
       transaction.labeled = Boolean(select.value);
       transaction.updated_at = new Date().toISOString();
+      rememberMerchantRule(transaction);
       state.lastAlert = transaction.labeled
         ? `${transaction.merchant} ahora tiene trabajo asignado.`
         : "Ese movimiento sigue pendiente de categoria.";
@@ -2495,6 +2661,7 @@ function bindEvents() {
 
   const transactionForm = document.querySelector("#transaction-form");
   if (transactionForm) {
+    bindMerchantRuleSuggestions(transactionForm);
     transactionForm.addEventListener("submit", handleTransactionSubmit);
   }
 
@@ -3080,6 +3247,65 @@ function bindSavingsSimulatorPreview(form) {
   escalation?.addEventListener("input", update);
 }
 
+function bindMerchantRuleSuggestions(form) {
+  const merchantInput = form.elements.namedItem("merchant");
+  const suggestion = form.querySelector("[data-merchant-rule-suggestion]");
+  if (!merchantInput || !suggestion) {
+    return;
+  }
+
+  const update = () => {
+    const rule = findMerchantRule(merchantInput.value);
+    const selectedCategory = form.elements.namedItem("category")?.value || "";
+    const shouldShow = Boolean(rule) && (!selectedCategory || selectedCategory === FREE_CATEGORY_ID);
+    suggestion.hidden = !shouldShow;
+    suggestion.innerHTML = shouldShow ? merchantRuleSuggestionMarkup(rule) : "";
+  };
+
+  merchantInput.addEventListener("input", update);
+  merchantInput.addEventListener("change", update);
+  form.querySelectorAll('[name="category"], [data-choice-name="category"]').forEach((control) => {
+    control.addEventListener("change", update);
+    control.addEventListener("click", () => window.setTimeout(update));
+  });
+  suggestion.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-apply-merchant-rule]");
+    if (!button) {
+      return;
+    }
+    const rule = state.merchantRules.find((item) => item.id === button.dataset.applyMerchantRule);
+    if (!rule) {
+      return;
+    }
+    applyMerchantRuleToForm(form, rule);
+    update();
+  });
+  update();
+}
+
+function applyMerchantRuleToForm(form, rule) {
+  setFormChoiceValue(form, "category", rule.category);
+  setFormChoiceValue(form, "source", normalizeLocation(rule.source));
+}
+
+function setFormChoiceValue(form, name, value) {
+  const field = form.elements.namedItem(name);
+  if (!field) {
+    return;
+  }
+
+  field.value = value;
+  const group = form.querySelector(`[data-choice-group="${name}"]`);
+  if (group) {
+    group.querySelectorAll("[data-choice-value]").forEach((choice) => {
+      const active = choice.dataset.choiceValue === value;
+      choice.classList.toggle("is-active", active);
+      choice.setAttribute("aria-checked", active ? "true" : "false");
+      choice.tabIndex = active ? 0 : -1;
+    });
+  }
+}
+
 function handleAction(event) {
   event.preventDefault();
   const action = event.currentTarget.dataset.action;
@@ -3191,6 +3417,8 @@ function handleAction(event) {
       editingExtraId = "";
     },
     "clear-period-extras": clearCurrentPeriodExtras,
+    "save-period-close": savePeriodClosure,
+    "remove-merchant-rule": () => removeMerchantRule(id),
     "extra-all-free": () => applyPendingExtraAllocation(0),
     "cancel-extra-allocation": () => {
       pendingExtraAllocation = null;
@@ -3640,6 +3868,7 @@ function handleTransactionEditSubmit(event) {
   transaction.labeled = nextCategory !== FREE_CATEGORY_ID;
   transaction.source = nextSource;
   transaction.updated_at = new Date().toISOString();
+  rememberMerchantRule(transaction);
   state.lastAlert = `${transaction.merchant} quedo reclasificado.`;
   editingTransactionId = "";
   saveState();
@@ -3981,8 +4210,44 @@ function removeCalendarEvent(id) {
   state.lastAlert = event ? `${event.title} salio del calendario.` : "Evento eliminado.";
 }
 
+function savePeriodClosure() {
+  const summary = budgetSummary();
+  const forecast = periodForecast();
+  const movements = movementsForSummary(summary);
+  const now = new Date().toISOString();
+  const closure = {
+    id: `${summary.window.start}:${summary.window.end}`,
+    windowStart: summary.window.start,
+    windowEnd: summary.window.end,
+    closedAt: now,
+    income: summary.income,
+    reserved: summary.reserved,
+    spent: summary.totalSpent,
+    freeRemaining: summary.freeRemaining,
+    projectedFreeAtEnd: forecast.projectedFreeAtEnd,
+    categoryOverspent: summary.categoryOverspent,
+    transactionCount: movements.filter((movement) => movement.kind === "expense").length,
+    incomeCount: movements.filter((movement) => movement.kind === "income").length,
+    status: forecast.status
+  };
+  const existingIndex = (state.periodClosures || []).findIndex((item) => item.id === closure.id);
+  state.periodClosures = state.periodClosures || [];
+  if (existingIndex >= 0) {
+    state.periodClosures[existingIndex] = closure;
+  } else {
+    state.periodClosures.unshift(closure);
+  }
+  state.periodClosures = state.periodClosures.slice(0, 12);
+  state.lastAlert = `Cierre guardado: ${formatMoney(closure.freeRemaining)} libres y ${closure.transactionCount} gastos.`;
+}
+
+function periodClosureForWindow(window) {
+  return (state.periodClosures || []).find((closure) => closure.windowStart === window.start && closure.windowEnd === window.end);
+}
+
 function removeBudgetJob(id) {
   state.budgetJobs = state.budgetJobs.filter((job) => job.id !== id);
+  state.merchantRules = (state.merchantRules || []).filter((rule) => rule.category !== id);
   state.transactions.forEach((transaction) => {
     if (transaction.category === id) {
       transaction.category = "";
@@ -3990,6 +4255,12 @@ function removeBudgetJob(id) {
     }
   });
   state.lastAlert = "Categoria eliminada. Sus gastos vuelven a revision.";
+}
+
+function removeMerchantRule(id) {
+  const rule = state.merchantRules.find((item) => item.id === id);
+  state.merchantRules = state.merchantRules.filter((item) => item.id !== id);
+  state.lastAlert = rule ? `Quite la regla de ${rule.merchant}.` : "Regla quitada.";
 }
 
 function removeTransaction(id) {
@@ -4017,6 +4288,7 @@ function clearTemplateBudget(target = state) {
   const templateIds = new Set(STUDENT_BUDGET_JOBS.map((job) => job.id));
   target.budgetJobs = [];
   target.cooldowns = (target.cooldowns || []).filter((cooldown) => !templateIds.has(cooldown.category));
+  target.merchantRules = (target.merchantRules || []).filter((rule) => !templateIds.has(rule.category));
   (target.transactions || []).forEach((transaction) => {
     if (templateIds.has(transaction.category)) {
       transaction.category = "";
@@ -4167,6 +4439,7 @@ function addTransaction({ merchant, description = "", amount, category, budgeted
     updated_at: now
   };
   state.transactions.push(transaction);
+  rememberMerchantRule(transaction);
   return transaction;
 }
 
@@ -4266,6 +4539,10 @@ function calculatePlan() {
 
 function budgetSummary() {
   return getBudgetSummary(state, todayKey());
+}
+
+function periodForecast() {
+  return getPeriodForecast(state, todayKey());
 }
 
 function calendarEventsSorted() {
@@ -4505,6 +4782,66 @@ function categoryName(categoryId) {
     return "Libre / sin clasificar";
   }
   return state.budgetJobs.find((job) => job.id === categoryId)?.name || "Sin categoria";
+}
+
+function activeMerchantRules() {
+  const validCategories = new Set(state.budgetJobs.map((job) => job.id));
+  return (state.merchantRules || [])
+    .filter((rule) => validCategories.has(rule.category))
+    .slice()
+    .sort((a, b) => String(b.lastUsedAt || b.updated_at || "").localeCompare(String(a.lastUsedAt || a.updated_at || "")) || Number(b.count || 0) - Number(a.count || 0));
+}
+
+function findMerchantRule(merchant) {
+  const key = merchantKey(merchant);
+  if (key.length < 3) {
+    return null;
+  }
+
+  const rules = activeMerchantRules();
+  return rules.find((rule) => rule.key === key)
+    || rules.find((rule) => rule.key.length >= 3 && (key.includes(rule.key) || rule.key.includes(key)))
+    || null;
+}
+
+function rememberMerchantRule(transaction) {
+  const key = merchantKey(transaction?.merchant);
+  const category = transaction?.category || "";
+  if (key.length < 3 || !category || category === FREE_CATEGORY_ID || !state.budgetJobs.some((job) => job.id === category)) {
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const existing = (state.merchantRules || []).find((rule) => rule.key === key);
+  const merchant = cleanText(transaction.merchant, "Comercio");
+  const next = {
+    id: existing?.id || uid("rule"),
+    merchant,
+    key,
+    category,
+    source: normalizeLocation(transaction.source),
+    count: Number(existing?.count || 0) + 1,
+    lastUsedAt: now,
+    updated_at: now
+  };
+
+  state.merchantRules = state.merchantRules || [];
+  if (existing) {
+    Object.assign(existing, next);
+  } else {
+    state.merchantRules.unshift(next);
+  }
+  state.merchantRules = state.merchantRules.slice(0, 30);
+}
+
+function merchantKey(value) {
+  return cleanText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
 function spendByCategory() {
@@ -4783,6 +5120,96 @@ function normalizeTransactions(transactions) {
     calendarEventId: transaction.calendarEventId || "",
     updated_at: transaction.updated_at || transaction.createdAt || transaction.date || ""
   }));
+}
+
+function normalizePeriodClosures(closures) {
+  return closures
+    .map((closure) => ({
+      id: closure.id || `${closure.windowStart || closure.start}:${closure.windowEnd || closure.end}`,
+      windowStart: cleanDate(closure.windowStart || closure.start, ""),
+      windowEnd: cleanDate(closure.windowEnd || closure.end, ""),
+      closedAt: closure.closedAt || closure.updated_at || "",
+      income: Number(closure.income || 0),
+      reserved: Number(closure.reserved || 0),
+      spent: Number(closure.spent || 0),
+      freeRemaining: Number(closure.freeRemaining || 0),
+      projectedFreeAtEnd: Number(closure.projectedFreeAtEnd || 0),
+      categoryOverspent: Number(closure.categoryOverspent || 0),
+      transactionCount: Number(closure.transactionCount || 0),
+      incomeCount: Number(closure.incomeCount || 0),
+      status: ["steady", "tight", "short", "over_reserved"].includes(closure.status) ? closure.status : "steady"
+    }))
+    .filter((closure) => closure.windowStart && closure.windowEnd)
+    .slice(0, 12);
+}
+
+function normalizeMerchantRules(rules, transactions = []) {
+  const normalized = rules
+    .map((rule) => {
+      const merchant = cleanText(rule.merchant || rule.name, "");
+      const key = merchantKey(rule.key || merchant);
+      return {
+        id: rule.id || uid("rule"),
+        merchant,
+        key,
+        category: rule.category || "",
+        source: normalizeLocation(rule.source),
+        count: Number(rule.count || 1),
+        lastUsedAt: rule.lastUsedAt || rule.updated_at || "",
+        updated_at: rule.updated_at || rule.lastUsedAt || ""
+      };
+    })
+    .filter((rule) => rule.key.length >= 3 && rule.category);
+
+  const byKey = new Map(normalized.map((rule) => [rule.key, rule]));
+  buildMerchantRulesFromTransactions(transactions).forEach((rule) => {
+    if (!byKey.has(rule.key)) {
+      byKey.set(rule.key, rule);
+    }
+  });
+
+  return [...byKey.values()]
+    .sort((a, b) => String(b.lastUsedAt || b.updated_at || "").localeCompare(String(a.lastUsedAt || a.updated_at || "")) || Number(b.count || 0) - Number(a.count || 0))
+    .slice(0, 30);
+}
+
+function buildMerchantRulesFromTransactions(transactions = []) {
+  const rules = new Map();
+  transactions.forEach((transaction) => {
+    const key = merchantKey(transaction.merchant);
+    const category = transaction.category || "";
+    if (key.length < 3 || !category || category === FREE_CATEGORY_ID) {
+      return;
+    }
+    const existing = rules.get(key);
+    const updatedAt = transaction.updated_at || transaction.createdAt || transaction.date || "";
+    if (!existing) {
+      rules.set(key, {
+        id: uid("rule"),
+        merchant: cleanText(transaction.merchant, "Comercio"),
+        key,
+        category,
+        source: normalizeLocation(transaction.source),
+        count: 1,
+        lastUsedAt: updatedAt,
+        updated_at: updatedAt
+      });
+      return;
+    }
+    existing.count += 1;
+    if (String(updatedAt).localeCompare(String(existing.lastUsedAt || "")) >= 0) {
+      existing.category = category;
+      existing.source = normalizeLocation(transaction.source);
+      existing.lastUsedAt = updatedAt;
+      existing.updated_at = updatedAt;
+    }
+  });
+  return [...rules.values()];
+}
+
+function filterMerchantRulesForJobs(rules, jobs) {
+  const validCategories = new Set((jobs || []).map((job) => job.id));
+  return (rules || []).filter((rule) => validCategories.has(rule.category));
 }
 
 function normalizeCalendarEvents(events) {

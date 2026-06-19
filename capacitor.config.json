@@ -1,0 +1,8 @@
+{
+  "appId": "com.estbn05.finanzasconductuales",
+  "appName": "Finanzas Conductuales",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  }
+}

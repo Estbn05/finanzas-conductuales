@@ -171,6 +171,41 @@ export function budgetSummary(state, today) {
   };
 }
 
+export function predictPeriodEnd(state, today) {
+  const summary = budgetSummary(state, today);
+  const currentKey = today ? String(today).slice(0, 10) : dateKey(new Date());
+  const totalDays = Math.max(1, daysBetween(summary.window.start, summary.window.end));
+  const elapsedDays = Math.max(1, Math.min(totalDays, daysBetween(summary.window.start, currentKey) + 1));
+  const remainingDays = Math.max(0, totalDays - elapsedDays);
+  const dailyFreeImpact = summary.freeImpactSpent / elapsedDays;
+  const projectedAdditionalImpact = Math.round(dailyFreeImpact * remainingDays);
+  const projectedFreeAtEnd = Math.round(summary.freeBudget - summary.freeImpactSpent - projectedAdditionalImpact);
+  const dailyAllowance = remainingDays > 0 ? Math.floor(summary.freeRemaining / remainingDays) : summary.freeRemaining;
+  let status = "steady";
+
+  if (summary.overReserved > 0) {
+    status = "over_reserved";
+  } else if (projectedFreeAtEnd < 0) {
+    status = "short";
+  } else if (remainingDays > 0 && projectedFreeAtEnd < summary.income * 0.08) {
+    status = "tight";
+  }
+
+  return {
+    window: summary.window,
+    totalDays,
+    elapsedDays,
+    remainingDays,
+    dailyFreeImpact,
+    projectedAdditionalImpact,
+    projectedFreeAtEnd,
+    shortage: Math.max(0, -projectedFreeAtEnd),
+    dailyAllowance,
+    status,
+    confidence: summary.totalSpent === 0 ? "empty" : elapsedDays < 3 ? "early" : "normal"
+  };
+}
+
 export function budgetRingAllocation(summary) {
   const income = Math.max(0, Number(summary?.income || 0));
   const reserved = Math.min(income, Math.max(0, Number((summary?.reservedRemaining ?? summary?.reserved) || 0)));
@@ -288,6 +323,12 @@ function addMonths(date, months, preferredDay = date.getDate()) {
 
 function daysInMonth(year, monthIndex) {
   return new Date(year, monthIndex + 1, 0).getDate();
+}
+
+function daysBetween(startValue, endValue) {
+  const start = parseDateOnly(startValue);
+  const end = parseDateOnly(endValue);
+  return Math.round((end - start) / 86_400_000);
 }
 
 function addDays(date, days) {
