@@ -7358,3 +7358,32 @@ html[data-theme="dark"] .bottom-sheet.transaction-editor .extra-edit-allocation 
     -webkit-text-fill-color: var(--ds-primary-strong) !important;
   }
 }
+
+/* Mobile drawer scroll fix v11 */
+@media (max-width: 1099px) {
+  .app-shell.is-menu-open .sidebar {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden !important;
+    touch-action: pan-y;
+  }
+
+  .app-shell.is-menu-open .nav-panel,
+  .app-shell.is-menu-open .nav-panel.is-open {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    padding-bottom: calc(116px + env(safe-area-inset-bottom, 0px));
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .app-shell.is-menu-open .menu-tools {
+    margin-top: 16px !important;
+    padding-bottom: 10px;
+  }
+}
