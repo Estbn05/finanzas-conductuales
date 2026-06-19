@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260619-ui-system-v18";
+const ASSET_VERSION = "20260619-ui-system-v19";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -364,6 +364,8 @@ test("Android back navigation closes the quick expense form before leaving the a
   assert.ok(app.includes('const QUICK_EXPENSE_HASH = "registrar-gasto"'));
   assert.ok(app.includes('window.addEventListener("popstate", syncQuickExpenseWithLocation)'));
   assert.ok(app.includes("window.location.hash = QUICK_EXPENSE_HASH"));
+  assert.ok(app.includes("function resetQuickExpenseAfterLogin()"));
+  assert.ok(app.includes("resetQuickExpenseAfterLogin();"));
   assert.ok(app.includes("window.history.back();"));
   assert.ok(app.includes("function openQuickExpense()"));
   assert.ok(app.includes("function closeQuickExpense()"));

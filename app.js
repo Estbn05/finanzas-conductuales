@@ -608,6 +608,18 @@ function closeQuickExpense() {
   }
 }
 
+function resetQuickExpenseAfterLogin() {
+  if (!quickExpenseOpen && !isQuickExpenseLocation()) {
+    return;
+  }
+  quickExpenseOpen = false;
+  expenseDraft = null;
+  menuOpen = false;
+  state.activeView = DEFAULT_VIEW;
+  const historyState = window.history.state || {};
+  window.history.replaceState(historyState, "", `#${hashFromView(DEFAULT_VIEW)}`);
+}
+
 function isQuickExpenseLocation() {
   return window.location.hash.replace("#", "") === QUICK_EXPENSE_HASH;
 }
@@ -3798,6 +3810,7 @@ async function handleCloudLoginSubmit(event) {
     }
     applyCloudSession(session);
     cloudState.sessionReady = true;
+    resetQuickExpenseAfterLogin();
     state.lastAlert = mode === "signup" ? "Cuenta creada." : "Sesion iniciada.";
     await pullCloudAfterLogin();
   } catch (error) {
