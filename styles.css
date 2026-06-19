@@ -7238,3 +7238,40 @@ html[data-theme="dark"] .quick-expense-panel .choice-pill:not(.is-active):hover 
   color: var(--ds-ink) !important;
   background: rgba(255, 255, 255, 0.09) !important;
 }
+
+/* Plan dark contrast v8 */
+html[data-theme="dark"] .screen-title-row .period-chip {
+  color: var(--ds-primary-strong) !important;
+  border-color: rgba(103, 217, 181, 0.22) !important;
+  background: rgba(103, 217, 181, 0.12) !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="dark"] .add-category-row {
+  color: var(--ds-ink) !important;
+  border-color: rgba(103, 217, 181, 0.2) !important;
+  background:
+    linear-gradient(180deg, rgba(103, 217, 181, 0.12), rgba(255, 255, 255, 0.04)),
+    var(--ds-surface) !important;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24) !important;
+}
+
+html[data-theme="dark"] .add-category-row > span {
+  color: #06251f !important;
+  background: linear-gradient(135deg, #94efcf, #32c097) !important;
+}
+
+html[data-theme="dark"] .add-category-row strong {
+  color: var(--ds-ink) !important;
+}
+
+html[data-theme="dark"] .add-category-row small,
+html[data-theme="dark"] .category-card-foot,
+html[data-theme="dark"] .category-card-foot span,
+html[data-theme="dark"] .category-status {
+  color: var(--ds-muted) !important;
+}
+
+html[data-theme="dark"] .category-card-foot strong {
+  color: var(--ds-ink) !important;
+}
