@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260618-ui-system-v13";
+const ASSET_VERSION = "20260618-ui-system-v14";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -123,6 +123,8 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(styles.includes("Calendar reminder dark contrast v13"));
   assert.ok(styles.includes(".reminder-panel .metric-badge"));
   assert.ok(styles.includes(".reminder-actions .btn:disabled"));
+  assert.ok(styles.includes("Sidebar ghost button dark contrast v14"));
+  assert.ok(styles.includes("html[data-theme=\"dark\"] .sidebar .menu-tools .btn.ghost"));
   assert.ok(styles.includes("--ds-bg: #f6f1e7"));
   assert.ok(styles.includes("--ds-bg: #f7f4ee"));
   assert.ok(styles.includes(":focus-visible"));
@@ -492,6 +494,7 @@ test("drawer visual system keeps menu contrast in mobile themes", async () => {
   assert.match(styles, /\.nav-item:hover,[\s\S]*\.nav-item\.is-active\s*{[\s\S]*color: #fff7e8/);
   assert.match(styles, /\.nav-item\.is-active \.nav-number\s*{[\s\S]*background: linear-gradient\(145deg, #7ee8c4, #47d6a6\)/);
   assert.match(styles, /\.menu-tools \.btn\.ghost\s*{[\s\S]*color: rgba\(255, 247, 232, 0\.78\)/);
+  assert.match(styles, /Sidebar ghost button dark contrast v14[\s\S]*html\[data-theme="dark"\] \.sidebar \.menu-tools \.btn\.ghost[\s\S]*background: rgba\(255, 255, 255, 0\.07\) !important/);
   assert.match(styles, /Mobile drawer scroll fix v11[\s\S]*\.app-shell\.is-menu-open \.sidebar\s*{[\s\S]*height: 100dvh[\s\S]*touch-action: pan-y/);
   assert.match(styles, /\.app-shell\.is-menu-open \.nav-panel,[\s\S]*\.app-shell\.is-menu-open \.nav-panel\.is-open\s*{[\s\S]*overflow-y: auto !important[\s\S]*padding-bottom: calc\(116px \+ env\(safe-area-inset-bottom, 0px\)\)/);
 });

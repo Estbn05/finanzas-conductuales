@@ -10,7 +10,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260618-ui-system-v13";
+} from "./finance-core.js?v=20260618-ui-system-v14";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -22,7 +22,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260618-ui-system-v13";
+} from "./sync-client.js?v=20260618-ui-system-v14";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";

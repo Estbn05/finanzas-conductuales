@@ -7452,3 +7452,31 @@ html[data-theme="dark"] .reminder-actions .btn:disabled,
     -webkit-text-fill-color: var(--ds-muted) !important;
   }
 }
+
+/* Sidebar ghost button dark contrast v14 */
+html[data-theme="dark"] .sidebar .menu-tools .btn.ghost,
+#app[data-theme="dark"] .sidebar .menu-tools .btn.ghost {
+  color: var(--ds-muted) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+  box-shadow: none !important;
+  -webkit-text-fill-color: var(--ds-muted) !important;
+}
+
+html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
+#app[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover {
+  color: var(--ds-ink) !important;
+  border-color: rgba(103, 217, 181, 0.24) !important;
+  background: rgba(103, 217, 181, 0.1) !important;
+  -webkit-text-fill-color: var(--ds-ink) !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  .sidebar .menu-tools .btn.ghost {
+    color: var(--ds-muted) !important;
+    border-color: rgba(255, 255, 255, 0.14) !important;
+    background: rgba(255, 255, 255, 0.07) !important;
+    box-shadow: none !important;
+    -webkit-text-fill-color: var(--ds-muted) !important;
+  }
+}
