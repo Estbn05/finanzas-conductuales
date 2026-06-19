@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260618-ui-system-v17";
+const ASSET_VERSION = "20260619-ui-system-v18";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -130,7 +130,7 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(styles.includes(".reminder-actions .btn:disabled"));
   assert.ok(styles.includes("Sidebar ghost button dark contrast v14"));
   assert.ok(styles.includes("html[data-theme=\"dark\"] .sidebar .menu-tools .btn.ghost"));
-  assert.ok(styles.includes("Distribution brand mark v17"));
+  assert.ok(styles.includes("Distribution brand mark v18"));
   assert.ok(styles.includes(".brand-ring-free"));
   assert.ok(styles.includes("--ds-bg: #f6f1e7"));
   assert.ok(styles.includes("--ds-bg: #f7f4ee"));

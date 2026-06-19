@@ -1,19 +1,19 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CACHE_NAME = `${CACHE_PREFIX}20260618-ui-system-v17`;
+const CACHE_NAME = `${CACHE_PREFIX}20260619-ui-system-v18`;
 const APP_SHELL = [
   "./",
   "index.html",
-  "styles.css?v=20260618-ui-system-v17",
-  "app.js?v=20260618-ui-system-v17",
-  "finance-core.js?v=20260618-ui-system-v17",
-  "sync-client.js?v=20260618-ui-system-v17",
-  "sync-config.js?v=20260618-ui-system-v17",
-  "vendor/supabase-2.108.1.min.js?v=20260618-ui-system-v17",
-  "manifest.webmanifest?v=20260618-ui-system-v17",
-  "assets/icon.svg?v=20260618-ui-system-v17",
-  "assets/icon-192.png?v=20260618-ui-system-v17",
-  "assets/icon-512.png?v=20260618-ui-system-v17",
-  "assets/apple-touch-icon.png?v=20260618-ui-system-v17"
+  "styles.css?v=20260619-ui-system-v18",
+  "app.js?v=20260619-ui-system-v18",
+  "finance-core.js?v=20260619-ui-system-v18",
+  "sync-client.js?v=20260619-ui-system-v18",
+  "sync-config.js?v=20260619-ui-system-v18",
+  "vendor/supabase-2.108.1.min.js?v=20260619-ui-system-v18",
+  "manifest.webmanifest?v=20260619-ui-system-v18",
+  "assets/icon.svg?v=20260619-ui-system-v18",
+  "assets/icon-192.png?v=20260619-ui-system-v18",
+  "assets/icon-512.png?v=20260619-ui-system-v18",
+  "assets/apple-touch-icon.png?v=20260619-ui-system-v18"
 ];
 
 self.addEventListener("install", (event) => {

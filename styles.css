@@ -274,11 +274,12 @@ a {
   font-weight: 900;
 }
 
-/* Distribution brand mark v17 */
+/* Distribution brand mark v18 */
 .brand-mark-icon {
   width: 100%;
   height: 100%;
   overflow: visible;
+  filter: drop-shadow(0 1px 1px rgba(2, 20, 17, 0.32));
 }
 
 .brand-ring-track,
@@ -296,7 +297,7 @@ a {
 }
 
 .brand-ring-free {
-  stroke: #86e8c6;
+  stroke: #28d99b;
   stroke-width: 5.6;
 }
 
@@ -6860,7 +6861,13 @@ textarea,
 
 .brand-mark {
   color: #fffaf0 !important;
-  background: linear-gradient(145deg, #6dddbb, var(--ds-primary-strong)) !important;
+  border-color: rgba(142, 240, 202, 0.36) !important;
+  background:
+    radial-gradient(circle at 31% 24%, rgba(181, 255, 224, 0.5), transparent 28%),
+    linear-gradient(145deg, #1fb987 0%, #0b765f 52%, #052e29 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 10px 22px rgba(2, 20, 17, 0.24) !important;
 }
 
 .nav-item {

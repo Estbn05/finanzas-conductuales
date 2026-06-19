@@ -7,9 +7,9 @@
       <stop offset="1" stop-color="#06342d"/>
     </radialGradient>
     <linearGradient id="surface" x1="32" y1="22" x2="172" y2="180" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#8df0cc"/>
-      <stop offset="0.48" stop-color="#16a47f"/>
-      <stop offset="1" stop-color="#06241f"/>
+      <stop stop-color="#64deb4"/>
+      <stop offset="0.48" stop-color="#118d70"/>
+      <stop offset="1" stop-color="#052e29"/>
     </linearGradient>
     <filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%">
       <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#021411" flood-opacity="0.34"/>
@@ -22,7 +22,7 @@
     <circle cx="100" cy="100" r="49" fill="none" stroke="#ffffff" stroke-opacity="0.24" stroke-width="16"/>
     <path d="M100 51a49 49 0 0 1 43.9 70.9" fill="none" stroke="#f2c56c" stroke-width="20"/>
     <path d="M143.9 121.9A49 49 0 0 1 79.9 144.7" fill="none" stroke="#a895de" stroke-width="20"/>
-    <path d="M79.9 144.7A49 49 0 0 1 100 51" fill="none" stroke="#8ff0ca" stroke-width="20"/>
+    <path d="M79.9 144.7A49 49 0 0 1 100 51" fill="none" stroke="#28d99b" stroke-width="20"/>
     <circle cx="100" cy="100" r="22" fill="#05241f" opacity="0.92"/>
   </g>
 </svg>
