@@ -11,7 +11,7 @@ import {
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictPeriodEnd as getPeriodForecast,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260619-ui-system-v19";
+} from "./finance-core.js?v=20260619-forecast-clarity-v20";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -23,7 +23,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260619-ui-system-v19";
+} from "./sync-client.js?v=20260619-forecast-clarity-v20";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -1039,16 +1039,18 @@ function renderForecastCard(summary = budgetSummary()) {
   const forecast = periodForecast();
   const statusLabel = forecastStatusLabel(forecast.status);
   const endDate = formatShortDate(previousDay(summary.window.end));
-  const projected = forecast.projectedFreeAtEnd;
+  const amount = forecastDisplayAmount(forecast);
   return `
-    <article class="forecast-card ${forecast.status}" aria-label="Prediccion hasta el proximo periodo">
+    <article class="forecast-card ${forecast.status}" aria-label="Proyeccion del periodo">
       <div>
-        <p class="eyebrow">Hasta el proximo periodo</p>
+        <p class="eyebrow">Proyeccion del periodo</p>
         <h2>${forecastHeadline(forecast)}</h2>
         <span>${forecastCopy(forecast, endDate)}</span>
+        <p class="forecast-explainer">No mueve dinero ni crea cargos: es una alerta para decidir si bajas gasto libre, ajustas limites o agregas dinero.</p>
       </div>
       <div class="forecast-number">
-        <strong>${formatMoney(projected)}</strong>
+        <span>${forecastAmountLabel(forecast)}</span>
+        <strong>${formatMoney(amount)}</strong>
         <small>${statusLabel}</small>
       </div>
     </article>
@@ -1057,35 +1059,58 @@ function renderForecastCard(summary = budgetSummary()) {
 
 function forecastHeadline(forecast) {
   if (forecast.status === "over_reserved") {
-    return "Hay mas reservado que presupuesto";
+    return "Tu plan esta sobreasignado";
   }
   if (forecast.status === "short") {
-    return `Podrian faltar ${formatMoney(forecast.shortage)}`;
+    return "Este ritmo no alcanza";
   }
   if (forecast.status === "tight") {
-    return "El margen viene justo";
+    return "Vas con poco margen";
   }
   if (forecast.confidence === "empty") {
     return "Aun no hay ritmo de gasto";
   }
-  return "El dinero parece alcanzar";
+  return "Vas bien para cerrar el periodo";
 }
 
 function forecastCopy(forecast, endDate) {
   if (forecast.remainingDays <= 0) {
-    return `El periodo termina hoy. Cierra con el dato real antes de ajustar.`;
+    return `El periodo termina hoy. Guarda el resultado real antes de ajustar el siguiente plan.`;
   }
   if (forecast.confidence === "empty") {
-    return `Quedan ${formatDays(forecast.remainingDays)} hasta ${endDate}. Sin gastos todavia, la proyeccion conserva tu libre actual.`;
+    return `Quedan ${formatDays(forecast.remainingDays)} hasta ${endDate}. Cuando registres gastos, la app estimara como podrias cerrar.`;
   }
-  return `Quedan ${formatDays(forecast.remainingDays)}. Ritmo usado: ${formatMoney(forecast.dailyFreeImpact)} diarios de dinero libre.`;
+  if (forecast.shortage > 0) {
+    return `Quedan ${formatDays(forecast.remainingDays)} hasta ${endDate}. Si nada cambia, faltaria dinero para sostener el ritmo actual.`;
+  }
+  return `Quedan ${formatDays(forecast.remainingDays)} hasta ${endDate}. Si nada cambia, este seria tu dinero libre estimado al cerrar.`;
+}
+
+function forecastAmountLabel(forecast) {
+  if (forecast.status === "over_reserved") {
+    return "Por ajustar";
+  }
+  if (forecast.shortage > 0) {
+    return "Faltaria";
+  }
+  return "Quedaria";
+}
+
+function forecastDisplayAmount(forecast) {
+  if (forecast.status === "over_reserved") {
+    return forecast.shortage || 0;
+  }
+  if (forecast.shortage > 0) {
+    return forecast.shortage;
+  }
+  return Math.max(0, forecast.projectedFreeAtEnd);
 }
 
 function forecastStatusLabel(status) {
   const labels = {
-    steady: "Sostenible",
+    steady: "Va bien",
     tight: "Ajustado",
-    short: "Riesgo",
+    short: "Riesgo de quedarse corto",
     over_reserved: "Revisar plan"
   };
   return labels[status] || labels.steady;
@@ -1200,6 +1225,7 @@ function renderPeriodCloseCard(summary = budgetSummary()) {
   const closure = periodClosureForWindow(summary.window);
   const movements = movementsForSummary(summary);
   const endDate = formatShortDate(previousDay(summary.window.end));
+  const isFinalClose = forecast.remainingDays <= 0;
   const closedLine = closure
     ? `<span class="period-close-saved">Guardado ${formatShortDate(String(closure.closedAt || "").slice(0, 10) || todayKey())}</span>`
     : "";
@@ -1208,18 +1234,18 @@ function renderPeriodCloseCard(summary = budgetSummary()) {
     <article class="period-close-card ${forecast.status}">
       <div class="period-close-heading">
         <div>
-          <p class="eyebrow">Cierre del periodo</p>
+          <p class="eyebrow">${isFinalClose ? "Cierre del periodo" : "Revision del periodo"}</p>
           <h2>${periodCloseHeadline(forecast)}</h2>
         </div>
         ${closedLine}
       </div>
       <div class="period-close-metrics">
-        <div><span>Libre actual</span><strong>${formatMoney(summary.freeRemaining)}</strong></div>
-        <div><span>Proyeccion ${endDate}</span><strong>${formatMoney(forecast.projectedFreeAtEnd)}</strong></div>
-        <div><span>Movimientos</span><strong>${movements.length}</strong></div>
+        <div><span>Libre hoy</span><strong>${formatMoney(summary.freeRemaining)}</strong></div>
+        <div><span>${forecastAmountLabel(forecast)} al ${endDate}</span><strong>${formatMoney(forecastDisplayAmount(forecast))}</strong></div>
+        <div><span>Gastos e ingresos</span><strong>${movements.length}</strong></div>
       </div>
       <p>${periodCloseInsight(summary, forecast)}</p>
-      <button class="btn secondary" type="button" data-action="save-period-close">${closure ? "Actualizar cierre" : "Guardar cierre"}</button>
+      <button class="btn secondary" type="button" data-action="save-period-close">${closure ? "Actualizar revision" : isFinalClose ? "Guardar cierre final" : "Guardar revision de hoy"}</button>
     </article>
   `;
 }
@@ -1228,20 +1254,20 @@ function periodCloseHeadline(forecast) {
   if (forecast.remainingDays <= 0) {
     return "Listo para guardar el resultado";
   }
-  return `Faltan ${formatDays(forecast.remainingDays)}`;
+  return `Asi vas hasta hoy`;
 }
 
 function periodCloseInsight(summary, forecast) {
   if (summary.overReserved > 0) {
-    return `Hay ${formatMoney(summary.overReserved)} sobreasignados. Ajusta categorias antes de usar este cierre como referencia.`;
+    return `Sirve para ver si el plan cabe. Ahora hay ${formatMoney(summary.overReserved)} mas reservado que presupuesto.`;
   }
   if (forecast.shortage > 0) {
-    return `Al ritmo actual faltarian ${formatMoney(forecast.shortage)}. Baja gasto libre o mueve limites antes del proximo pago.`;
+    return `Sirve para comparar tu libre de hoy con una proyeccion al cierre. No significa que debas ese dinero: significa que este ritmo no alcanza.`;
   }
   if (summary.categoryOverspent > 0) {
-    return `Hay ${formatMoney(summary.categoryOverspent)} por encima de limites. El cierre lo deja visible sin castigar el historial.`;
+    return `Sirve para dejar visible el ajuste: hay ${formatMoney(summary.categoryOverspent)} por encima de limites, sin borrar movimientos.`;
   }
-  return `Este cierre guarda una foto del periodo; no mueve saldos ni borra movimientos.`;
+  return `Sirve para guardar una foto del periodo y comparar despues. No mueve saldos ni borra movimientos.`;
 }
 
 function renderBudgetJobForm() {

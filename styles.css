@@ -7530,7 +7530,7 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   }
 }
 
-/* Forecast, period close and merchant rules v19 */
+/* Forecast, period close and merchant rules v20 */
 .forecast-card,
 .period-close-card,
 .merchant-rules-panel {
@@ -7582,6 +7582,21 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   color: var(--ds-primary-strong);
   font-size: 1.16rem;
   font-weight: 850;
+}
+
+.forecast-explainer {
+  margin: 8px 0 0;
+  max-width: 620px;
+  color: var(--ds-muted);
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.forecast-number > span {
+  color: var(--ds-muted);
+  font-size: 0.68rem;
+  font-weight: 760;
+  text-transform: uppercase;
 }
 
 .forecast-number small,
