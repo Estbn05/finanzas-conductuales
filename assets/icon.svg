@@ -20,10 +20,9 @@
   <circle cx="62" cy="48" r="44" fill="url(#glow)" opacity="0.52"/>
   <g filter="url(#softShadow)">
     <circle cx="100" cy="100" r="49" fill="none" stroke="#ffffff" stroke-opacity="0.24" stroke-width="16"/>
-    <path d="M100 51a49 49 0 0 1 43.9 70.9" fill="none" stroke="#8ff0ca" stroke-width="20" stroke-linecap="round"/>
-    <path d="M143.9 121.9A49 49 0 0 1 79.9 144.7" fill="none" stroke="#f2c56c" stroke-width="20" stroke-linecap="round"/>
-    <path d="M79.9 144.7A49 49 0 0 1 100 51" fill="none" stroke="#a895de" stroke-width="20" stroke-linecap="round"/>
+    <path d="M100 51a49 49 0 0 1 43.9 70.9" fill="none" stroke="#f2c56c" stroke-width="20"/>
+    <path d="M143.9 121.9A49 49 0 0 1 79.9 144.7" fill="none" stroke="#a895de" stroke-width="20"/>
+    <path d="M79.9 144.7A49 49 0 0 1 100 51" fill="none" stroke="#8ff0ca" stroke-width="20"/>
     <circle cx="100" cy="100" r="22" fill="#05241f" opacity="0.92"/>
-    <path d="M100 78v44M78 100h44" fill="none" stroke="#eafff7" stroke-width="8" stroke-linecap="round"/>
   </g>
 </svg>

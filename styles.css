@@ -274,10 +274,10 @@ a {
   font-weight: 900;
 }
 
-/* Distribution brand mark v15 */
+/* Distribution brand mark v17 */
 .brand-mark-icon {
-  width: 31px;
-  height: 31px;
+  width: 100%;
+  height: 100%;
   overflow: visible;
 }
 
@@ -286,7 +286,7 @@ a {
 .brand-ring-spent,
 .brand-ring-reserved {
   fill: none;
-  stroke-linecap: round;
+  stroke-linecap: butt;
   stroke-linejoin: round;
 }
 
@@ -314,12 +314,6 @@ a {
   fill: rgba(5, 36, 31, 0.88);
   stroke: rgba(255, 255, 255, 0.2);
   stroke-width: 1;
-}
-
-.brand-ring-spark {
-  stroke: #eafff7;
-  stroke-width: 1.9;
-  stroke-linecap: round;
 }
 
 .brand strong,

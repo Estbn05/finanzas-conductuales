@@ -781,11 +781,10 @@ function renderBrandMark() {
     <span class="brand-mark" aria-hidden="true">
       <svg class="brand-mark-icon" viewBox="0 0 48 48" fill="none" focusable="false">
         <circle class="brand-ring-track" cx="24" cy="24" r="13.5"/>
-        <path class="brand-ring-free" d="M24 10.5a13.5 13.5 0 0 1 12.1 19.5"/>
-        <path class="brand-ring-spent" d="M36.1 30A13.5 13.5 0 0 1 18.4 36.2"/>
-        <path class="brand-ring-reserved" d="M18.4 36.2A13.5 13.5 0 0 1 24 10.5"/>
+        <path class="brand-ring-spent" d="M24 10.5a13.5 13.5 0 0 1 12.1 19.5"/>
+        <path class="brand-ring-reserved" d="M36.1 30A13.5 13.5 0 0 1 18.4 36.2"/>
+        <path class="brand-ring-free" d="M18.4 36.2A13.5 13.5 0 0 1 24 10.5"/>
         <circle class="brand-ring-core" cx="24" cy="24" r="5.6"/>
-        <path class="brand-ring-spark" d="M24 17.8v12.4M17.8 24h12.4"/>
       </svg>
     </span>
   `;
