@@ -7530,7 +7530,7 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   }
 }
 
-/* Forecast, period close and merchant rules v20 */
+/* Forecast, period close and merchant rules v21 */
 .forecast-card,
 .period-close-card,
 .merchant-rules-panel {
@@ -7597,6 +7597,43 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   font-size: 0.68rem;
   font-weight: 760;
   text-transform: uppercase;
+}
+
+.forecast-help {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  border-top: 1px solid rgba(100, 75, 38, 0.12);
+  padding-top: 12px;
+}
+
+.forecast-help div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.forecast-help strong,
+.period-close-calculation strong {
+  color: var(--ds-ink);
+  font-size: 0.7rem;
+  font-weight: 830;
+}
+
+.forecast-help code {
+  overflow-wrap: anywhere;
+  color: var(--ds-ink);
+  font-family: inherit;
+  font-size: 0.73rem;
+  font-weight: 800;
+}
+
+.forecast-help small,
+.period-close-calculation {
+  color: var(--ds-muted);
+  font-size: 0.68rem;
+  line-height: 1.45;
 }
 
 .forecast-number small,
@@ -7670,6 +7707,10 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
 .period-close-card .btn {
   justify-self: start;
   width: auto;
+}
+
+.period-close-calculation {
+  margin: -2px 0 0;
 }
 
 .merchant-rule-suggestion {
@@ -7746,6 +7787,11 @@ html[data-theme="dark"] .merchant-rule-chip,
   background: rgba(255, 255, 255, 0.04) !important;
 }
 
+html[data-theme="dark"] .forecast-help,
+#app[data-theme="dark"] .forecast-help {
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
 html[data-theme="dark"] .merchant-rule-suggestion,
 #app[data-theme="dark"] .merchant-rule-suggestion {
   border-color: rgba(103, 217, 181, 0.2) !important;
@@ -7761,6 +7807,10 @@ html[data-theme="dark"] .merchant-rule-suggestion,
   .forecast-number {
     justify-items: start;
     min-width: 0;
+  }
+
+  .forecast-help {
+    grid-template-columns: 1fr;
   }
 
   .period-close-metrics {

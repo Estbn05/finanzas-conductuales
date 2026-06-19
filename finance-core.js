@@ -179,7 +179,8 @@ export function predictPeriodEnd(state, today) {
   const remainingDays = Math.max(0, totalDays - elapsedDays);
   const dailyFreeImpact = summary.freeImpactSpent / elapsedDays;
   const projectedAdditionalImpact = Math.round(dailyFreeImpact * remainingDays);
-  const projectedFreeAtEnd = Math.round(summary.freeBudget - summary.freeImpactSpent - projectedAdditionalImpact);
+  const currentFreeAtCalculation = Math.round(summary.freeBudget - summary.freeImpactSpent);
+  const projectedFreeAtEnd = Math.round(currentFreeAtCalculation - projectedAdditionalImpact);
   const dailyAllowance = remainingDays > 0 ? Math.floor(summary.freeRemaining / remainingDays) : summary.freeRemaining;
   let status = "steady";
 
@@ -197,6 +198,7 @@ export function predictPeriodEnd(state, today) {
     elapsedDays,
     remainingDays,
     dailyFreeImpact,
+    currentFreeAtCalculation,
     projectedAdditionalImpact,
     projectedFreeAtEnd,
     shortage: Math.max(0, -projectedFreeAtEnd),

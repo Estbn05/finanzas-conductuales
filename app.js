@@ -11,7 +11,7 @@ import {
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictPeriodEnd as getPeriodForecast,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260619-forecast-clarity-v20";
+} from "./finance-core.js?v=20260619-forecast-formula-v21";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -23,7 +23,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260619-forecast-clarity-v20";
+} from "./sync-client.js?v=20260619-forecast-formula-v21";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -1053,8 +1053,50 @@ function renderForecastCard(summary = budgetSummary()) {
         <strong>${formatMoney(amount)}</strong>
         <small>${statusLabel}</small>
       </div>
+      ${renderForecastHelp(summary, forecast)}
     </article>
   `;
+}
+
+function renderForecastHelp(summary, forecast) {
+  return `
+    <div class="forecast-help" aria-label="Para que sirve y como se calcula">
+      <div>
+        <strong>Para que sirve</strong>
+        <span>Te avisa antes del proximo pago si tu dinero libre podria alcanzar. No cambia saldos: sirve para decidir si bajas gasto libre, ajustas limites o agregas dinero.</span>
+      </div>
+      <div>
+        <strong>Como se calcula</strong>
+        <span>Libre calculado hoy - gasto libre estimado de los dias que faltan = cierre estimado.</span>
+        <code>${forecastFormulaText(summary, forecast)}</code>
+        <small>${forecastPaceText(forecast)}</small>
+      </div>
+    </div>
+  `;
+}
+
+function forecastCurrentFreeAtCalculation(summary, forecast) {
+  if (Number.isFinite(Number(forecast.currentFreeAtCalculation))) {
+    return Math.round(Number(forecast.currentFreeAtCalculation));
+  }
+  return Math.round(Number(summary.freeBudget || 0) - Number(summary.freeImpactSpent || 0));
+}
+
+function forecastFormulaText(summary, forecast) {
+  const currentFree = forecastCurrentFreeAtCalculation(summary, forecast);
+  const projectedSpend = Math.max(0, Number(forecast.projectedAdditionalImpact || 0));
+  const projectedEnd = Math.round(Number(forecast.projectedFreeAtEnd || 0));
+  return `${formatMoney(currentFree)} - ${formatMoney(projectedSpend)} = ${formatMoney(projectedEnd)}`;
+}
+
+function forecastPaceText(forecast) {
+  if (forecast.remainingDays <= 0) {
+    return "No proyecta dias extra porque el periodo termina hoy.";
+  }
+  if (forecast.confidence === "empty") {
+    return `Aun no hay gastos registrados; por ahora usa ${formatMoney(0)} por dia.`;
+  }
+  return `Gasto estimado: ${formatMoney(Math.round(forecast.dailyFreeImpact))} diarios x ${formatDays(forecast.remainingDays)}.`;
 }
 
 function forecastHeadline(forecast) {
@@ -1245,6 +1287,7 @@ function renderPeriodCloseCard(summary = budgetSummary()) {
         <div><span>Gastos e ingresos</span><strong>${movements.length}</strong></div>
       </div>
       <p>${periodCloseInsight(summary, forecast)}</p>
+      <p class="period-close-calculation"><strong>Calculo:</strong> ${forecastFormulaText(summary, forecast)}. ${forecastPaceText(forecast)}</p>
       <button class="btn secondary" type="button" data-action="save-period-close">${closure ? "Actualizar revision" : isFinalClose ? "Guardar cierre final" : "Guardar revision de hoy"}</button>
     </article>
   `;
@@ -1262,7 +1305,7 @@ function periodCloseInsight(summary, forecast) {
     return `Sirve para ver si el plan cabe. Ahora hay ${formatMoney(summary.overReserved)} mas reservado que presupuesto.`;
   }
   if (forecast.shortage > 0) {
-    return `Sirve para comparar tu libre de hoy con una proyeccion al cierre. No significa que debas ese dinero: significa que este ritmo no alcanza.`;
+    return `Sirve para comparar tu libre de hoy con una proyeccion al cierre. No es un pago pendiente ni un cargo: es una alerta de que este ritmo no alcanza.`;
   }
   if (summary.categoryOverspent > 0) {
     return `Sirve para dejar visible el ajuste: hay ${formatMoney(summary.categoryOverspent)} por encima de limites, sin borrar movimientos.`;

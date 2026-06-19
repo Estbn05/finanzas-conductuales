@@ -1,19 +1,19 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CACHE_NAME = `${CACHE_PREFIX}20260619-forecast-clarity-v20`;
+const CACHE_NAME = `${CACHE_PREFIX}20260619-forecast-formula-v21`;
 const APP_SHELL = [
   "./",
   "index.html",
-  "styles.css?v=20260619-forecast-clarity-v20",
-  "app.js?v=20260619-forecast-clarity-v20",
-  "finance-core.js?v=20260619-forecast-clarity-v20",
-  "sync-client.js?v=20260619-forecast-clarity-v20",
-  "sync-config.js?v=20260619-forecast-clarity-v20",
-  "vendor/supabase-2.108.1.min.js?v=20260619-forecast-clarity-v20",
-  "manifest.webmanifest?v=20260619-forecast-clarity-v20",
-  "assets/icon.svg?v=20260619-forecast-clarity-v20",
-  "assets/icon-192.png?v=20260619-forecast-clarity-v20",
-  "assets/icon-512.png?v=20260619-forecast-clarity-v20",
-  "assets/apple-touch-icon.png?v=20260619-forecast-clarity-v20"
+  "styles.css?v=20260619-forecast-formula-v21",
+  "app.js?v=20260619-forecast-formula-v21",
+  "finance-core.js?v=20260619-forecast-formula-v21",
+  "sync-client.js?v=20260619-forecast-formula-v21",
+  "sync-config.js?v=20260619-forecast-formula-v21",
+  "vendor/supabase-2.108.1.min.js?v=20260619-forecast-formula-v21",
+  "manifest.webmanifest?v=20260619-forecast-formula-v21",
+  "assets/icon.svg?v=20260619-forecast-formula-v21",
+  "assets/icon-192.png?v=20260619-forecast-formula-v21",
+  "assets/icon-512.png?v=20260619-forecast-formula-v21",
+  "assets/apple-touch-icon.png?v=20260619-forecast-formula-v21"
 ];
 
 self.addEventListener("install", (event) => {

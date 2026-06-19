@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260619-forecast-clarity-v20";
+const ASSET_VERSION = "20260619-forecast-formula-v21";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -198,13 +198,18 @@ test("period forecast, period close and merchant rules are exposed in the app sh
 
   assert.ok(core.includes("export function predictPeriodEnd"));
   assert.ok(core.includes("projectedFreeAtEnd"));
+  assert.ok(core.includes("currentFreeAtCalculation"));
   assert.ok(app.includes("predictPeriodEnd as getPeriodForecast"));
   assert.ok(app.includes("function renderForecastCard"));
   assert.ok(app.includes("Proyeccion del periodo"));
   assert.ok(app.includes("No mueve dinero ni crea cargos"));
+  assert.ok(app.includes("Para que sirve"));
+  assert.ok(app.includes("Como se calcula"));
+  assert.ok(app.includes("Libre calculado hoy - gasto libre estimado"));
   assert.ok(app.includes("Revision del periodo"));
   assert.ok(app.includes("Guardar revision de hoy"));
   assert.ok(app.includes("forecastAmountLabel"));
+  assert.ok(app.includes("forecastFormulaText"));
   assert.ok(app.includes("function renderPeriodCloseCard"));
   assert.ok(app.includes('data-action="save-period-close"'));
   assert.ok(app.includes("function savePeriodClosure"));
@@ -217,8 +222,9 @@ test("period forecast, period close and merchant rules are exposed in the app sh
   assert.ok(app.includes("merchantRules: []"));
   assert.ok(app.includes("data-apply-merchant-rule"));
   assert.ok(app.includes('data-action="remove-merchant-rule"'));
-  assert.ok(styles.includes("Forecast, period close and merchant rules v20"));
+  assert.ok(styles.includes("Forecast, period close and merchant rules v21"));
   assert.ok(styles.includes(".forecast-card"));
+  assert.ok(styles.includes(".forecast-help"));
   assert.ok(styles.includes(".period-close-card"));
   assert.ok(styles.includes(".merchant-rule-suggestion"));
   assert.ok(styles.includes(".merchant-rules-panel"));

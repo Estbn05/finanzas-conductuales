@@ -427,6 +427,7 @@ test("period forecast projects free money at the current spending pace", () => {
   assert.equal(forecast.totalDays, 30);
   assert.equal(forecast.elapsedDays, 10);
   assert.equal(forecast.remainingDays, 20);
+  assert.equal(forecast.currentFreeAtCalculation, 600_000);
   assert.equal(forecast.projectedAdditionalImpact, 200_000);
   assert.equal(forecast.projectedFreeAtEnd, 400_000);
   assert.equal(forecast.status, "steady");
