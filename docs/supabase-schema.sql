@@ -6,22 +6,29 @@ create table if not exists public.finance_app_state (
 
 alter table public.finance_app_state enable row level security;
 
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on public.finance_app_state to authenticated;
+
+drop policy if exists "Users can read their finance state" on public.finance_app_state;
 create policy "Users can read their finance state"
 on public.finance_app_state
 for select
 using (auth.uid() = user_id);
 
+drop policy if exists "Users can insert their finance state" on public.finance_app_state;
 create policy "Users can insert their finance state"
 on public.finance_app_state
 for insert
 with check (auth.uid() = user_id);
 
+drop policy if exists "Users can update their finance state" on public.finance_app_state;
 create policy "Users can update their finance state"
 on public.finance_app_state
 for update
 using (auth.uid() = user_id)
 with check (auth.uid() = user_id);
 
+drop policy if exists "Users can delete their finance state" on public.finance_app_state;
 create policy "Users can delete their finance state"
 on public.finance_app_state
 for delete

@@ -57,6 +57,42 @@ function clearSessionBackup() {
   } catch {}
 }
 
+async function restoreCloudSession(cloud, backup) {
+  const { data, error } = await withCloudTimeout(cloud.auth.setSession(backup), "Restaurar la sesion");
+  if (error) {
+    throw error;
+  }
+  persistSessionBackup(data.session);
+  return data.session;
+}
+
+async function getStoredCloudSession(cloud, backup) {
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const { data, error } = await withCloudTimeout(cloud.auth.getSession(), "Comprobar la sesion");
+      if (error) {
+        throw error;
+      }
+      if (data.session) {
+        persistSessionBackup(data.session);
+        return data.session;
+      }
+
+      if (!backup) {
+        return null;
+      }
+      return await restoreCloudSession(cloud, backup);
+    } catch (error) {
+      lastError = error;
+      if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, SESSION_RETRY_DELAY_MS));
+      }
+    }
+  }
+  throw lastError;
+}
+
 export function clearStoredCloudSession() {
   clearSessionBackup();
 }
@@ -97,48 +133,12 @@ export async function getCloudSession() {
 
   const backup = readSessionBackup();
   if (isCurrentSessionBackup(backup)) {
-    withCloudTimeout(cloud.auth.setSession(backup), "Restaurar la sesion")
-      .then(({ data, error }) => {
-        if (!error) {
-          persistSessionBackup(data.session);
-        }
-      })
+    restoreCloudSession(cloud, backup)
       .catch(() => {});
     return backup;
   }
 
-  let lastError;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const { data, error } = await withCloudTimeout(cloud.auth.getSession(), "Comprobar la sesion");
-      if (error) {
-        throw error;
-      }
-      if (data.session) {
-        persistSessionBackup(data.session);
-        return data.session;
-      }
-
-      if (!backup) {
-        return null;
-      }
-      const { data: restored, error: restoreError } = await withCloudTimeout(
-        cloud.auth.setSession(backup),
-        "Restaurar la sesion"
-      );
-      if (restoreError) {
-        throw restoreError;
-      }
-      persistSessionBackup(restored.session);
-      return restored.session;
-    } catch (error) {
-      lastError = error;
-      if (attempt === 0) {
-        await new Promise((resolve) => setTimeout(resolve, SESSION_RETRY_DELAY_MS));
-      }
-    }
-  }
-  throw lastError;
+  return getStoredCloudSession(cloud, backup);
 }
 
 export function onCloudAuthChange(callback) {
@@ -195,8 +195,8 @@ export async function signOutFromCloud() {
 
 export async function loadCloudState() {
   const cloud = getCloudClient();
-  const session = await getCloudSession();
-  if (!cloud || !session) {
+  const userId = await getCloudUserIdForRequest(cloud);
+  if (!cloud || !userId) {
     return null;
   }
 
@@ -204,7 +204,7 @@ export async function loadCloudState() {
     cloud
       .from("finance_app_state")
       .select("app_state, updated_at")
-      .eq("user_id", session.user.id)
+      .eq("user_id", userId)
       .maybeSingle(),
     "Descargar los datos"
   );
@@ -217,8 +217,8 @@ export async function loadCloudState() {
 
 export async function saveCloudState(appState) {
   const cloud = getCloudClient();
-  const session = await getCloudSession();
-  if (!cloud || !session) {
+  const userId = await getCloudUserIdForRequest(cloud);
+  if (!cloud || !userId) {
     return null;
   }
 
@@ -227,10 +227,10 @@ export async function saveCloudState(appState) {
     cloud
       .from("finance_app_state")
       .upsert({
-        user_id: session.user.id,
+        user_id: userId,
         app_state: appState,
         updated_at: updatedAt
-      })
+      }, { onConflict: "user_id" })
       .select("updated_at")
       .single(),
     "Guardar los datos"
@@ -240,4 +240,44 @@ export async function saveCloudState(appState) {
     throw error;
   }
   return data;
+}
+
+async function getCloudUserIdForRequest(cloud) {
+  if (!cloud) {
+    return "";
+  }
+
+  const session = await getCloudSessionForRequest(cloud);
+  if (!session) {
+    return "";
+  }
+
+  if (cloud.auth.getUser) {
+    try {
+      const { data, error } = await withCloudTimeout(cloud.auth.getUser(), "Comprobar el usuario activo");
+      if (error) {
+        throw error;
+      }
+      if (data?.user?.id) {
+        return data.user.id;
+      }
+    } catch (error) {
+      if (!session?.user?.id) {
+        throw error;
+      }
+    }
+  }
+
+  return session?.user?.id || "";
+}
+
+async function getCloudSessionForRequest(cloud) {
+  const backup = readSessionBackup();
+  if (isCurrentSessionBackup(backup)) {
+    try {
+      return await restoreCloudSession(cloud, backup);
+    } catch {}
+  }
+
+  return getStoredCloudSession(cloud, backup);
 }

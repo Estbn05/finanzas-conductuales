@@ -120,3 +120,50 @@ test("stored cloud session can be cleared without a network round trip", async (
 
   assert.equal(storage.getItem(backupKey), null);
 });
+
+test("cloud saves use the authenticated Supabase user after restoring a backup session", async () => {
+  const backupKey = "finanzas-conductuales:cloud-session:v1";
+  const backup = {
+    access_token: "saved-access",
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+    refresh_token: "saved-refresh",
+    user: { id: "stale-user", email: "saved@example.com" }
+  };
+  const storage = createStorage({ [backupKey]: JSON.stringify(backup) });
+  let savedRow;
+  const liveSession = {
+    ...backup,
+    user: { id: "live-user", email: "saved@example.com" }
+  };
+  const cloud = {
+    auth: {
+      getUser: async () => ({ data: { user: liveSession.user }, error: null }),
+      setSession: async () => ({ data: { session: liveSession }, error: null })
+    },
+    from(table) {
+      assert.equal(table, "finance_app_state");
+      return {
+        upsert(row, options) {
+          savedRow = row;
+          assert.deepEqual(options, { onConflict: "user_id" });
+          return {
+            select(columns) {
+              assert.equal(columns, "updated_at");
+              return {
+                single: async () => ({ data: { updated_at: "2026-06-18T00:00:00.000Z" }, error: null })
+              };
+            }
+          };
+        }
+      };
+    }
+  };
+  installCloudMock(cloud, storage);
+
+  const syncClient = await import(`../sync-client.js?save-user-test=${Date.now()}`);
+  const result = await syncClient.saveCloudState({ profile: { completed: true } });
+
+  assert.equal(savedRow.user_id, "live-user");
+  assert.deepEqual(savedRow.app_state, { profile: { completed: true } });
+  assert.equal(result.updated_at, "2026-06-18T00:00:00.000Z");
+});

@@ -559,13 +559,17 @@ function saveLocalBackup(reason, snapshot = state) {
 
 function friendlyCloudError(error) {
   const message = error?.message || String(error);
-  if (message.toLowerCase().includes("invalid login")) {
+  const normalizedMessage = message.toLowerCase();
+  if (normalizedMessage.includes("row-level security") || normalizedMessage.includes("42501")) {
+    return "Supabase bloqueo el guardado por permisos de esta sesion. Tus datos locales siguen aqui; cierra sesion e inicia de nuevo. Si se repite, actualiza las politicas SQL de finance_app_state.";
+  }
+  if (normalizedMessage.includes("invalid login")) {
     return "Correo o contrasena incorrectos.";
   }
-  if (message.toLowerCase().includes("fetch")) {
+  if (normalizedMessage.includes("fetch")) {
     return "No pude conectar con la nube. Revisa internet.";
   }
-  if (message.toLowerCase().includes("libreria de nube")) {
+  if (normalizedMessage.includes("libreria de nube")) {
     return "No pude cargar Supabase. Revisa internet y recarga la pagina.";
   }
   return message;
