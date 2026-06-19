@@ -7213,3 +7213,28 @@ html[data-theme="dark"] .bottom-nav-item.is-active,
 html[data-theme="dark"] .bottom-nav-item.is-active .bottom-nav-icon {
   color: var(--ds-primary-strong) !important;
 }
+
+/* Quick expense dark contrast v7 */
+html[data-theme="dark"] .quick-expense-panel .metric-badge {
+  color: var(--ds-primary-strong) !important;
+  border-color: rgba(103, 217, 181, 0.2) !important;
+  background: rgba(103, 217, 181, 0.12) !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="dark"] .quick-expense-panel .choice-pill {
+  color: var(--ds-muted) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  background: rgba(255, 255, 255, 0.055) !important;
+}
+
+html[data-theme="dark"] .quick-expense-panel .choice-pill.is-active {
+  color: var(--ds-primary-strong) !important;
+  border-color: rgba(103, 217, 181, 0.34) !important;
+  background: rgba(103, 217, 181, 0.18) !important;
+}
+
+html[data-theme="dark"] .quick-expense-panel .choice-pill:not(.is-active):hover {
+  color: var(--ds-ink) !important;
+  background: rgba(255, 255, 255, 0.09) !important;
+}
