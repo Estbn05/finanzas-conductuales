@@ -7407,3 +7407,48 @@ html[data-theme="dark"] .savings-hero .trust-tags span,
     -webkit-text-fill-color: var(--ds-primary-strong) !important;
   }
 }
+
+/* Calendar reminder dark contrast v13 */
+html[data-theme="dark"] .reminder-panel .metric-badge,
+#app[data-theme="dark"] .reminder-panel .metric-badge {
+  color: var(--ds-primary-strong) !important;
+  border-color: rgba(103, 217, 181, 0.22) !important;
+  background: rgba(103, 217, 181, 0.14) !important;
+  box-shadow: none !important;
+  -webkit-text-fill-color: var(--ds-primary-strong) !important;
+}
+
+html[data-theme="dark"] .reminder-panel .metric-badge.danger,
+#app[data-theme="dark"] .reminder-panel .metric-badge.danger {
+  color: var(--ds-danger) !important;
+  border-color: rgba(255, 157, 145, 0.24) !important;
+  background: rgba(255, 157, 145, 0.14) !important;
+  -webkit-text-fill-color: var(--ds-danger) !important;
+}
+
+html[data-theme="dark"] .reminder-actions .btn:disabled,
+#app[data-theme="dark"] .reminder-actions .btn:disabled {
+  color: var(--ds-muted) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+  -webkit-text-fill-color: var(--ds-muted) !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  .reminder-panel .metric-badge {
+    color: var(--ds-primary-strong) !important;
+    border-color: rgba(103, 217, 181, 0.22) !important;
+    background: rgba(103, 217, 181, 0.14) !important;
+    -webkit-text-fill-color: var(--ds-primary-strong) !important;
+  }
+
+  .reminder-actions .btn:disabled {
+    color: var(--ds-muted) !important;
+    border-color: rgba(255, 255, 255, 0.14) !important;
+    background: rgba(255, 255, 255, 0.07) !important;
+    opacity: 1 !important;
+    -webkit-text-fill-color: var(--ds-muted) !important;
+  }
+}

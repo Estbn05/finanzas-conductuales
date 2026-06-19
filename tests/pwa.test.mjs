@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260618-ui-system-v12";
+const ASSET_VERSION = "20260618-ui-system-v13";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -120,6 +120,9 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(styles.includes("-webkit-overflow-scrolling: touch"));
   assert.ok(styles.includes("Savings hero tag contrast v12"));
   assert.ok(styles.includes(".savings-hero .trust-tags span"));
+  assert.ok(styles.includes("Calendar reminder dark contrast v13"));
+  assert.ok(styles.includes(".reminder-panel .metric-badge"));
+  assert.ok(styles.includes(".reminder-actions .btn:disabled"));
   assert.ok(styles.includes("--ds-bg: #f6f1e7"));
   assert.ok(styles.includes("--ds-bg: #f7f4ee"));
   assert.ok(styles.includes(":focus-visible"));
