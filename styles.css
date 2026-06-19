@@ -7387,3 +7387,23 @@ html[data-theme="dark"] .bottom-sheet.transaction-editor .extra-edit-allocation 
     padding-bottom: 10px;
   }
 }
+
+/* Savings hero tag contrast v12 */
+.savings-hero .trust-tags span,
+html[data-theme="dark"] .savings-hero .trust-tags span,
+#app[data-theme="dark"] .savings-hero .trust-tags span {
+  color: var(--ds-primary-strong) !important;
+  border: 1px solid rgba(103, 217, 181, 0.22) !important;
+  background: rgba(103, 217, 181, 0.14) !important;
+  box-shadow: none !important;
+  -webkit-text-fill-color: var(--ds-primary-strong) !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  .savings-hero .trust-tags span {
+    color: var(--ds-primary-strong) !important;
+    border-color: rgba(103, 217, 181, 0.22) !important;
+    background: rgba(103, 217, 181, 0.14) !important;
+    -webkit-text-fill-color: var(--ds-primary-strong) !important;
+  }
+}

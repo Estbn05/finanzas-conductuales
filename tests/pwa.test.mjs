@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260618-ui-system-v11";
+const ASSET_VERSION = "20260618-ui-system-v12";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -118,6 +118,8 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(styles.includes("Mobile drawer scroll fix v11"));
   assert.ok(styles.includes("height: 100dvh"));
   assert.ok(styles.includes("-webkit-overflow-scrolling: touch"));
+  assert.ok(styles.includes("Savings hero tag contrast v12"));
+  assert.ok(styles.includes(".savings-hero .trust-tags span"));
   assert.ok(styles.includes("--ds-bg: #f6f1e7"));
   assert.ok(styles.includes("--ds-bg: #f7f4ee"));
   assert.ok(styles.includes(":focus-visible"));
@@ -441,6 +443,7 @@ test("savings remains advisory and debt features are removed", async () => {
 
   assert.ok(app.includes("Orientativo"));
   assert.ok(app.includes("No mueve dinero"));
+  assert.ok((await readFile(new URL("../styles.css", import.meta.url), "utf8")).includes("Savings hero tag contrast v12"));
   assert.ok(app.includes("suggestedPeriodSavings"));
   assert.ok(core.includes("savingsCapacityGap"));
   assert.ok(core.includes("savingsReserved"));
