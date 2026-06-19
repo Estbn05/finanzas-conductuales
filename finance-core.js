@@ -171,60 +171,105 @@ export function budgetSummary(state, today) {
   };
 }
 
-export function predictPeriodEnd(state, today) {
+export function predictUntilNextPeriod(state, today) {
   const summary = budgetSummary(state, today);
   const currentKey = today ? String(today).slice(0, 10) : dateKey(new Date());
   const totalDays = Math.max(1, daysBetween(summary.window.start, summary.window.end));
-  const elapsedDays = Math.max(1, Math.min(totalDays, daysBetween(summary.window.start, currentKey) + 1));
-  const remainingDays = Math.max(0, totalDays - elapsedDays);
-  const trendDaysNeeded = forecastTrendDaysNeeded(totalDays);
-  const observedDailyFreeImpact = summary.freeImpactSpent / elapsedDays;
-  const usesTrendProjection = summary.freeImpactSpent > 0 && elapsedDays >= trendDaysNeeded;
-  const dailyFreeImpact = usesTrendProjection ? observedDailyFreeImpact : 0;
-  const projectedAdditionalImpact = Math.round(dailyFreeImpact * remainingDays);
-  const currentFreeAtCalculation = Math.round(summary.freeBudget - summary.freeImpactSpent);
-  const projectedFreeAtEnd = Math.round(currentFreeAtCalculation - projectedAdditionalImpact);
-  const dailyAllowance = remainingDays > 0 ? Math.floor(summary.freeRemaining / remainingDays) : summary.freeRemaining;
-  let status = "steady";
+  const observedDays = Math.max(1, Math.min(totalDays, daysBetween(summary.window.start, currentKey) + 1));
+  const remainingDays = Math.max(0, totalDays - observedDays);
+  const minimumObservedDays = predictionMinimumObservedDays(totalDays);
+  const pace = freeImpactForPrediction(state, summary, today);
+  const freeToday = Math.round(summary.freeBudget - summary.freeImpactSpent);
+  const hasObservedPace = pace.observedFreeSpent > 0;
+  const hasReliablePace = hasObservedPace && observedDays >= minimumObservedDays;
+  const observedDailyRate = hasObservedPace ? pace.observedFreeSpent / observedDays : 0;
+  const dailyRate = hasReliablePace ? observedDailyRate : 0;
+  const projectedRemainingSpend = Math.round(dailyRate * remainingDays);
+  const projectedEndFree = Math.round(freeToday - projectedRemainingSpend);
+  const shortage = Math.max(0, -projectedEndFree);
+  const tightThreshold = Math.round(summary.income * LARGE_PURCHASE_RATIO);
+  let status = "healthy";
+  let confidence = hasReliablePace ? "normal" : "learning";
 
   if (summary.overReserved > 0) {
     status = "over_reserved";
-  } else if (summary.freeImpactSpent > 0 && !usesTrendProjection && remainingDays > 0) {
+    confidence = "normal";
+  } else if (freeToday < 0) {
+    status = "risk";
+    confidence = hasReliablePace ? "normal" : hasObservedPace ? "learning" : "empty";
+  } else if (!hasObservedPace) {
+    status = "empty";
+    confidence = "empty";
+  } else if (!hasReliablePace && remainingDays > 0) {
     status = "learning";
-  } else if (projectedFreeAtEnd < 0) {
-    status = "short";
-  } else if (remainingDays > 0 && projectedFreeAtEnd < summary.income * 0.08) {
+  } else if (projectedEndFree < 0) {
+    status = "risk";
+  } else if (remainingDays > 0 && projectedEndFree < tightThreshold) {
     status = "tight";
   }
 
   return {
     window: summary.window,
     totalDays,
-    elapsedDays,
+    observedDays,
     remainingDays,
-    trendDaysNeeded,
-    freeImpactSpent: summary.freeImpactSpent,
-    observedDailyFreeImpact,
-    usesTrendProjection,
-    dailyFreeImpact,
-    currentFreeAtCalculation,
-    projectedAdditionalImpact,
-    projectedFreeAtEnd,
-    shortage: Math.max(0, -projectedFreeAtEnd),
-    dailyAllowance,
+    minimumObservedDays,
+    freeBudget: summary.freeBudget,
+    reserved: summary.reserved,
+    overReserved: summary.overReserved,
+    freeToday,
+    observedFreeSpent: pace.observedFreeSpent,
+    ignoredOneOffSpent: pace.ignoredOneOffSpent,
+    observedDailyRate,
+    dailyRate,
+    projectedRemainingSpend,
+    projectedEndFree,
+    shortage,
+    tightThreshold,
     status,
-    confidence: summary.totalSpent === 0 ? "empty" : usesTrendProjection ? "normal" : "early"
+    confidence
   };
 }
 
-function forecastTrendDaysNeeded(totalDays) {
+function predictionMinimumObservedDays(totalDays) {
   if (totalDays >= 90) {
     return 7;
   }
-  if (totalDays >= 21) {
-    return 3;
-  }
-  return Math.min(2, totalDays);
+  return Math.min(3, totalDays);
+}
+
+function freeImpactForPrediction(state, summary, today) {
+  const validCategoryIds = new Set((state.budgetJobs || []).map((job) => job.id));
+  const spent = {};
+  let ignoredOneOffSpent = 0;
+
+  (state.transactions || [])
+    .filter((transaction) => isInBudgetWindow(transaction.date, state.profile, today))
+    .forEach((transaction) => {
+      const amount = Number(transaction.amount || 0);
+      if (transaction.oneOff || transaction.excludeFromPrediction) {
+        ignoredOneOffSpent += amount;
+        return;
+      }
+      const category =
+        transaction.labeled && validCategoryIds.has(transaction.category)
+          ? transaction.category
+          : FREE_CATEGORY_ID;
+      spent[category] = (spent[category] || 0) + amount;
+    });
+
+  const categoryOverspent = (state.budgetJobs || []).reduce((sum, job) => {
+    const used = spent[job.id] || 0;
+    const budget = budgetAmountForJob(job, state.profile);
+    return sum + Math.max(0, used - budget);
+  }, 0);
+  const observedFreeSpent = (spent[FREE_CATEGORY_ID] || 0) + categoryOverspent;
+
+  return {
+    observedFreeSpent,
+    ignoredOneOffSpent,
+    actualFreeImpactSpent: summary.freeImpactSpent
+  };
 }
 
 export function budgetRingAllocation(summary) {

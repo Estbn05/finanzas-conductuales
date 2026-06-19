@@ -7530,8 +7530,8 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   }
 }
 
-/* Forecast, period close and merchant rules v22 */
-.forecast-card,
+/* Prediction, period close and merchant rules v23 */
+.prediction-card,
 .period-close-card,
 .merchant-rules-panel {
   display: grid;
@@ -7544,13 +7544,13 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   box-shadow: var(--ds-shadow-xs);
 }
 
-.forecast-card {
+.prediction-card {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   padding: 14px;
 }
 
-.forecast-card h2,
+.prediction-card h2,
 .period-close-card h2,
 .merchant-rules-heading h2 {
   margin: 2px 0 0;
@@ -7560,7 +7560,7 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   letter-spacing: 0;
 }
 
-.forecast-card span,
+.prediction-card span,
 .period-close-card p,
 .merchant-rules-heading span,
 .merchant-rule-chip span,
@@ -7570,7 +7570,7 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   line-height: 1.45;
 }
 
-.forecast-number {
+.prediction-number {
   display: grid;
   justify-items: end;
   gap: 3px;
@@ -7578,13 +7578,13 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   font-variant-numeric: tabular-nums;
 }
 
-.forecast-number strong {
+.prediction-number strong {
   color: var(--ds-primary-strong);
   font-size: 1.16rem;
   font-weight: 850;
 }
 
-.forecast-explainer {
+.prediction-explainer {
   margin: 8px 0 0;
   max-width: 620px;
   color: var(--ds-muted);
@@ -7592,14 +7592,14 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   line-height: 1.45;
 }
 
-.forecast-number > span {
+.prediction-number > span {
   color: var(--ds-muted);
   font-size: 0.68rem;
   font-weight: 760;
   text-transform: uppercase;
 }
 
-.forecast-help {
+.prediction-help {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -7608,20 +7608,20 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   padding-top: 12px;
 }
 
-.forecast-help div {
+.prediction-help div {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.forecast-help strong,
+.prediction-help strong,
 .period-close-calculation strong {
   color: var(--ds-ink);
   font-size: 0.7rem;
   font-weight: 830;
 }
 
-.forecast-help code {
+.prediction-help code {
   overflow-wrap: anywhere;
   color: var(--ds-ink);
   font-family: inherit;
@@ -7629,14 +7629,14 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   font-weight: 800;
 }
 
-.forecast-help small,
+.prediction-help small,
 .period-close-calculation {
   color: var(--ds-muted);
   font-size: 0.68rem;
   line-height: 1.45;
 }
 
-.forecast-number small,
+.prediction-number small,
 .period-close-saved {
   display: inline-flex;
   min-height: 26px;
@@ -7649,15 +7649,15 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   font-weight: 760;
 }
 
-.forecast-card.tight .forecast-number strong,
-.forecast-card.short .forecast-number strong,
-.forecast-card.over_reserved .forecast-number strong {
+.prediction-card.tight .prediction-number strong,
+.prediction-card.risk .prediction-number strong,
+.prediction-card.over_reserved .prediction-number strong {
   color: var(--amber);
 }
 
-.forecast-card.short .forecast-number small,
-.forecast-card.over_reserved .forecast-number small,
-.period-close-card.short .period-close-saved,
+.prediction-card.risk .prediction-number small,
+.prediction-card.over_reserved .prediction-number small,
+.period-close-card.risk .period-close-saved,
 .period-close-card.over_reserved .period-close-saved {
   border-color: rgba(184, 67, 60, 0.18);
   color: var(--coral);
@@ -7766,10 +7766,10 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   color: var(--ds-ink);
 }
 
-html[data-theme="dark"] .forecast-card,
+html[data-theme="dark"] .prediction-card,
 html[data-theme="dark"] .period-close-card,
 html[data-theme="dark"] .merchant-rules-panel,
-#app[data-theme="dark"] .forecast-card,
+#app[data-theme="dark"] .prediction-card,
 #app[data-theme="dark"] .period-close-card,
 #app[data-theme="dark"] .merchant-rules-panel {
   color: var(--ds-ink) !important;
@@ -7787,8 +7787,8 @@ html[data-theme="dark"] .merchant-rule-chip,
   background: rgba(255, 255, 255, 0.04) !important;
 }
 
-html[data-theme="dark"] .forecast-help,
-#app[data-theme="dark"] .forecast-help {
+html[data-theme="dark"] .prediction-help,
+#app[data-theme="dark"] .prediction-help {
   border-color: rgba(255, 255, 255, 0.1) !important;
 }
 
@@ -7799,17 +7799,17 @@ html[data-theme="dark"] .merchant-rule-suggestion,
 }
 
 @media (max-width: 520px) {
-  .forecast-card,
+  .prediction-card,
   .merchant-rule-suggestion {
     grid-template-columns: 1fr;
   }
 
-  .forecast-number {
+  .prediction-number {
     justify-items: start;
     min-width: 0;
   }
 
-  .forecast-help {
+  .prediction-help {
     grid-template-columns: 1fr;
   }
 

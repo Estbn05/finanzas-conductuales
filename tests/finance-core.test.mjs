@@ -10,7 +10,7 @@ import {
   extraIncomeForPeriod,
   getEmergencyTarget,
   isLargeUnbudgetedPurchase,
-  predictPeriodEnd
+  predictUntilNextPeriod
 } from "../finance-core.js";
 
 test("budget ring allocation is an exact non-overlapping partition of income", () => {
@@ -408,7 +408,7 @@ test("large unbudgeted purchases use the 8 percent cooling-off threshold", () =>
   assert.equal(isLargeUnbudgetedPurchase(160_000, 2_000_000), true);
 });
 
-test("period forecast projects free money at the current spending pace", () => {
+test("period prediction projects free money only after enough observed days", () => {
   const state = makeState({
     profile: {
       incomeCadence: "monthly",
@@ -422,21 +422,22 @@ test("period forecast projects free money at the current spending pace", () => {
     ]
   });
 
-  const forecast = predictPeriodEnd(state, "2026-06-10");
+  const prediction = predictUntilNextPeriod(state, "2026-06-10");
 
-  assert.equal(forecast.totalDays, 30);
-  assert.equal(forecast.elapsedDays, 10);
-  assert.equal(forecast.remainingDays, 20);
-  assert.equal(forecast.trendDaysNeeded, 3);
-  assert.equal(forecast.usesTrendProjection, true);
-  assert.equal(forecast.observedDailyFreeImpact, 10_000);
-  assert.equal(forecast.currentFreeAtCalculation, 600_000);
-  assert.equal(forecast.projectedAdditionalImpact, 200_000);
-  assert.equal(forecast.projectedFreeAtEnd, 400_000);
-  assert.equal(forecast.status, "steady");
+  assert.equal(prediction.totalDays, 30);
+  assert.equal(prediction.observedDays, 10);
+  assert.equal(prediction.remainingDays, 20);
+  assert.equal(prediction.minimumObservedDays, 3);
+  assert.equal(prediction.confidence, "normal");
+  assert.equal(prediction.observedFreeSpent, 100_000);
+  assert.equal(prediction.observedDailyRate, 10_000);
+  assert.equal(prediction.freeToday, 600_000);
+  assert.equal(prediction.projectedRemainingSpend, 200_000);
+  assert.equal(prediction.projectedEndFree, 400_000);
+  assert.equal(prediction.status, "healthy");
 });
 
-test("period forecast does not extrapolate one early day across a semester", () => {
+test("period prediction does not extrapolate one early day across a semester", () => {
   const state = makeState({
     profile: {
       incomeCadence: "semester",
@@ -448,20 +449,19 @@ test("period forecast does not extrapolate one early day across a semester", () 
     transactions: [{ date: "2026-06-19", amount: 30_100, category: "free", labeled: true }]
   });
 
-  const forecast = predictPeriodEnd(state, "2026-06-19");
+  const prediction = predictUntilNextPeriod(state, "2026-06-19");
 
-  assert.equal(forecast.elapsedDays, 1);
-  assert.equal(forecast.trendDaysNeeded, 7);
-  assert.equal(forecast.usesTrendProjection, false);
-  assert.equal(forecast.observedDailyFreeImpact, 30_100);
-  assert.equal(forecast.dailyFreeImpact, 0);
-  assert.equal(forecast.projectedAdditionalImpact, 0);
-  assert.equal(forecast.projectedFreeAtEnd, 4_969_900);
-  assert.equal(forecast.status, "learning");
-  assert.equal(forecast.confidence, "early");
+  assert.equal(prediction.observedDays, 1);
+  assert.equal(prediction.minimumObservedDays, 7);
+  assert.equal(prediction.confidence, "learning");
+  assert.equal(prediction.observedFreeSpent, 30_100);
+  assert.equal(prediction.dailyRate, 0);
+  assert.equal(prediction.projectedRemainingSpend, 0);
+  assert.equal(prediction.projectedEndFree, 4_969_900);
+  assert.equal(prediction.status, "learning");
 });
 
-test("period forecast flags a likely shortfall", () => {
+test("period prediction flags a likely shortfall", () => {
   const state = makeState({
     profile: {
       incomeCadence: "monthly",
@@ -475,10 +475,31 @@ test("period forecast flags a likely shortfall", () => {
     ]
   });
 
-  const forecast = predictPeriodEnd(state, "2026-06-03");
+  const prediction = predictUntilNextPeriod(state, "2026-06-03");
 
-  assert.equal(forecast.projectedFreeAtEnd < 0, true);
-  assert.equal(forecast.usesTrendProjection, true);
-  assert.equal(forecast.status, "short");
-  assert.equal(forecast.shortage, 3_600_000);
+  assert.equal(prediction.projectedEndFree < 0, true);
+  assert.equal(prediction.confidence, "normal");
+  assert.equal(prediction.status, "risk");
+  assert.equal(prediction.shortage, 3_600_000);
+});
+
+test("one-off spending lowers free money but does not affect the daily pace", () => {
+  const state = makeState({
+    profile: {
+      incomeCadence: "monthly",
+      incomeAmount: 1_000_000,
+      periodStart: "2026-06-01"
+    },
+    budgetJobs: [],
+    transactions: [{ date: "2026-06-05", amount: 300_000, category: "free", labeled: true, oneOff: true }]
+  });
+
+  const prediction = predictUntilNextPeriod(state, "2026-06-05");
+
+  assert.equal(prediction.freeToday, 700_000);
+  assert.equal(prediction.observedFreeSpent, 0);
+  assert.equal(prediction.ignoredOneOffSpent, 300_000);
+  assert.equal(prediction.dailyRate, 0);
+  assert.equal(prediction.projectedEndFree, 700_000);
+  assert.equal(prediction.status, "empty");
 });

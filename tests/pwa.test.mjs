@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260619-forecast-learning-v22";
+const ASSET_VERSION = "20260619-period-prediction-v23";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -191,29 +191,29 @@ test("movements combines expenses and extra income and can sort the full history
   assert.equal(profile.includes("Movimientos del periodo"), false);
 });
 
-test("period forecast, period close and merchant rules are exposed in the app shell", async () => {
+test("period prediction, period close and merchant rules are exposed in the app shell", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
   const core = await readFile(new URL("../finance-core.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
 
-  assert.ok(core.includes("export function predictPeriodEnd"));
-  assert.ok(core.includes("projectedFreeAtEnd"));
-  assert.ok(core.includes("currentFreeAtCalculation"));
-  assert.ok(core.includes("usesTrendProjection"));
-  assert.ok(core.includes("trendDaysNeeded"));
-  assert.ok(app.includes("predictPeriodEnd as getPeriodForecast"));
-  assert.ok(app.includes("function renderForecastCard"));
-  assert.ok(app.includes("Proyeccion del periodo"));
+  assert.ok(core.includes("export function predictUntilNextPeriod"));
+  assert.ok(core.includes("projectedEndFree"));
+  assert.ok(core.includes("minimumObservedDays"));
+  assert.ok(core.includes("freeImpactForPrediction"));
+  assert.ok(core.includes("ignoredOneOffSpent"));
+  assert.ok(app.includes("predictUntilNextPeriod as getPeriodPrediction"));
+  assert.ok(app.includes("function renderPeriodPredictionCard"));
+  assert.ok(app.includes("Prediccion hasta el proximo periodo"));
   assert.ok(app.includes("No mueve dinero ni crea cargos"));
   assert.ok(app.includes("Para que sirve"));
   assert.ok(app.includes("Como se calcula"));
-  assert.ok(app.includes("Libre calculado hoy - gasto libre estimado"));
+  assert.ok(app.includes("Libre hoy - gasto libre estimado"));
   assert.ok(app.includes("Aprendiendo ritmo"));
-  assert.ok(app.includes("Aun no lo multiplico"));
+  assert.ok(app.includes("Gasto unico: no usar para ritmo diario"));
   assert.ok(app.includes("Revision del periodo"));
   assert.ok(app.includes("Guardar revision de hoy"));
-  assert.ok(app.includes("forecastAmountLabel"));
-  assert.ok(app.includes("forecastFormulaText"));
+  assert.ok(app.includes("predictionAmountLabel"));
+  assert.ok(app.includes("predictionFormulaText"));
   assert.ok(app.includes("function renderPeriodCloseCard"));
   assert.ok(app.includes('data-action="save-period-close"'));
   assert.ok(app.includes("function savePeriodClosure"));
@@ -226,9 +226,9 @@ test("period forecast, period close and merchant rules are exposed in the app sh
   assert.ok(app.includes("merchantRules: []"));
   assert.ok(app.includes("data-apply-merchant-rule"));
   assert.ok(app.includes('data-action="remove-merchant-rule"'));
-  assert.ok(styles.includes("Forecast, period close and merchant rules v22"));
-  assert.ok(styles.includes(".forecast-card"));
-  assert.ok(styles.includes(".forecast-help"));
+  assert.ok(styles.includes("Prediction, period close and merchant rules v23"));
+  assert.ok(styles.includes(".prediction-card"));
+  assert.ok(styles.includes(".prediction-help"));
   assert.ok(styles.includes(".period-close-card"));
   assert.ok(styles.includes(".merchant-rule-suggestion"));
   assert.ok(styles.includes(".merchant-rules-panel"));

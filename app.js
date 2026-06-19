@@ -9,9 +9,9 @@ import {
   getPeriodIncome,
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
-  predictPeriodEnd as getPeriodForecast,
+  predictUntilNextPeriod as getPeriodPrediction,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260619-forecast-learning-v22";
+} from "./finance-core.js?v=20260619-period-prediction-v23";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -23,7 +23,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260619-forecast-learning-v22";
+} from "./sync-client.js?v=20260619-period-prediction-v23";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -1010,7 +1010,7 @@ function renderToday(plan) {
   const homeSummary = budgetSummary();
   return `
     <section class="home-view" aria-label="Resumen del periodo">
-      ${renderForecastCard(homeSummary)}
+      ${renderPeriodPredictionCard(homeSummary)}
       <div class="home-section-heading">
         <div>
           <p class="eyebrow">Categorias del periodo</p>
@@ -1035,146 +1035,164 @@ function renderToday(plan) {
 
 }
 
-function renderForecastCard(summary = budgetSummary()) {
-  const forecast = periodForecast();
-  const statusLabel = forecastStatusLabel(forecast.status);
+function renderPeriodPredictionCard(summary = budgetSummary()) {
+  const prediction = periodPrediction();
+  const statusLabel = predictionStatusLabel(prediction.status);
   const endDate = formatShortDate(previousDay(summary.window.end));
-  const amount = forecastDisplayAmount(forecast);
+  const amount = predictionDisplayAmount(prediction);
   return `
-    <article class="forecast-card ${forecast.status}" aria-label="Proyeccion del periodo">
+    <article class="prediction-card ${prediction.status}" aria-label="Prediccion hasta el proximo periodo">
       <div>
-        <p class="eyebrow">Proyeccion del periodo</p>
-        <h2>${forecastHeadline(forecast)}</h2>
-        <span>${forecastCopy(forecast, endDate)}</span>
-        <p class="forecast-explainer">No mueve dinero ni crea cargos: es una alerta para decidir si bajas gasto libre, ajustas limites o agregas dinero.</p>
+        <p class="eyebrow">Prediccion hasta el proximo periodo</p>
+        <h2>${predictionHeadline(prediction)}</h2>
+        <span>${predictionCopy(prediction, endDate)}</span>
+        <p class="prediction-explainer">No mueve dinero ni crea cargos. Sirve para bajar ansiedad: ves a tiempo si tu dinero libre podria alcanzar antes del proximo pago.</p>
       </div>
-      <div class="forecast-number">
-        <span>${forecastAmountLabel(forecast)}</span>
+      <div class="prediction-number">
+        <span>${predictionAmountLabel(prediction)}</span>
         <strong>${formatMoney(amount)}</strong>
         <small>${statusLabel}</small>
       </div>
-      ${renderForecastHelp(summary, forecast)}
+      ${renderPredictionHelp(prediction)}
     </article>
   `;
 }
 
-function renderForecastHelp(summary, forecast) {
+function renderPredictionHelp(prediction) {
   return `
-    <div class="forecast-help" aria-label="Para que sirve y como se calcula">
+    <div class="prediction-help" aria-label="Para que sirve y como se calcula">
       <div>
         <strong>Para que sirve</strong>
-        <span>Te avisa antes del proximo pago si tu dinero libre podria alcanzar. No cambia saldos: sirve para decidir si bajas gasto libre, ajustas limites o agregas dinero.</span>
+        <span>${predictionPurposeText(prediction)}</span>
       </div>
       <div>
         <strong>Como se calcula</strong>
-        <span>Libre calculado hoy - gasto libre estimado de los dias que faltan = cierre estimado.</span>
-        <code>${forecastFormulaText(summary, forecast)}</code>
-        <small>${forecastPaceText(forecast)}</small>
+        <span>${predictionFormulaIntro(prediction)}</span>
+        <code>${predictionFormulaText(prediction)}</code>
+        <small>${predictionPaceText(prediction)}</small>
       </div>
     </div>
   `;
 }
 
-function forecastCurrentFreeAtCalculation(summary, forecast) {
-  if (Number.isFinite(Number(forecast.currentFreeAtCalculation))) {
-    return Math.round(Number(forecast.currentFreeAtCalculation));
+function predictionPurposeText(prediction) {
+  if (prediction.status === "learning") {
+    return "Te muestra lo observado sin convertir pocos dias en una alarma grande.";
   }
-  return Math.round(Number(summary.freeBudget || 0) - Number(summary.freeImpactSpent || 0));
+  if (prediction.status === "risk") {
+    if (prediction.freeToday < 0 && prediction.dailyRate === 0) {
+      return "Te avisa que el dinero libre de hoy ya quedo negativo, sin culpar al ritmo diario.";
+    }
+    return "Te avisa antes del proximo pago para ajustar limites, bajar gasto libre o agregar dinero.";
+  }
+  return "Te ayuda a saber si el dinero libre actual alcanza para cerrar el periodo con calma.";
 }
 
-function forecastFormulaText(summary, forecast) {
-  const currentFree = forecastCurrentFreeAtCalculation(summary, forecast);
-  const projectedSpend = Math.max(0, Number(forecast.projectedAdditionalImpact || 0));
-  const projectedEnd = Math.round(Number(forecast.projectedFreeAtEnd || 0));
-  if (!forecast.usesTrendProjection && forecast.remainingDays > 0 && Number(forecast.freeImpactSpent || 0) > 0) {
-    return `${formatMoney(currentFree)} - ${formatMoney(0)} = ${formatMoney(projectedEnd)} (sin proyectar todavia)`;
+function predictionFormulaIntro(prediction) {
+  if (prediction.status === "learning") {
+    return "Libre hoy = dinero libre inicial - gasto libre real. El ritmo aun no se proyecta.";
   }
-  return `${formatMoney(currentFree)} - ${formatMoney(projectedSpend)} = ${formatMoney(projectedEnd)}`;
+  if (prediction.status === "empty") {
+    return "Libre hoy = dinero libre inicial - gasto libre real.";
+  }
+  return "Libre hoy - gasto libre estimado hasta el proximo pago = cierre estimado.";
 }
 
-function forecastPaceText(forecast) {
-  if (forecast.remainingDays <= 0) {
-    return "No proyecta dias extra porque el periodo termina hoy.";
+function predictionFormulaText(prediction) {
+  if (prediction.status === "learning" || prediction.status === "empty") {
+    return `Libre hoy: ${formatMoney(prediction.freeToday)}`;
   }
-  if (forecast.confidence === "empty") {
-    return `Aun no hay gastos registrados; por ahora usa ${formatMoney(0)} por dia.`;
-  }
-  if (!forecast.usesTrendProjection && forecast.remainingDays > 0) {
-    return `Observado: ${formatMoney(forecast.freeImpactSpent)} en ${formatDays(forecast.elapsedDays)} (${formatMoney(Math.round(forecast.observedDailyFreeImpact))}/dia). Aun no lo multiplico por ${formatDays(forecast.remainingDays)}; necesito ${formatDays(forecast.trendDaysNeeded)} de datos.`;
-  }
-  return `Promedio usado: ${formatMoney(Math.round(forecast.dailyFreeImpact))} diarios x ${formatDays(forecast.remainingDays)}.`;
+  return `${formatMoney(prediction.freeToday)} - (${formatMoney(Math.round(prediction.dailyRate))} x ${formatDays(prediction.remainingDays)}) = ${formatMoney(prediction.projectedEndFree)}`;
 }
 
-function forecastHeadline(forecast) {
-  if (forecast.status === "over_reserved") {
+function predictionPaceText(prediction) {
+  const ignored = prediction.ignoredOneOffSpent > 0 ? ` Gasto unico ignorado para ritmo: ${formatMoney(prediction.ignoredOneOffSpent)}.` : "";
+  if (prediction.remainingDays <= 0) {
+    return "El periodo termina hoy; no hay dias futuros que proyectar.";
+  }
+  if (prediction.status === "empty") {
+    return `Gasto libre que cuenta para ritmo: ${formatMoney(0)}.${ignored}`;
+  }
+  if (prediction.status === "learning") {
+    return `Observado para ritmo: ${formatMoney(prediction.observedFreeSpent)} en ${formatDays(prediction.observedDays)}. Necesito ${formatDays(prediction.minimumObservedDays)} para proyectar.${ignored}`;
+  }
+  return `Ritmo usado: ${formatMoney(Math.round(prediction.dailyRate))} diarios durante ${formatDays(prediction.remainingDays)}.${ignored}`;
+}
+
+function predictionHeadline(prediction) {
+  if (prediction.status === "over_reserved") {
     return "Tu plan esta sobreasignado";
   }
-  if (forecast.status === "learning") {
+  if (prediction.status === "empty") {
+    return "Aun no hay gasto libre que proyectar";
+  }
+  if (prediction.status === "learning") {
     return "Aun no hay tendencia suficiente";
   }
-  if (forecast.status === "short") {
-    return "Este ritmo no alcanza";
+  if (prediction.status === "risk") {
+    return "Si sigues asi, no alcanza";
   }
-  if (forecast.status === "tight") {
-    return "Vas con poco margen";
+  if (prediction.status === "tight") {
+    return "Llegas con poco margen";
   }
-  if (forecast.confidence === "empty") {
-    return "Aun no hay ritmo de gasto";
-  }
-  return "Vas bien para cerrar el periodo";
+  return "Vas bien para el proximo pago";
 }
 
-function forecastCopy(forecast, endDate) {
-  if (forecast.remainingDays <= 0) {
-    return `El periodo termina hoy. Guarda el resultado real antes de ajustar el siguiente plan.`;
+function predictionCopy(prediction, endDate) {
+  if (prediction.remainingDays <= 0) {
+    return "El periodo termina hoy. Guarda el resultado real antes de ajustar el siguiente plan.";
   }
-  if (forecast.confidence === "empty") {
-    return `Quedan ${formatDays(forecast.remainingDays)} hasta ${endDate}. Cuando registres gastos, la app estimara como podrias cerrar.`;
+  if (prediction.status === "empty") {
+    return `Quedan ${formatDays(prediction.remainingDays)} hasta ${endDate}. Cuando haya gasto libre real, la app empezara a observar el ritmo.`;
   }
-  if (forecast.status === "learning") {
-    return `Quedan ${formatDays(forecast.remainingDays)} hasta ${endDate}. Ya hay gastos, pero todavia son pocos dias para proyectar el cierre sin exagerar.`;
+  if (prediction.status === "learning") {
+    return `Quedan ${formatDays(prediction.remainingDays)} hasta ${endDate}. Hay datos, pero todavia no los extrapolo para evitar falsas alarmas.`;
   }
-  if (forecast.shortage > 0) {
-    return `Quedan ${formatDays(forecast.remainingDays)} hasta ${endDate}. Si nada cambia, faltaria dinero para sostener el ritmo actual.`;
+  if (prediction.status === "risk") {
+    if (prediction.freeToday < 0 && prediction.dailyRate === 0) {
+      return `Quedan ${formatDays(prediction.remainingDays)} hasta ${endDate}. Hoy ya faltan ${formatMoney(prediction.shortage)} de dinero libre.`;
+    }
+    return `Quedan ${formatDays(prediction.remainingDays)} hasta ${endDate}. Si el ritmo se mantiene, podrian faltar ${formatMoney(prediction.shortage)}.`;
   }
-  return `Quedan ${formatDays(forecast.remainingDays)} hasta ${endDate}. Si nada cambia, este seria tu dinero libre estimado al cerrar.`;
+  return `Quedan ${formatDays(prediction.remainingDays)} hasta ${endDate}. Si el ritmo se mantiene, llegarias con ${formatMoney(Math.max(0, prediction.projectedEndFree))}.`;
 }
 
-function forecastAmountLabel(forecast) {
-  if (forecast.status === "over_reserved") {
+function predictionAmountLabel(prediction) {
+  if (prediction.status === "over_reserved") {
     return "Por ajustar";
   }
-  if (forecast.status === "learning") {
-    return "Libre hoy";
+  if (prediction.status === "risk") {
+    return "Podrian faltar";
   }
-  if (forecast.shortage > 0) {
-    return "Faltaria";
+  if (prediction.status === "healthy" || prediction.status === "tight") {
+    return "Llegarias con";
   }
-  return "Quedaria";
+  return "Libre hoy";
 }
 
-function forecastDisplayAmount(forecast) {
-  if (forecast.status === "over_reserved") {
-    return forecast.shortage || 0;
+function predictionDisplayAmount(prediction) {
+  if (prediction.status === "over_reserved") {
+    return prediction.overReserved || 0;
   }
-  if (forecast.status === "learning") {
-    return forecastCurrentFreeAtCalculation(budgetSummary(), forecast);
+  if (prediction.status === "risk") {
+    return prediction.shortage;
   }
-  if (forecast.shortage > 0) {
-    return forecast.shortage;
+  if (prediction.status === "healthy" || prediction.status === "tight") {
+    return Math.max(0, prediction.projectedEndFree);
   }
-  return Math.max(0, forecast.projectedFreeAtEnd);
+  return prediction.freeToday;
 }
 
-function forecastStatusLabel(status) {
+function predictionStatusLabel(status) {
   const labels = {
-    steady: "Va bien",
-    tight: "Ajustado",
-    short: "Riesgo de quedarse corto",
+    empty: "Sin datos",
     learning: "Aprendiendo ritmo",
+    healthy: "Vas bien",
+    tight: "Margen justo",
+    risk: "Riesgo",
     over_reserved: "Revisar plan"
   };
-  return labels[status] || labels.steady;
+  return labels[status] || labels.healthy;
 }
 
 function formatDays(days) {
@@ -1282,52 +1300,52 @@ function renderBudget(plan) {
 }
 
 function renderPeriodCloseCard(summary = budgetSummary()) {
-  const forecast = periodForecast();
+  const prediction = periodPrediction();
   const closure = periodClosureForWindow(summary.window);
   const movements = movementsForSummary(summary);
   const endDate = formatShortDate(previousDay(summary.window.end));
-  const isFinalClose = forecast.remainingDays <= 0;
+  const isFinalClose = prediction.remainingDays <= 0;
   const closedLine = closure
     ? `<span class="period-close-saved">Guardado ${formatShortDate(String(closure.closedAt || "").slice(0, 10) || todayKey())}</span>`
     : "";
 
   return `
-    <article class="period-close-card ${forecast.status}">
+    <article class="period-close-card ${prediction.status}">
       <div class="period-close-heading">
         <div>
           <p class="eyebrow">${isFinalClose ? "Cierre del periodo" : "Revision del periodo"}</p>
-          <h2>${periodCloseHeadline(forecast)}</h2>
+          <h2>${periodCloseHeadline(prediction)}</h2>
         </div>
         ${closedLine}
       </div>
       <div class="period-close-metrics">
         <div><span>Libre hoy</span><strong>${formatMoney(summary.freeRemaining)}</strong></div>
-        <div><span>${forecastAmountLabel(forecast)} al ${endDate}</span><strong>${formatMoney(forecastDisplayAmount(forecast))}</strong></div>
+        <div><span>${predictionAmountLabel(prediction)} al ${endDate}</span><strong>${formatMoney(predictionDisplayAmount(prediction))}</strong></div>
         <div><span>Gastos e ingresos</span><strong>${movements.length}</strong></div>
       </div>
-      <p>${periodCloseInsight(summary, forecast)}</p>
-      <p class="period-close-calculation"><strong>Calculo:</strong> ${forecastFormulaText(summary, forecast)}. ${forecastPaceText(forecast)}</p>
+      <p>${periodCloseInsight(summary, prediction)}</p>
+      <p class="period-close-calculation"><strong>Calculo:</strong> ${predictionFormulaText(prediction)}. ${predictionPaceText(prediction)}</p>
       <button class="btn secondary" type="button" data-action="save-period-close">${closure ? "Actualizar revision" : isFinalClose ? "Guardar cierre final" : "Guardar revision de hoy"}</button>
     </article>
   `;
 }
 
-function periodCloseHeadline(forecast) {
-  if (forecast.remainingDays <= 0) {
+function periodCloseHeadline(prediction) {
+  if (prediction.remainingDays <= 0) {
     return "Listo para guardar el resultado";
   }
   return `Asi vas hasta hoy`;
 }
 
-function periodCloseInsight(summary, forecast) {
+function periodCloseInsight(summary, prediction) {
   if (summary.overReserved > 0) {
     return `Sirve para ver si el plan cabe. Ahora hay ${formatMoney(summary.overReserved)} mas reservado que presupuesto.`;
   }
-  if (forecast.status === "learning") {
-    return `Sirve para evitar falsas alarmas: ya hay gastos del periodo, pero aun no hay suficientes dias para convertirlos en tendencia.`;
+  if (prediction.status === "learning") {
+    return `Sirve para evitar falsas alarmas: ya hay gasto libre, pero aun no hay suficientes dias para convertirlo en tendencia.`;
   }
-  if (forecast.shortage > 0) {
-    return `Sirve para comparar tu libre de hoy con una proyeccion al cierre. No es un pago pendiente ni un cargo: es una alerta de que este ritmo no alcanza.`;
+  if (prediction.status === "risk") {
+    return `Sirve para comparar tu libre de hoy con una prediccion al cierre. No es un pago pendiente ni un cargo: es una alerta de que este ritmo no alcanza.`;
   }
   if (summary.categoryOverspent > 0) {
     return `Sirve para dejar visible el ajuste: hay ${formatMoney(summary.categoryOverspent)} por encima de limites, sin borrar movimientos.`;
@@ -1760,6 +1778,10 @@ function renderQuickExpensePanel() {
             <input name="budgeted" type="checkbox" checked>
             Ya estaba previsto en el plan
           </label>
+          <label class="check-row quick-check-row">
+            <input name="oneOff" type="checkbox">
+            Gasto unico: no usar para ritmo diario
+          </label>
           <button class="btn primary quick-submit" type="submit">Registrar gasto</button>
         </form>
       </section>
@@ -1883,6 +1905,10 @@ function renderSpending(plan) {
           <label class="check-row">
             <input name="budgeted" type="checkbox" checked>
             Ya estaba previsto en el plan
+          </label>
+          <label class="check-row">
+            <input name="oneOff" type="checkbox">
+            Gasto unico: no usar para ritmo diario
           </label>
         </form>
       </article>
@@ -2097,6 +2123,10 @@ function renderTransactionEditor() {
               { value: "cash", label: "Efectivo" }
             ], normalizeLocation(transaction.source))}
           </div>
+          <label class="check-row">
+            <input name="oneOff" type="checkbox" ${transaction.oneOff ? "checked" : ""}>
+            Gasto unico: no usar para ritmo diario
+          </label>
           <button class="btn primary" type="submit">Guardar cambios</button>
           <button class="btn danger subtle-danger" type="button" data-action="remove-transaction" data-id="${escapeAttr(transaction.id)}">Eliminar gasto y devolver saldo</button>
         </form>
@@ -3893,6 +3923,7 @@ function handleTransactionSubmit(event) {
   const description = cleanText(data.get("description"), "");
   const category = String(data.get("category"));
   const budgeted = data.get("budgeted") === "on";
+  const oneOff = data.get("oneOff") === "on";
   const source = normalizeLocation(data.get("source"));
   const calendarEventId = cleanText(data.get("calendarEventId"), "");
   const threshold = plan.expenses * LARGE_PURCHASE_RATIO;
@@ -3918,7 +3949,7 @@ function handleTransactionSubmit(event) {
     });
     state.lastAlert = `${merchant} quedo en pausa 24 horas antes de decidir.`;
   } else {
-    const transaction = addTransaction({ merchant, description, amount, category, budgeted, source, calendarEventId });
+    const transaction = addTransaction({ merchant, description, amount, category, budgeted, oneOff, source, calendarEventId });
     if (calendarEventId) {
       markCalendarEventSpent(calendarEventId, transaction.id);
     }
@@ -3943,6 +3974,7 @@ function handleTransactionEditSubmit(event) {
   const data = new FormData(event.currentTarget);
   const nextCategory = String(data.get("category") || FREE_CATEGORY_ID);
   const nextSource = normalizeLocation(data.get("source"));
+  const nextOneOff = data.get("oneOff") === "on";
   const currentSource = normalizeLocation(transaction.source);
   if (nextSource !== currentSource) {
     const available = liquiditySummary()[nextSource];
@@ -3958,6 +3990,7 @@ function handleTransactionEditSubmit(event) {
   transaction.category = nextCategory;
   transaction.labeled = nextCategory !== FREE_CATEGORY_ID;
   transaction.source = nextSource;
+  transaction.oneOff = nextOneOff;
   transaction.updated_at = new Date().toISOString();
   rememberMerchantRule(transaction);
   state.lastAlert = `${transaction.merchant} quedo reclasificado.`;
@@ -4303,7 +4336,7 @@ function removeCalendarEvent(id) {
 
 function savePeriodClosure() {
   const summary = budgetSummary();
-  const forecast = periodForecast();
+  const prediction = periodPrediction();
   const movements = movementsForSummary(summary);
   const now = new Date().toISOString();
   const closure = {
@@ -4315,11 +4348,13 @@ function savePeriodClosure() {
     reserved: summary.reserved,
     spent: summary.totalSpent,
     freeRemaining: summary.freeRemaining,
-    projectedFreeAtEnd: forecast.projectedFreeAtEnd,
+    projectedEndFree: prediction.projectedEndFree,
+    dailyRate: prediction.dailyRate,
+    confidence: prediction.confidence,
     categoryOverspent: summary.categoryOverspent,
     transactionCount: movements.filter((movement) => movement.kind === "expense").length,
     incomeCount: movements.filter((movement) => movement.kind === "income").length,
-    status: forecast.status
+    status: prediction.status
   };
   const existingIndex = (state.periodClosures || []).findIndex((item) => item.id === closure.id);
   state.periodClosures = state.periodClosures || [];
@@ -4512,7 +4547,7 @@ function unlockCooldown(id) {
   state.lastAlert = createSpendAlert(cooldown.category);
 }
 
-function addTransaction({ merchant, description = "", amount, category, budgeted, source = "account", calendarEventId = "" }) {
+function addTransaction({ merchant, description = "", amount, category, budgeted, oneOff = false, source = "account", calendarEventId = "" }) {
   const location = normalizeLocation(source);
   const now = new Date().toISOString();
   adjustLiquidity(location, -Number(amount || 0), "expense");
@@ -4525,6 +4560,7 @@ function addTransaction({ merchant, description = "", amount, category, budgeted
     category,
     labeled: Boolean(category),
     budgeted,
+    oneOff,
     source: location,
     calendarEventId,
     updated_at: now
@@ -4632,8 +4668,8 @@ function budgetSummary() {
   return getBudgetSummary(state, todayKey());
 }
 
-function periodForecast() {
-  return getPeriodForecast(state, todayKey());
+function periodPrediction() {
+  return getPeriodPrediction(state, todayKey());
 }
 
 function calendarEventsSorted() {
@@ -5207,6 +5243,7 @@ function normalizeTransactions(transactions) {
     category: transaction.category || "",
     labeled: Boolean(transaction.category || transaction.labeled),
     budgeted: Boolean(transaction.budgeted),
+    oneOff: Boolean(transaction.oneOff || transaction.excludeFromPrediction),
     source: normalizeLocation(transaction.source),
     calendarEventId: transaction.calendarEventId || "",
     updated_at: transaction.updated_at || transaction.createdAt || transaction.date || ""
@@ -5224,14 +5261,20 @@ function normalizePeriodClosures(closures) {
       reserved: Number(closure.reserved || 0),
       spent: Number(closure.spent || 0),
       freeRemaining: Number(closure.freeRemaining || 0),
-      projectedFreeAtEnd: Number(closure.projectedFreeAtEnd || 0),
+      projectedEndFree: Number(closure.projectedEndFree || 0),
+      dailyRate: Number(closure.dailyRate || 0),
+      confidence: ["empty", "learning", "normal"].includes(closure.confidence) ? closure.confidence : "normal",
       categoryOverspent: Number(closure.categoryOverspent || 0),
       transactionCount: Number(closure.transactionCount || 0),
       incomeCount: Number(closure.incomeCount || 0),
-      status: ["steady", "tight", "short", "over_reserved"].includes(closure.status) ? closure.status : "steady"
+      status: normalizePredictionStatus(closure.status)
     }))
     .filter((closure) => closure.windowStart && closure.windowEnd)
     .slice(0, 12);
+}
+
+function normalizePredictionStatus(status) {
+  return ["empty", "learning", "healthy", "tight", "risk", "over_reserved"].includes(status) ? status : "healthy";
 }
 
 function normalizeMerchantRules(rules, transactions = []) {
