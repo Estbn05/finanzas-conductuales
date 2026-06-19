@@ -11,7 +11,7 @@ import {
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictPeriodEnd as getPeriodForecast,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260619-forecast-formula-v21";
+} from "./finance-core.js?v=20260619-forecast-learning-v22";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -23,7 +23,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260619-forecast-formula-v21";
+} from "./sync-client.js?v=20260619-forecast-learning-v22";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -1086,6 +1086,9 @@ function forecastFormulaText(summary, forecast) {
   const currentFree = forecastCurrentFreeAtCalculation(summary, forecast);
   const projectedSpend = Math.max(0, Number(forecast.projectedAdditionalImpact || 0));
   const projectedEnd = Math.round(Number(forecast.projectedFreeAtEnd || 0));
+  if (!forecast.usesTrendProjection && forecast.remainingDays > 0 && Number(forecast.freeImpactSpent || 0) > 0) {
+    return `${formatMoney(currentFree)} - ${formatMoney(0)} = ${formatMoney(projectedEnd)} (sin proyectar todavia)`;
+  }
   return `${formatMoney(currentFree)} - ${formatMoney(projectedSpend)} = ${formatMoney(projectedEnd)}`;
 }
 
@@ -1096,12 +1099,18 @@ function forecastPaceText(forecast) {
   if (forecast.confidence === "empty") {
     return `Aun no hay gastos registrados; por ahora usa ${formatMoney(0)} por dia.`;
   }
-  return `Gasto estimado: ${formatMoney(Math.round(forecast.dailyFreeImpact))} diarios x ${formatDays(forecast.remainingDays)}.`;
+  if (!forecast.usesTrendProjection && forecast.remainingDays > 0) {
+    return `Observado: ${formatMoney(forecast.freeImpactSpent)} en ${formatDays(forecast.elapsedDays)} (${formatMoney(Math.round(forecast.observedDailyFreeImpact))}/dia). Aun no lo multiplico por ${formatDays(forecast.remainingDays)}; necesito ${formatDays(forecast.trendDaysNeeded)} de datos.`;
+  }
+  return `Promedio usado: ${formatMoney(Math.round(forecast.dailyFreeImpact))} diarios x ${formatDays(forecast.remainingDays)}.`;
 }
 
 function forecastHeadline(forecast) {
   if (forecast.status === "over_reserved") {
     return "Tu plan esta sobreasignado";
+  }
+  if (forecast.status === "learning") {
+    return "Aun no hay tendencia suficiente";
   }
   if (forecast.status === "short") {
     return "Este ritmo no alcanza";
@@ -1122,6 +1131,9 @@ function forecastCopy(forecast, endDate) {
   if (forecast.confidence === "empty") {
     return `Quedan ${formatDays(forecast.remainingDays)} hasta ${endDate}. Cuando registres gastos, la app estimara como podrias cerrar.`;
   }
+  if (forecast.status === "learning") {
+    return `Quedan ${formatDays(forecast.remainingDays)} hasta ${endDate}. Ya hay gastos, pero todavia son pocos dias para proyectar el cierre sin exagerar.`;
+  }
   if (forecast.shortage > 0) {
     return `Quedan ${formatDays(forecast.remainingDays)} hasta ${endDate}. Si nada cambia, faltaria dinero para sostener el ritmo actual.`;
   }
@@ -1132,6 +1144,9 @@ function forecastAmountLabel(forecast) {
   if (forecast.status === "over_reserved") {
     return "Por ajustar";
   }
+  if (forecast.status === "learning") {
+    return "Libre hoy";
+  }
   if (forecast.shortage > 0) {
     return "Faltaria";
   }
@@ -1141,6 +1156,9 @@ function forecastAmountLabel(forecast) {
 function forecastDisplayAmount(forecast) {
   if (forecast.status === "over_reserved") {
     return forecast.shortage || 0;
+  }
+  if (forecast.status === "learning") {
+    return forecastCurrentFreeAtCalculation(budgetSummary(), forecast);
   }
   if (forecast.shortage > 0) {
     return forecast.shortage;
@@ -1153,6 +1171,7 @@ function forecastStatusLabel(status) {
     steady: "Va bien",
     tight: "Ajustado",
     short: "Riesgo de quedarse corto",
+    learning: "Aprendiendo ritmo",
     over_reserved: "Revisar plan"
   };
   return labels[status] || labels.steady;
@@ -1303,6 +1322,9 @@ function periodCloseHeadline(forecast) {
 function periodCloseInsight(summary, forecast) {
   if (summary.overReserved > 0) {
     return `Sirve para ver si el plan cabe. Ahora hay ${formatMoney(summary.overReserved)} mas reservado que presupuesto.`;
+  }
+  if (forecast.status === "learning") {
+    return `Sirve para evitar falsas alarmas: ya hay gastos del periodo, pero aun no hay suficientes dias para convertirlos en tendencia.`;
   }
   if (forecast.shortage > 0) {
     return `Sirve para comparar tu libre de hoy con una proyeccion al cierre. No es un pago pendiente ni un cargo: es una alerta de que este ritmo no alcanza.`;

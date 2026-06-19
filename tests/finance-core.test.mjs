@@ -427,10 +427,38 @@ test("period forecast projects free money at the current spending pace", () => {
   assert.equal(forecast.totalDays, 30);
   assert.equal(forecast.elapsedDays, 10);
   assert.equal(forecast.remainingDays, 20);
+  assert.equal(forecast.trendDaysNeeded, 3);
+  assert.equal(forecast.usesTrendProjection, true);
+  assert.equal(forecast.observedDailyFreeImpact, 10_000);
   assert.equal(forecast.currentFreeAtCalculation, 600_000);
   assert.equal(forecast.projectedAdditionalImpact, 200_000);
   assert.equal(forecast.projectedFreeAtEnd, 400_000);
   assert.equal(forecast.status, "steady");
+});
+
+test("period forecast does not extrapolate one early day across a semester", () => {
+  const state = makeState({
+    profile: {
+      incomeCadence: "semester",
+      semesterIncome: 5_000_000,
+      semesterStart: "2026-06-19",
+      semesterMonths: 6
+    },
+    budgetJobs: [],
+    transactions: [{ date: "2026-06-19", amount: 30_100, category: "free", labeled: true }]
+  });
+
+  const forecast = predictPeriodEnd(state, "2026-06-19");
+
+  assert.equal(forecast.elapsedDays, 1);
+  assert.equal(forecast.trendDaysNeeded, 7);
+  assert.equal(forecast.usesTrendProjection, false);
+  assert.equal(forecast.observedDailyFreeImpact, 30_100);
+  assert.equal(forecast.dailyFreeImpact, 0);
+  assert.equal(forecast.projectedAdditionalImpact, 0);
+  assert.equal(forecast.projectedFreeAtEnd, 4_969_900);
+  assert.equal(forecast.status, "learning");
+  assert.equal(forecast.confidence, "early");
 });
 
 test("period forecast flags a likely shortfall", () => {
@@ -447,9 +475,10 @@ test("period forecast flags a likely shortfall", () => {
     ]
   });
 
-  const forecast = predictPeriodEnd(state, "2026-06-02");
+  const forecast = predictPeriodEnd(state, "2026-06-03");
 
   assert.equal(forecast.projectedFreeAtEnd < 0, true);
+  assert.equal(forecast.usesTrendProjection, true);
   assert.equal(forecast.status, "short");
-  assert.equal(forecast.shortage, 5_600_000);
+  assert.equal(forecast.shortage, 3_600_000);
 });

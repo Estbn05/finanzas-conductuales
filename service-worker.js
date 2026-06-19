@@ -1,19 +1,19 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CACHE_NAME = `${CACHE_PREFIX}20260619-forecast-formula-v21`;
+const CACHE_NAME = `${CACHE_PREFIX}20260619-forecast-learning-v22`;
 const APP_SHELL = [
   "./",
   "index.html",
-  "styles.css?v=20260619-forecast-formula-v21",
-  "app.js?v=20260619-forecast-formula-v21",
-  "finance-core.js?v=20260619-forecast-formula-v21",
-  "sync-client.js?v=20260619-forecast-formula-v21",
-  "sync-config.js?v=20260619-forecast-formula-v21",
-  "vendor/supabase-2.108.1.min.js?v=20260619-forecast-formula-v21",
-  "manifest.webmanifest?v=20260619-forecast-formula-v21",
-  "assets/icon.svg?v=20260619-forecast-formula-v21",
-  "assets/icon-192.png?v=20260619-forecast-formula-v21",
-  "assets/icon-512.png?v=20260619-forecast-formula-v21",
-  "assets/apple-touch-icon.png?v=20260619-forecast-formula-v21"
+  "styles.css?v=20260619-forecast-learning-v22",
+  "app.js?v=20260619-forecast-learning-v22",
+  "finance-core.js?v=20260619-forecast-learning-v22",
+  "sync-client.js?v=20260619-forecast-learning-v22",
+  "sync-config.js?v=20260619-forecast-learning-v22",
+  "vendor/supabase-2.108.1.min.js?v=20260619-forecast-learning-v22",
+  "manifest.webmanifest?v=20260619-forecast-learning-v22",
+  "assets/icon.svg?v=20260619-forecast-learning-v22",
+  "assets/icon-192.png?v=20260619-forecast-learning-v22",
+  "assets/icon-512.png?v=20260619-forecast-learning-v22",
+  "assets/apple-touch-icon.png?v=20260619-forecast-learning-v22"
 ];
 
 self.addEventListener("install", (event) => {

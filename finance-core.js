@@ -177,7 +177,10 @@ export function predictPeriodEnd(state, today) {
   const totalDays = Math.max(1, daysBetween(summary.window.start, summary.window.end));
   const elapsedDays = Math.max(1, Math.min(totalDays, daysBetween(summary.window.start, currentKey) + 1));
   const remainingDays = Math.max(0, totalDays - elapsedDays);
-  const dailyFreeImpact = summary.freeImpactSpent / elapsedDays;
+  const trendDaysNeeded = forecastTrendDaysNeeded(totalDays);
+  const observedDailyFreeImpact = summary.freeImpactSpent / elapsedDays;
+  const usesTrendProjection = summary.freeImpactSpent > 0 && elapsedDays >= trendDaysNeeded;
+  const dailyFreeImpact = usesTrendProjection ? observedDailyFreeImpact : 0;
   const projectedAdditionalImpact = Math.round(dailyFreeImpact * remainingDays);
   const currentFreeAtCalculation = Math.round(summary.freeBudget - summary.freeImpactSpent);
   const projectedFreeAtEnd = Math.round(currentFreeAtCalculation - projectedAdditionalImpact);
@@ -186,6 +189,8 @@ export function predictPeriodEnd(state, today) {
 
   if (summary.overReserved > 0) {
     status = "over_reserved";
+  } else if (summary.freeImpactSpent > 0 && !usesTrendProjection && remainingDays > 0) {
+    status = "learning";
   } else if (projectedFreeAtEnd < 0) {
     status = "short";
   } else if (remainingDays > 0 && projectedFreeAtEnd < summary.income * 0.08) {
@@ -197,6 +202,10 @@ export function predictPeriodEnd(state, today) {
     totalDays,
     elapsedDays,
     remainingDays,
+    trendDaysNeeded,
+    freeImpactSpent: summary.freeImpactSpent,
+    observedDailyFreeImpact,
+    usesTrendProjection,
     dailyFreeImpact,
     currentFreeAtCalculation,
     projectedAdditionalImpact,
@@ -204,8 +213,18 @@ export function predictPeriodEnd(state, today) {
     shortage: Math.max(0, -projectedFreeAtEnd),
     dailyAllowance,
     status,
-    confidence: summary.totalSpent === 0 ? "empty" : elapsedDays < 3 ? "early" : "normal"
+    confidence: summary.totalSpent === 0 ? "empty" : usesTrendProjection ? "normal" : "early"
   };
+}
+
+function forecastTrendDaysNeeded(totalDays) {
+  if (totalDays >= 90) {
+    return 7;
+  }
+  if (totalDays >= 21) {
+    return 3;
+  }
+  return Math.min(2, totalDays);
 }
 
 export function budgetRingAllocation(summary) {
