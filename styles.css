@@ -7275,3 +7275,25 @@ html[data-theme="dark"] .category-status {
 html[data-theme="dark"] .category-card-foot strong {
   color: var(--ds-ink) !important;
 }
+
+/* Modal choice contrast v9 */
+html[data-theme="dark"] .bottom-sheet .choice-pill,
+html[data-theme="dark"] .modal:not(.onboarding-modal) .choice-pill {
+  color: var(--ds-muted) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  background: rgba(255, 255, 255, 0.055) !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="dark"] .bottom-sheet .choice-pill.is-active,
+html[data-theme="dark"] .modal:not(.onboarding-modal) .choice-pill.is-active {
+  color: var(--ds-primary-strong) !important;
+  border-color: rgba(103, 217, 181, 0.34) !important;
+  background: rgba(103, 217, 181, 0.18) !important;
+}
+
+html[data-theme="dark"] .bottom-sheet .choice-pill:not(.is-active):hover,
+html[data-theme="dark"] .modal:not(.onboarding-modal) .choice-pill:not(.is-active):hover {
+  color: var(--ds-ink) !important;
+  background: rgba(255, 255, 255, 0.09) !important;
+}
