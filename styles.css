@@ -274,6 +274,54 @@ a {
   font-weight: 900;
 }
 
+/* Distribution brand mark v15 */
+.brand-mark-icon {
+  width: 31px;
+  height: 31px;
+  overflow: visible;
+}
+
+.brand-ring-track,
+.brand-ring-free,
+.brand-ring-spent,
+.brand-ring-reserved {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.brand-ring-track {
+  stroke: rgba(255, 255, 255, 0.24);
+  stroke-width: 4;
+}
+
+.brand-ring-free {
+  stroke: #86e8c6;
+  stroke-width: 5.6;
+}
+
+.brand-ring-spent {
+  stroke: #f2c56c;
+  stroke-width: 5.6;
+}
+
+.brand-ring-reserved {
+  stroke: #a895de;
+  stroke-width: 5.6;
+}
+
+.brand-ring-core {
+  fill: rgba(5, 36, 31, 0.88);
+  stroke: rgba(255, 255, 255, 0.2);
+  stroke-width: 1;
+}
+
+.brand-ring-spark {
+  stroke: #eafff7;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+}
+
 .brand strong,
 .brand small {
   display: block;

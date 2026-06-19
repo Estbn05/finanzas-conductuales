@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260618-ui-system-v14";
+const ASSET_VERSION = "20260618-ui-system-v15";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -48,6 +48,9 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(app.includes('data-action="open-expense"'));
   assert.ok(app.includes('data-action="close-expense"'));
   assert.ok(app.includes('data-action="set-theme"'));
+  assert.ok(app.includes("function renderBrandMark()"));
+  assert.ok(app.includes('class="brand-mark-icon"'));
+  assert.equal(app.includes('<span class="brand-mark">FC</span>'), false);
   assert.ok(app.includes('data-theme-choice="light"'));
   assert.ok(app.includes('data-theme-choice="dark"'));
   assert.ok(app.includes("function applyThemePreference()"));
@@ -125,6 +128,8 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(styles.includes(".reminder-actions .btn:disabled"));
   assert.ok(styles.includes("Sidebar ghost button dark contrast v14"));
   assert.ok(styles.includes("html[data-theme=\"dark\"] .sidebar .menu-tools .btn.ghost"));
+  assert.ok(styles.includes("Distribution brand mark v15"));
+  assert.ok(styles.includes(".brand-ring-free"));
   assert.ok(styles.includes("--ds-bg: #f6f1e7"));
   assert.ok(styles.includes("--ds-bg: #f7f4ee"));
   assert.ok(styles.includes(":focus-visible"));

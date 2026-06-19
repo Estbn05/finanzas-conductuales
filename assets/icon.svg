@@ -1,9 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Finanzas Conductuales">
   <title>Finanzas Conductuales</title>
-  <rect width="200" height="200" rx="46" fill="#0b2218"/>
-  <path d="M40 170C40 110 70 60 100 45c30-15 70 5 70 45 0 35-25 60-55 65-25 3-40-10-45-25-5-15 2-28 15-32 13-4 23 2 23 14" fill="none" stroke="#2d9b6f" stroke-width="3.5" stroke-linecap="round"/>
-  <circle cx="108" cy="112" r="5" fill="#2d9b6f"/>
-  <path d="m28 155 34-27 20 10 28-30 28 7 30-25" fill="none" stroke="#5dcaa5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="168" cy="90" r="4.5" fill="#5dcaa5"/>
-  <rect x="28" y="174" width="144" height="1.5" rx="1" fill="#1a4a30"/>
+  <defs>
+    <radialGradient id="glow" cx="30%" cy="22%" r="78%">
+      <stop offset="0" stop-color="#baf9dd"/>
+      <stop offset="0.48" stop-color="#28bd91"/>
+      <stop offset="1" stop-color="#06342d"/>
+    </radialGradient>
+    <linearGradient id="surface" x1="32" y1="22" x2="172" y2="180" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8df0cc"/>
+      <stop offset="0.48" stop-color="#16a47f"/>
+      <stop offset="1" stop-color="#06241f"/>
+    </linearGradient>
+    <filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#021411" flood-opacity="0.34"/>
+    </filter>
+  </defs>
+  <rect width="200" height="200" rx="46" fill="#071b18"/>
+  <rect x="14" y="14" width="172" height="172" rx="42" fill="url(#surface)"/>
+  <circle cx="62" cy="48" r="44" fill="url(#glow)" opacity="0.52"/>
+  <g filter="url(#softShadow)">
+    <circle cx="100" cy="100" r="49" fill="none" stroke="#ffffff" stroke-opacity="0.24" stroke-width="16"/>
+    <path d="M100 51a49 49 0 0 1 43.9 70.9" fill="none" stroke="#8ff0ca" stroke-width="20" stroke-linecap="round"/>
+    <path d="M143.9 121.9A49 49 0 0 1 79.9 144.7" fill="none" stroke="#f2c56c" stroke-width="20" stroke-linecap="round"/>
+    <path d="M79.9 144.7A49 49 0 0 1 100 51" fill="none" stroke="#a895de" stroke-width="20" stroke-linecap="round"/>
+    <circle cx="100" cy="100" r="22" fill="#05241f" opacity="0.92"/>
+    <path d="M100 78v44M78 100h44" fill="none" stroke="#eafff7" stroke-width="8" stroke-linecap="round"/>
+  </g>
 </svg>

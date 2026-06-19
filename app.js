@@ -10,7 +10,7 @@ import {
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260618-ui-system-v14";
+} from "./finance-core.js?v=20260618-ui-system-v15";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -22,7 +22,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260618-ui-system-v14";
+} from "./sync-client.js?v=20260618-ui-system-v15";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -645,7 +645,7 @@ function render() {
     <aside class="sidebar" aria-label="Menu principal">
       <div class="sidebar-head">
         <a class="brand" href="#" data-view="today" aria-label="Ir al inicio">
-          <span class="brand-mark">FC</span>
+          ${renderBrandMark()}
           <span>
             <strong>Finanzas Conductuales</strong>
             <small>${capitalize(budgetSummary().cadenceLabel)} · ${formatMoney(budgetSummary().freeRemaining)} libre</small>
@@ -772,6 +772,21 @@ function renderIcon(name) {
   return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">${paths[name] || paths.menu}</svg>`;
 }
 
+function renderBrandMark() {
+  return `
+    <span class="brand-mark" aria-hidden="true">
+      <svg class="brand-mark-icon" viewBox="0 0 48 48" fill="none" focusable="false">
+        <circle class="brand-ring-track" cx="24" cy="24" r="13.5"/>
+        <path class="brand-ring-free" d="M24 10.5a13.5 13.5 0 0 1 12.1 19.5"/>
+        <path class="brand-ring-spent" d="M36.1 30A13.5 13.5 0 0 1 18.4 36.2"/>
+        <path class="brand-ring-reserved" d="M18.4 36.2A13.5 13.5 0 0 1 24 10.5"/>
+        <circle class="brand-ring-core" cx="24" cy="24" r="5.6"/>
+        <path class="brand-ring-spark" d="M24 17.8v12.4M17.8 24h12.4"/>
+      </svg>
+    </span>
+  `;
+}
+
 function renderConnectionBanner() {
   if (navigator.onLine) {
     return "";
@@ -854,7 +869,7 @@ function renderAuthGate() {
       <section class="auth-landing" aria-labelledby="auth-title">
         <div class="auth-hero">
           <div class="auth-brand">
-            <span class="brand-mark">FC</span>
+            ${renderBrandMark()}
             <div>
               <p class="eyebrow">Finanzas Conductuales</p>
               <h1 id="auth-title">Entiende tu dinero antes de gastarlo</h1>
