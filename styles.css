@@ -7297,3 +7297,64 @@ html[data-theme="dark"] .modal:not(.onboarding-modal) .choice-pill:not(.is-activ
   color: var(--ds-ink) !important;
   background: rgba(255, 255, 255, 0.09) !important;
 }
+
+/* Income editor dark contrast v10 */
+html[data-theme="dark"] .bottom-sheet.transaction-editor .choice-pill,
+#app[data-theme="dark"] .bottom-sheet.transaction-editor .choice-pill {
+  color: var(--ds-muted) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  background: rgba(255, 255, 255, 0.055) !important;
+  box-shadow: none !important;
+  -webkit-text-fill-color: var(--ds-muted) !important;
+}
+
+html[data-theme="dark"] .bottom-sheet.transaction-editor .choice-pill.is-active,
+#app[data-theme="dark"] .bottom-sheet.transaction-editor .choice-pill.is-active {
+  color: var(--ds-primary-strong) !important;
+  border-color: rgba(103, 217, 181, 0.34) !important;
+  background: rgba(103, 217, 181, 0.18) !important;
+  -webkit-text-fill-color: var(--ds-primary-strong) !important;
+}
+
+html[data-theme="dark"] .bottom-sheet.transaction-editor .extra-edit-allocation span,
+#app[data-theme="dark"] .bottom-sheet.transaction-editor .extra-edit-allocation span {
+  color: var(--ds-muted) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="dark"] .bottom-sheet.transaction-editor .extra-edit-allocation strong,
+#app[data-theme="dark"] .bottom-sheet.transaction-editor .extra-edit-allocation strong {
+  color: var(--ds-primary-strong) !important;
+  -webkit-text-fill-color: var(--ds-primary-strong) !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  .bottom-sheet.transaction-editor .choice-pill {
+    color: var(--ds-muted) !important;
+    border-color: rgba(255, 255, 255, 0.14) !important;
+    background: rgba(255, 255, 255, 0.055) !important;
+    box-shadow: none !important;
+    -webkit-text-fill-color: var(--ds-muted) !important;
+  }
+
+  .bottom-sheet.transaction-editor .choice-pill.is-active {
+    color: var(--ds-primary-strong) !important;
+    border-color: rgba(103, 217, 181, 0.34) !important;
+    background: rgba(103, 217, 181, 0.18) !important;
+    -webkit-text-fill-color: var(--ds-primary-strong) !important;
+  }
+
+  .bottom-sheet.transaction-editor .extra-edit-allocation span {
+    color: var(--ds-muted) !important;
+    border-color: rgba(255, 255, 255, 0.14) !important;
+    background: rgba(255, 255, 255, 0.06) !important;
+    box-shadow: none !important;
+  }
+
+  .bottom-sheet.transaction-editor .extra-edit-allocation strong {
+    color: var(--ds-primary-strong) !important;
+    -webkit-text-fill-color: var(--ds-primary-strong) !important;
+  }
+}
