@@ -11,7 +11,7 @@ import {
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictUntilNextPeriod as getPeriodPrediction,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260619-startup-route-v25";
+} from "./finance-core.js?v=20260620-period-close-v26";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -23,7 +23,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260619-startup-route-v25";
+} from "./sync-client.js?v=20260620-period-close-v26";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -50,7 +50,7 @@ const NAV_ITEMS = [
   { id: "movements", label: "Movimientos", icon: "05" },
   { id: "profile", label: "Datos", icon: "06" }
 ];
-const APP_VIEWS = new Set([...NAV_ITEMS.map((item) => item.id), "spending"]);
+const APP_VIEWS = new Set([...NAV_ITEMS.map((item) => item.id), "spending", "periodClose"]);
 
 const app = document.querySelector("#app");
 let state = loadState();
@@ -737,7 +737,7 @@ function renderThemeSwitcher(currentTheme = themePreference()) {
 }
 
 function renderNavItem(item) {
-  const active = state.activeView === item.id ? "is-active" : "";
+  const active = state.activeView === item.id || (item.id === "budget" && state.activeView === "periodClose") ? "is-active" : "";
   return `
     <button class="nav-item ${active}" type="button" data-view="${item.id}">
       <span class="nav-number">${item.icon}</span>
@@ -769,7 +769,7 @@ function renderBottomNavigation() {
         <span class="bottom-nav-icon" aria-hidden="true">${renderIcon("home")}</span>
         <span>Inicio</span>
       </button>
-      <button class="bottom-nav-item ${state.activeView === "budget" ? "is-active" : ""}" type="button" data-view="budget">
+      <button class="bottom-nav-item ${["budget", "periodClose"].includes(state.activeView) ? "is-active" : ""}" type="button" data-view="budget">
         <span class="bottom-nav-icon" aria-hidden="true">${renderIcon("plan")}</span>
         <span>Plan</span>
       </button>
@@ -1006,6 +1006,7 @@ function renderView(plan) {
   const views = {
     today: renderToday,
     budget: renderBudget,
+    periodClose: renderPeriodCloseScreen,
     savings: renderSavings,
     calendar: renderCalendar,
     spending: renderSpending,
@@ -1297,7 +1298,7 @@ function renderBudget(plan) {
         ${ring.outside > 0 ? `<p class="inline-warning">Gastos fuera del presupuesto: ${formatMoney(ring.outside)}.</p>` : ""}
       </article>
 
-      ${renderPeriodCloseCard(summary)}
+      ${renderPeriodCloseCard(summary, plan)}
 
       <div class="plan-actions">
         <button class="plan-action" type="button" data-action="open-extra-sheet">
@@ -1338,58 +1339,225 @@ function renderBudget(plan) {
   `;
 }
 
-function renderPeriodCloseCard(summary = budgetSummary()) {
-  const prediction = periodPrediction();
-  const closure = periodClosureForWindow(summary.window);
-  const movements = movementsForSummary(summary);
-  const endDate = formatShortDate(previousDay(summary.window.end));
-  const isFinalClose = prediction.remainingDays <= 0;
-  const closedLine = closure
-    ? `<span class="period-close-saved">Guardado ${formatShortDate(String(closure.closedAt || "").slice(0, 10) || todayKey())}</span>`
-    : "";
+function renderPeriodCloseCard(summary = budgetSummary(), plan = calculatePlan()) {
+  const report = periodCloseReport(plan, summary);
+  const closedLine = renderPeriodCloseSavedLine(report.closure);
+  const freeClass = report.freeFinal < 0 ? "negative" : "";
 
   return `
-    <article class="period-close-card ${prediction.status}">
+    <article class="period-close-card ${report.status}">
       <div class="period-close-heading">
         <div>
-          <p class="eyebrow">${isFinalClose ? "Cierre del periodo" : "Revision del periodo"}</p>
-          <h2>${periodCloseHeadline(prediction)}</h2>
+          <p class="eyebrow">Cierre de periodo</p>
+          <h2>${report.isFinal ? "Resultado listo para guardar" : "Prepara el proximo plan"}</h2>
         </div>
         ${closedLine}
       </div>
       <div class="period-close-metrics">
-        <div><span>Libre hoy</span><strong>${formatMoney(summary.freeRemaining)}</strong></div>
-        <div><span>${predictionAmountLabel(prediction)} al ${endDate}</span><strong>${formatMoney(predictionDisplayAmount(prediction))}</strong></div>
-        <div><span>Gastos e ingresos</span><strong>${movements.length}</strong></div>
+        <div><span>${report.isFinal ? "Libre final" : "Libre si cerraras hoy"}</span><strong class="${freeClass}">${formatMoney(report.freeFinal)}</strong></div>
+        <div><span>Categorias excedidas</span><strong>${report.exceededCategories.length}</strong></div>
+        <div><span>Ahorro posible</span><strong>${formatMoney(report.possibleSavings)}</strong></div>
       </div>
-      <p>${periodCloseInsight(summary, prediction)}</p>
-      <p class="period-close-calculation"><strong>Calculo:</strong> ${predictionFormulaText(prediction)}. ${predictionPaceText(prediction)}</p>
-      <button class="btn secondary" type="button" data-action="save-period-close">${closure ? "Actualizar revision" : isFinalClose ? "Guardar cierre final" : "Guardar revision de hoy"}</button>
+      <p>${periodCloseCardText(report)}</p>
+      <button class="btn secondary" type="button" data-view="periodClose">Ver cierre</button>
     </article>
   `;
 }
 
-function periodCloseHeadline(prediction) {
-  if (prediction.remainingDays <= 0) {
-    return "Listo para guardar el resultado";
-  }
-  return `Asi vas hasta hoy`;
+function renderPeriodCloseScreen(plan = calculatePlan()) {
+  const summary = budgetSummary();
+  const report = periodCloseReport(plan, summary);
+  const period = `${formatShortDate(summary.window.start)} - ${formatShortDate(previousDay(summary.window.end))}`;
+  const freeClass = report.freeFinal < 0 ? "negative" : "positive";
+
+  return `
+    <section class="screen-view period-close-view" aria-label="Cierre de periodo">
+      <div class="screen-title-row">
+        <div>
+          <p class="eyebrow">${report.isFinal ? "Fin del periodo" : "Pre-cierre"}</p>
+          <h1>Cierre de periodo</h1>
+        </div>
+        <span class="period-chip">${period}</span>
+      </div>
+
+      <article class="period-close-hero ${freeClass}">
+        <span>${report.isFinal ? "Libre final" : "Libre si cerraras hoy"}</span>
+        <strong>${formatMoney(report.freeFinal)}</strong>
+        <p>${periodCloseHeroText(report)}</p>
+      </article>
+
+      <div class="period-close-grid">
+        <article class="period-close-panel">
+          <div class="period-close-panel-head">
+            <p class="eyebrow">Categorias excedidas</p>
+            <h2>${report.exceededCategories.length ? `${report.exceededCategories.length} por ajustar` : "Sin excedidos"}</h2>
+          </div>
+          ${renderExceededCategories(report)}
+        </article>
+
+        <article class="period-close-panel">
+          <div class="period-close-panel-head">
+            <p class="eyebrow">Ahorro sugerido vs posible</p>
+            <h2>${report.savingsGap > 0 ? `Faltaria ${formatMoney(report.savingsGap)}` : "Cabe en el plan"}</h2>
+          </div>
+          <div class="savings-compare">
+            <div><span>Sugerido ideal</span><strong>${formatMoney(report.suggestedSavings)}</strong></div>
+            <div><span>Posible real</span><strong>${formatMoney(report.possibleSavings)}</strong></div>
+          </div>
+          <p>${periodCloseSavingsText(report)}</p>
+        </article>
+
+        <article class="period-close-panel period-close-adjust-panel">
+          <div class="period-close-panel-head">
+            <p class="eyebrow">Que ajustar para el proximo</p>
+            <h2>${report.adjustments.length ? "Acciones concretas" : "Mantener plan"}</h2>
+          </div>
+          <ol class="period-adjustments">
+            ${report.adjustments.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ol>
+        </article>
+      </div>
+
+      <div class="period-close-actions">
+        <button class="btn primary" type="button" data-action="save-period-close">${report.closure ? "Actualizar cierre" : report.isFinal ? "Guardar cierre final" : "Guardar pre-cierre"}</button>
+        <button class="btn ghost" type="button" data-view="budget">Volver al plan</button>
+      </div>
+    </section>
+  `;
 }
 
-function periodCloseInsight(summary, prediction) {
+function renderPeriodCloseSavedLine(closure) {
+  if (!closure) {
+    return "";
+  }
+  return `<span class="period-close-saved">Guardado ${formatShortDate(String(closure.closedAt || "").slice(0, 10) || todayKey())}</span>`;
+}
+
+function periodCloseReport(plan = calculatePlan(), summary = budgetSummary()) {
+  const prediction = periodPrediction();
+  const closure = periodClosureForWindow(summary.window);
+  const categories = categoryStatus()
+    .map((category) => ({
+      ...category,
+      over: Math.max(0, Number(category.spent || 0) - Number(category.budget || 0))
+    }))
+    .filter((category) => category.over > 0)
+    .sort((a, b) => b.over - a.over);
+  const freeFinal = Math.round(summary.freeBudget - summary.freeImpactSpent);
+  const possibleSavings = Math.max(0, Number(plan.projectedPeriodSavings || 0));
+  const suggestedSavings = Math.max(0, Number(plan.idealPeriodSavings || 0));
+  const savingsGap = Math.max(0, Number(plan.savingsCapacityGap || 0));
+  const movements = movementsForSummary(summary);
+  const status = periodCloseStatus(summary, categories, freeFinal, savingsGap);
+
+  return {
+    summary,
+    prediction,
+    closure,
+    isFinal: prediction.remainingDays <= 0,
+    remainingDays: prediction.remainingDays,
+    freeFinal,
+    exceededCategories: categories,
+    suggestedSavings,
+    possibleSavings,
+    additionalSavingsNow: Math.max(0, Number(plan.suggestedPeriodSavings || 0)),
+    savingsGap,
+    expenseCount: movements.filter((movement) => movement.kind === "expense").length,
+    incomeCount: movements.filter((movement) => movement.kind === "income").length,
+    status,
+    adjustments: periodCloseAdjustments(summary, plan, categories, freeFinal)
+  };
+}
+
+function periodCloseStatus(summary, exceededCategories, freeFinal, savingsGap) {
+  if (summary.overReserved > 0 || freeFinal < 0) {
+    return "risk";
+  }
+  if (exceededCategories.length || savingsGap > 0) {
+    return "tight";
+  }
+  return "healthy";
+}
+
+function periodCloseCardText(report) {
+  if (!report.isFinal) {
+    return `Faltan ${formatDays(report.remainingDays)}. Puedes revisar el cierre hoy y ajustar el siguiente plan antes de que se acabe el periodo.`;
+  }
+  if (report.freeFinal < 0) {
+    return `El periodo cerro con faltante de dinero libre. Guarda el cierre y baja gasto libre o sube limites realistas.`;
+  }
+  return `Guarda una foto del resultado final y usa los ajustes para el proximo periodo.`;
+}
+
+function periodCloseHeroText(report) {
+  if (!report.isFinal) {
+    return `Todavia no termina: faltan ${formatDays(report.remainingDays)}. Este numero muestra como quedaria si cerraras el periodo hoy.`;
+  }
+  if (report.freeFinal < 0) {
+    return `Faltaron ${formatMoney(Math.abs(report.freeFinal))} de dinero libre despues de gastos sin categoria y excesos.`;
+  }
+  return `Quedaron ${formatMoney(report.freeFinal)} libres despues de gastos sin categoria y excesos.`;
+}
+
+function renderExceededCategories(report) {
+  if (!report.exceededCategories.length) {
+    return `<div class="empty-state compact-empty">No hay categorias por encima del limite. Buen cierre.</div>`;
+  }
+  return `
+    <div class="period-close-list">
+      ${report.exceededCategories
+        .map(
+          (category) => `
+            <div class="period-close-row">
+              <span>${escapeHtml(category.name)}</span>
+              <strong>${formatMoney(category.over)} de exceso</strong>
+              <small>${formatMoney(category.spent)} usados de ${formatMoney(category.budget)}</small>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function periodCloseSavingsText(report) {
+  if (report.savingsGap > 0) {
+    return `El ahorro ideal no cupo completo. Lo posible incluye lo ya reservado mas ${formatMoney(report.additionalSavingsNow)} que todavia caben desde el libre.`;
+  }
+  if (report.possibleSavings > 0) {
+    return `El ahorro sugerido cabe en este periodo. Puedes separar hasta ${formatMoney(report.additionalSavingsNow)} adicionales sin forzar el plan.`;
+  }
+  return `No hay ahorro posible en este cierre. Primero libera gasto libre o reduce categorias excedidas.`;
+}
+
+function periodCloseAdjustments(summary, plan, exceededCategories, freeFinal) {
+  const adjustments = [];
+  if (freeFinal < 0) {
+    adjustments.push(`Recupera ${formatMoney(Math.abs(freeFinal))} bajando gasto libre o moviendo dinero desde una categoria menos usada.`);
+  }
   if (summary.overReserved > 0) {
-    return `Sirve para ver si el plan cabe. Ahora hay ${formatMoney(summary.overReserved)} mas reservado que presupuesto.`;
+    adjustments.push(`Baja reservas por ${formatMoney(summary.overReserved)}; el plan separa mas dinero del que entra.`);
   }
-  if (prediction.status === "learning") {
-    return `Sirve para evitar falsas alarmas: ya hay gasto libre, pero aun no hay suficientes dias para convertirlo en tendencia.`;
+  exceededCategories.slice(0, 3).forEach((category) => {
+    if (category.id === FREE_CATEGORY_ID) {
+      adjustments.push(`Convierte ${formatMoney(category.over)} de gasto libre repetido en una categoria con limite propio.`);
+      return;
+    }
+    adjustments.push(`Ajusta ${category.name}: sube el limite a ${formatMoney(category.spent)} o baja ${formatMoney(category.over)} de gasto.`);
+  });
+  if (summary.freeSpent > 0 && !exceededCategories.some((category) => category.id === FREE_CATEGORY_ID)) {
+    adjustments.push(`Revisa ${formatMoney(summary.freeSpent)} sin categoria para decidir si era gasto libre real o falta una regla por comercio.`);
   }
-  if (prediction.status === "risk") {
-    return `Sirve para comparar tu libre de hoy con una prediccion al cierre. No es un pago pendiente ni un cargo: es una alerta de que este ritmo no alcanza.`;
+  if (Number(plan.savingsCapacityGap || 0) > 0) {
+    adjustments.push(`Para acercarte al ahorro ideal, libera ${formatMoney(plan.savingsCapacityGap)} en el proximo periodo.`);
   }
-  if (summary.categoryOverspent > 0) {
-    return `Sirve para dejar visible el ajuste: hay ${formatMoney(summary.categoryOverspent)} por encima de limites, sin borrar movimientos.`;
+  if (!adjustments.length && freeFinal > 0) {
+    adjustments.push(`Mantén los limites y considera mover ${formatMoney(freeFinal)} sobrantes a ahorro antes de iniciar el proximo periodo.`);
   }
-  return `Sirve para guardar una foto del periodo y comparar despues. No mueve saldos ni borra movimientos.`;
+  if (!adjustments.length) {
+    adjustments.push("Mantén el plan actual y registra gastos desde el primer dia del proximo periodo.");
+  }
+  return adjustments.slice(0, 5);
 }
 
 function renderBudgetJobForm() {
@@ -4390,7 +4558,9 @@ function removeCalendarEvent(id) {
 
 function savePeriodClosure() {
   const summary = budgetSummary();
+  const plan = calculatePlan();
   const prediction = periodPrediction();
+  const report = periodCloseReport(plan, summary);
   const movements = movementsForSummary(summary);
   const now = new Date().toISOString();
   const closure = {
@@ -4401,14 +4571,27 @@ function savePeriodClosure() {
     income: summary.income,
     reserved: summary.reserved,
     spent: summary.totalSpent,
-    freeRemaining: summary.freeRemaining,
+    freeRemaining: report.freeFinal,
+    freeFinal: report.freeFinal,
     projectedEndFree: prediction.projectedEndFree,
     dailyRate: prediction.dailyRate,
     confidence: prediction.confidence,
     categoryOverspent: summary.categoryOverspent,
+    exceededCategories: report.exceededCategories.map((category) => ({
+      id: category.id,
+      name: category.name,
+      budget: category.budget,
+      spent: category.spent,
+      over: category.over
+    })),
+    idealPeriodSavings: report.suggestedSavings,
+    possiblePeriodSavings: report.possibleSavings,
+    suggestedPeriodSavings: report.additionalSavingsNow,
+    savingsCapacityGap: report.savingsGap,
+    adjustments: report.adjustments,
     transactionCount: movements.filter((movement) => movement.kind === "expense").length,
     incomeCount: movements.filter((movement) => movement.kind === "income").length,
-    status: prediction.status
+    status: report.status
   };
   const existingIndex = (state.periodClosures || []).findIndex((item) => item.id === closure.id);
   state.periodClosures = state.periodClosures || [];
@@ -4418,7 +4601,7 @@ function savePeriodClosure() {
     state.periodClosures.unshift(closure);
   }
   state.periodClosures = state.periodClosures.slice(0, 12);
-  state.lastAlert = `Cierre guardado: ${formatMoney(closure.freeRemaining)} libres y ${closure.transactionCount} gastos.`;
+  state.lastAlert = `Cierre guardado: ${formatMoney(closure.freeFinal)} libres y ${closure.exceededCategories.length} excedidos.`;
 }
 
 function periodClosureForWindow(window) {
@@ -5121,6 +5304,8 @@ function viewFromHash(fallback) {
     ahorro: "savings",
     calendario: "calendar",
     eventos: "calendar",
+    cierre: "periodClose",
+    "cierre-periodo": "periodClose",
     registrar: "spending",
     gastos: "spending",
     movimientos: "movements",
@@ -5149,6 +5334,7 @@ function hashFromView(view) {
   const hashes = {
     today: "inicio",
     budget: "plan",
+    periodClose: "cierre",
     savings: "ahorro",
     calendar: "calendario",
     spending: "registrar",
@@ -5314,11 +5500,30 @@ function normalizePeriodClosures(closures) {
       income: Number(closure.income || 0),
       reserved: Number(closure.reserved || 0),
       spent: Number(closure.spent || 0),
-      freeRemaining: Number(closure.freeRemaining || 0),
+      freeRemaining: Number(closure.freeFinal ?? closure.freeRemaining ?? 0),
+      freeFinal: Number(closure.freeFinal ?? closure.freeRemaining ?? 0),
       projectedEndFree: Number(closure.projectedEndFree || 0),
       dailyRate: Number(closure.dailyRate || 0),
       confidence: ["empty", "learning", "normal"].includes(closure.confidence) ? closure.confidence : "normal",
       categoryOverspent: Number(closure.categoryOverspent || 0),
+      exceededCategories: Array.isArray(closure.exceededCategories)
+        ? closure.exceededCategories
+            .map((category) => ({
+              id: category.id || "",
+              name: cleanText(category.name, "Categoria"),
+              budget: Number(category.budget || 0),
+              spent: Number(category.spent || 0),
+              over: Number(category.over || 0)
+            }))
+            .filter((category) => category.name && category.over > 0)
+        : [],
+      idealPeriodSavings: Number(closure.idealPeriodSavings || 0),
+      possiblePeriodSavings: Number(closure.possiblePeriodSavings || 0),
+      suggestedPeriodSavings: Number(closure.suggestedPeriodSavings || 0),
+      savingsCapacityGap: Number(closure.savingsCapacityGap || 0),
+      adjustments: Array.isArray(closure.adjustments)
+        ? closure.adjustments.map((item) => cleanText(item, "")).filter(Boolean).slice(0, 5)
+        : [],
       transactionCount: Number(closure.transactionCount || 0),
       incomeCount: Number(closure.incomeCount || 0),
       status: normalizePredictionStatus(closure.status)
