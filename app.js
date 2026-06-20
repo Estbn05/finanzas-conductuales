@@ -11,7 +11,7 @@ import {
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictUntilNextPeriod as getPeriodPrediction,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260619-period-prediction-v23";
+} from "./finance-core.js?v=20260619-prediction-details-v24";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -23,7 +23,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260619-period-prediction-v23";
+} from "./sync-client.js?v=20260619-prediction-details-v24";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -72,6 +72,7 @@ let planSheet = "";
 let pendingJobRemovalId = "";
 let editingTransactionId = "";
 let editingExtraId = "";
+let predictionDetailsOpen = false;
 let expenseDraft = null;
 let diagnosisValidation = { field: "", message: "" };
 let cloudState = {
@@ -595,6 +596,7 @@ function renderCloudStatusChange() {
 function openQuickExpense() {
   quickExpenseOpen = true;
   menuOpen = false;
+  predictionDetailsOpen = false;
   if (!isQuickExpenseLocation()) {
     window.location.hash = QUICK_EXPENSE_HASH;
   }
@@ -702,6 +704,7 @@ function render() {
     ${pendingJobRemovalId ? renderJobRemovalConfirmation() : ""}
     ${editingTransactionId ? renderTransactionEditor() : ""}
     ${editingExtraId ? renderExtraEditor() : ""}
+    ${predictionDetailsOpen ? renderPredictionDetailsModal() : ""}
     ${!state.profile.completed || state.showDiagnosis ? renderDiagnosisModal() : ""}
     ${pendingExtraAllocation ? renderExtraAllocationModal() : ""}
     ${renderSnackbar()}
@@ -1046,56 +1049,69 @@ function renderPeriodPredictionCard(summary = budgetSummary()) {
         <p class="eyebrow">Prediccion hasta el proximo periodo</p>
         <h2>${predictionHeadline(prediction)}</h2>
         <span>${predictionCopy(prediction, endDate)}</span>
-        <p class="prediction-explainer">No mueve dinero ni crea cargos. Sirve para bajar ansiedad: ves a tiempo si tu dinero libre podria alcanzar antes del proximo pago.</p>
+        <button class="text-link prediction-detail-link" type="button" data-action="open-prediction-details">Como se calculo</button>
       </div>
       <div class="prediction-number">
         <span>${predictionAmountLabel(prediction)}</span>
         <strong>${formatMoney(amount)}</strong>
         <small>${statusLabel}</small>
       </div>
-      ${renderPredictionHelp(prediction)}
     </article>
   `;
 }
 
-function renderPredictionHelp(prediction) {
+function renderPredictionDetailsModal() {
+  const prediction = periodPrediction();
+  const summary = budgetSummary();
   return `
-    <div class="prediction-help" aria-label="Para que sirve y como se calcula">
-      <div>
-        <strong>Para que sirve</strong>
-        <span>${predictionPurposeText(prediction)}</span>
-      </div>
-      <div>
-        <strong>Como se calcula</strong>
-        <span>${predictionFormulaIntro(prediction)}</span>
-        <code>${predictionFormulaText(prediction)}</code>
-        <small>${predictionPaceText(prediction)}</small>
-      </div>
+    <div class="sheet-backdrop" role="presentation">
+      <section class="bottom-sheet prediction-detail-modal" role="dialog" aria-modal="true" aria-labelledby="prediction-detail-title">
+        <div class="sheet-handle"></div>
+        <div class="sheet-heading">
+          <div>
+            <p class="eyebrow">Prediccion hasta el proximo periodo</p>
+            <h2 id="prediction-detail-title">Como se calculo</h2>
+          </div>
+          <button class="icon-btn muted" type="button" data-action="close-prediction-details" aria-label="Cerrar">x</button>
+        </div>
+        <div class="calculation-outcome ${prediction.status}">
+          <strong>${predictionOutcomeText(prediction)}</strong>
+          <span>${predictionPaceText(prediction)}</span>
+        </div>
+        <div class="prediction-detail-grid">
+          <div>
+            <span>Libre hoy</span>
+            <strong>${formatMoney(prediction.freeToday)}</strong>
+          </div>
+          <div>
+            <span>Ritmo usado</span>
+            <strong>${formatMoney(Math.round(prediction.dailyRate))} diarios</strong>
+          </div>
+          <div>
+            <span>Dias restantes</span>
+            <strong>${prediction.remainingDays}</strong>
+          </div>
+        </div>
+        <div class="formula-list">
+          <p class="formula-heading">Calculo</p>
+          <p><strong>dinero_libre_inicial</strong> = ingreso_del_periodo + extras - dinero_reservado_en_categorias</p>
+          <code>${formatMoney(summary.baseIncome)} + ${formatMoney(prediction.extraIncome)} - ${formatMoney(prediction.reserved)} = ${formatMoney(prediction.freeBudget)}</code>
+          <p><strong>gasto_libre_real</strong> = gastos_sin_categoria + excesos_de_categorias</p>
+          <code>${formatMoney(prediction.freeSpent)} + ${formatMoney(prediction.categoryOverspent)} = ${formatMoney(prediction.actualFreeImpactSpent)}</code>
+          ${prediction.ignoredOneOffSpent > 0 ? `<p><strong>gasto_unico</strong> = ${formatMoney(prediction.ignoredOneOffSpent)}. Baja el libre hoy, pero no se usa para ritmo diario.</p>` : ""}
+          <p><strong>libre_hoy</strong> = dinero_libre_inicial - gasto_libre_real</p>
+          <code>${formatMoney(prediction.freeBudget)} - ${formatMoney(prediction.actualFreeImpactSpent)} = ${formatMoney(prediction.freeToday)}</code>
+          <p><strong>ritmo_diario</strong> = ${prediction.ignoredOneOffSpent > 0 ? "gasto_libre_real_sin_unicos" : "gasto_libre_real"} / dias_observados</p>
+          <code>${formatMoney(prediction.observedFreeSpent)} / ${prediction.observedDays} = ${formatMoney(Math.round(prediction.observedDailyRate))} diarios</code>
+          <p><strong>gasto_estimado_restante</strong> = ritmo_diario * dias_hasta_proximo_pago</p>
+          <code>${formatMoney(Math.round(prediction.dailyRate))} x ${prediction.remainingDays} = ${formatMoney(prediction.projectedRemainingSpend)}</code>
+          <p><strong>resultado_final</strong> = libre_hoy - gasto_estimado_restante</p>
+          <code>${formatMoney(prediction.freeToday)} - ${formatMoney(prediction.projectedRemainingSpend)} = ${formatMoney(prediction.projectedEndFree)}</code>
+        </div>
+        <button class="btn primary" type="button" data-action="close-prediction-details">Entendido</button>
+      </section>
     </div>
   `;
-}
-
-function predictionPurposeText(prediction) {
-  if (prediction.status === "learning") {
-    return "Te muestra lo observado sin convertir pocos dias en una alarma grande.";
-  }
-  if (prediction.status === "risk") {
-    if (prediction.freeToday < 0 && prediction.dailyRate === 0) {
-      return "Te avisa que el dinero libre de hoy ya quedo negativo, sin culpar al ritmo diario.";
-    }
-    return "Te avisa antes del proximo pago para ajustar limites, bajar gasto libre o agregar dinero.";
-  }
-  return "Te ayuda a saber si el dinero libre actual alcanza para cerrar el periodo con calma.";
-}
-
-function predictionFormulaIntro(prediction) {
-  if (prediction.status === "learning") {
-    return "Libre hoy = dinero libre inicial - gasto libre real. El ritmo aun no se proyecta.";
-  }
-  if (prediction.status === "empty") {
-    return "Libre hoy = dinero libre inicial - gasto libre real.";
-  }
-  return "Libre hoy - gasto libre estimado hasta el proximo pago = cierre estimado.";
 }
 
 function predictionFormulaText(prediction) {
@@ -1103,6 +1119,22 @@ function predictionFormulaText(prediction) {
     return `Libre hoy: ${formatMoney(prediction.freeToday)}`;
   }
   return `${formatMoney(prediction.freeToday)} - (${formatMoney(Math.round(prediction.dailyRate))} x ${formatDays(prediction.remainingDays)}) = ${formatMoney(prediction.projectedEndFree)}`;
+}
+
+function predictionOutcomeText(prediction) {
+  if (prediction.status === "risk") {
+    return `Si sigues a este ritmo, podrian faltar ${formatMoney(prediction.shortage)}.`;
+  }
+  if (prediction.status === "healthy" || prediction.status === "tight") {
+    return `Si sigues a este ritmo, llegarias con ${formatMoney(Math.max(0, prediction.projectedEndFree))}.`;
+  }
+  if (prediction.status === "learning") {
+    return "Aun no proyecto el resultado final porque faltan dias observados.";
+  }
+  if (prediction.status === "over_reserved") {
+    return `Hay ${formatMoney(prediction.overReserved)} mas reservado que presupuesto.`;
+  }
+  return "Aun no hay gasto libre para calcular un ritmo.";
 }
 
 function predictionPaceText(prediction) {
@@ -3448,6 +3480,8 @@ function handleAction(event) {
     "close-transaction-editor",
     "edit-extra",
     "close-extra-editor",
+    "open-prediction-details",
+    "close-prediction-details",
     "open-diagnosis",
     "close-diagnosis",
     "cancel-extra-allocation",
@@ -3478,10 +3512,12 @@ function handleAction(event) {
     "open-category-sheet": () => {
       planSheet = "category";
       menuOpen = false;
+      predictionDetailsOpen = false;
     },
     "open-extra-sheet": () => {
       planSheet = "extra";
       menuOpen = false;
+      predictionDetailsOpen = false;
     },
     "close-plan-sheet": () => {
       planSheet = "";
@@ -3499,6 +3535,7 @@ function handleAction(event) {
     "edit-transaction": () => {
       editingTransactionId = id;
       editingExtraId = "";
+      predictionDetailsOpen = false;
     },
     "close-transaction-editor": () => {
       editingTransactionId = "";
@@ -3506,14 +3543,24 @@ function handleAction(event) {
     "edit-extra": () => {
       editingExtraId = id;
       editingTransactionId = "";
+      predictionDetailsOpen = false;
     },
     "close-extra-editor": () => {
       editingExtraId = "";
+    },
+    "open-prediction-details": () => {
+      predictionDetailsOpen = true;
+      menuOpen = false;
+      quickExpenseOpen = false;
+    },
+    "close-prediction-details": () => {
+      predictionDetailsOpen = false;
     },
     "open-diagnosis": () => {
       diagnosisValidation = { field: "", message: "" };
       state.showDiagnosis = true;
       menuOpen = false;
+      predictionDetailsOpen = false;
     },
     "close-diagnosis": () => {
       diagnosisValidation = { field: "", message: "" };

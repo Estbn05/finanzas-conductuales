@@ -1,19 +1,19 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CACHE_NAME = `${CACHE_PREFIX}20260619-period-prediction-v23`;
+const CACHE_NAME = `${CACHE_PREFIX}20260619-prediction-details-v24`;
 const APP_SHELL = [
   "./",
   "index.html",
-  "styles.css?v=20260619-period-prediction-v23",
-  "app.js?v=20260619-period-prediction-v23",
-  "finance-core.js?v=20260619-period-prediction-v23",
-  "sync-client.js?v=20260619-period-prediction-v23",
-  "sync-config.js?v=20260619-period-prediction-v23",
-  "vendor/supabase-2.108.1.min.js?v=20260619-period-prediction-v23",
-  "manifest.webmanifest?v=20260619-period-prediction-v23",
-  "assets/icon.svg?v=20260619-period-prediction-v23",
-  "assets/icon-192.png?v=20260619-period-prediction-v23",
-  "assets/icon-512.png?v=20260619-period-prediction-v23",
-  "assets/apple-touch-icon.png?v=20260619-period-prediction-v23"
+  "styles.css?v=20260619-prediction-details-v24",
+  "app.js?v=20260619-prediction-details-v24",
+  "finance-core.js?v=20260619-prediction-details-v24",
+  "sync-client.js?v=20260619-prediction-details-v24",
+  "sync-config.js?v=20260619-prediction-details-v24",
+  "vendor/supabase-2.108.1.min.js?v=20260619-prediction-details-v24",
+  "manifest.webmanifest?v=20260619-prediction-details-v24",
+  "assets/icon.svg?v=20260619-prediction-details-v24",
+  "assets/icon-192.png?v=20260619-prediction-details-v24",
+  "assets/icon-512.png?v=20260619-prediction-details-v24",
+  "assets/apple-touch-icon.png?v=20260619-prediction-details-v24"
 ];
 
 self.addEventListener("install", (event) => {

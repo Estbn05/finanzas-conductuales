@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260619-period-prediction-v23";
+const ASSET_VERSION = "20260619-prediction-details-v24";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -203,11 +203,16 @@ test("period prediction, period close and merchant rules are exposed in the app 
   assert.ok(core.includes("ignoredOneOffSpent"));
   assert.ok(app.includes("predictUntilNextPeriod as getPeriodPrediction"));
   assert.ok(app.includes("function renderPeriodPredictionCard"));
+  assert.ok(app.includes("function renderPredictionDetailsModal"));
   assert.ok(app.includes("Prediccion hasta el proximo periodo"));
-  assert.ok(app.includes("No mueve dinero ni crea cargos"));
-  assert.ok(app.includes("Para que sirve"));
-  assert.ok(app.includes("Como se calcula"));
-  assert.ok(app.includes("Libre hoy - gasto libre estimado"));
+  assert.ok(app.includes("Como se calculo"));
+  assert.ok(app.includes("data-action=\"open-prediction-details\""));
+  assert.ok(app.includes("data-action=\"close-prediction-details\""));
+  assert.ok(app.includes("dinero_libre_inicial"));
+  assert.ok(app.includes("gasto_libre_real"));
+  assert.ok(app.includes("ritmo_diario"));
+  assert.ok(app.includes("gasto_estimado_restante"));
+  assert.ok(app.includes("resultado_final"));
   assert.ok(app.includes("Aprendiendo ritmo"));
   assert.ok(app.includes("Gasto unico: no usar para ritmo diario"));
   assert.ok(app.includes("Revision del periodo"));
@@ -226,9 +231,10 @@ test("period prediction, period close and merchant rules are exposed in the app 
   assert.ok(app.includes("merchantRules: []"));
   assert.ok(app.includes("data-apply-merchant-rule"));
   assert.ok(app.includes('data-action="remove-merchant-rule"'));
-  assert.ok(styles.includes("Prediction, period close and merchant rules v23"));
+  assert.ok(styles.includes("Prediction, period close and merchant rules v24"));
   assert.ok(styles.includes(".prediction-card"));
-  assert.ok(styles.includes(".prediction-help"));
+  assert.ok(styles.includes(".prediction-detail-modal"));
+  assert.ok(styles.includes(".formula-list"));
   assert.ok(styles.includes(".period-close-card"));
   assert.ok(styles.includes(".merchant-rule-suggestion"));
   assert.ok(styles.includes(".merchant-rules-panel"));

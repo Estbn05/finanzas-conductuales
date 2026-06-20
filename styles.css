@@ -7530,7 +7530,7 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   }
 }
 
-/* Prediction, period close and merchant rules v23 */
+/* Prediction, period close and merchant rules v24 */
 .prediction-card,
 .period-close-card,
 .merchant-rules-panel {
@@ -7584,14 +7584,6 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   font-weight: 850;
 }
 
-.prediction-explainer {
-  margin: 8px 0 0;
-  max-width: 620px;
-  color: var(--ds-muted);
-  font-size: 0.7rem;
-  line-height: 1.45;
-}
-
 .prediction-number > span {
   color: var(--ds-muted);
   font-size: 0.68rem;
@@ -7599,37 +7591,100 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   text-transform: uppercase;
 }
 
-.prediction-help {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  border-top: 1px solid rgba(100, 75, 38, 0.12);
-  padding-top: 12px;
+.prediction-detail-link {
+  justify-self: start;
+  margin-top: 8px;
+  border: 0;
+  padding: 0;
+  color: var(--ds-primary-strong);
+  background: transparent;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 820;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
 }
 
-.prediction-help div {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.prediction-help strong,
 .period-close-calculation strong {
   color: var(--ds-ink);
   font-size: 0.7rem;
   font-weight: 830;
 }
 
-.prediction-help code {
+.prediction-detail-modal {
+  gap: 14px;
+}
+
+.calculation-outcome {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(11, 111, 91, 0.14);
+  border-radius: var(--ds-radius-md);
+  padding: 12px;
+  background: var(--ds-primary-soft);
+}
+
+.calculation-outcome strong {
+  color: var(--ds-ink);
+  font-size: 0.9rem;
+}
+
+.calculation-outcome span,
+.formula-list p,
+.prediction-detail-grid span {
+  color: var(--ds-muted);
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.prediction-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.prediction-detail-grid div {
+  display: grid;
+  gap: 3px;
+  border: 1px solid rgba(100, 75, 38, 0.1);
+  border-radius: var(--ds-radius-md);
+  padding: 10px;
+  background: rgba(255, 250, 240, 0.66);
+}
+
+.prediction-detail-grid strong {
   overflow-wrap: anywhere;
+  color: var(--ds-ink);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.formula-list {
+  display: grid;
+  gap: 7px;
+}
+
+.formula-list p {
+  margin: 0;
+}
+
+.formula-list .formula-heading {
+  color: var(--ds-ink);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.formula-list code {
+  overflow-wrap: anywhere;
+  border-left: 3px solid rgba(11, 111, 91, 0.24);
+  padding-left: 9px;
   color: var(--ds-ink);
   font-family: inherit;
   font-size: 0.73rem;
   font-weight: 800;
 }
 
-.prediction-help small,
 .period-close-calculation {
   color: var(--ds-muted);
   font-size: 0.68rem;
@@ -7780,16 +7835,19 @@ html[data-theme="dark"] .merchant-rules-panel,
 }
 
 html[data-theme="dark"] .period-close-metrics div,
+html[data-theme="dark"] .prediction-detail-grid div,
 html[data-theme="dark"] .merchant-rule-chip,
 #app[data-theme="dark"] .period-close-metrics div,
+#app[data-theme="dark"] .prediction-detail-grid div,
 #app[data-theme="dark"] .merchant-rule-chip {
   border-color: rgba(255, 255, 255, 0.1) !important;
   background: rgba(255, 255, 255, 0.04) !important;
 }
 
-html[data-theme="dark"] .prediction-help,
-#app[data-theme="dark"] .prediction-help {
-  border-color: rgba(255, 255, 255, 0.1) !important;
+html[data-theme="dark"] .calculation-outcome,
+#app[data-theme="dark"] .calculation-outcome {
+  border-color: rgba(103, 217, 181, 0.18) !important;
+  background: rgba(103, 217, 181, 0.1) !important;
 }
 
 html[data-theme="dark"] .merchant-rule-suggestion,
@@ -7809,7 +7867,7 @@ html[data-theme="dark"] .merchant-rule-suggestion,
     min-width: 0;
   }
 
-  .prediction-help {
+  .prediction-detail-grid {
     grid-template-columns: 1fr;
   }
 
