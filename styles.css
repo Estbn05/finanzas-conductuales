@@ -7530,7 +7530,7 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   }
 }
 
-/* Prediction, period close and merchant rules v26 */
+/* Prediction, period close and merchant rules v27 */
 .prediction-card,
 .period-close-card,
 .merchant-rules-panel {
@@ -7912,6 +7912,11 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
+}
+
+.period-close-waiting .btn {
+  justify-self: start;
+  width: auto;
 }
 
 .period-close-card.risk,

@@ -11,7 +11,7 @@ import {
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictUntilNextPeriod as getPeriodPrediction,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260620-period-close-v26";
+} from "./finance-core.js?v=20260620-period-close-window-v27";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -23,12 +23,13 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260620-period-close-v26";
+} from "./sync-client.js?v=20260620-period-close-window-v27";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
 const DEFAULT_VIEW = "today";
 const QUICK_EXPENSE_HASH = "registrar-gasto";
+const PERIOD_CLOSE_NOTICE_DAYS = 5;
 const AUTH_STARTUP_TIMEOUT_MS = 25_000;
 const DEFAULT_REMINDER_TIME = "20:00";
 const STUDENT_SEMESTER_INCOME = 1_750_000;
@@ -1264,6 +1265,7 @@ function renderTransactionLabeler(transaction) {
 
 function renderBudget(plan) {
   const summary = budgetSummary();
+  const closeReport = periodCloseReport(plan, summary);
   const ring = getBudgetRingAllocation(summary);
   const reservedRatio = (ring.reserved / Math.max(1, ring.total)) * 100;
   const spentRatio = (ring.spent / Math.max(1, ring.total)) * 100;
@@ -1298,7 +1300,7 @@ function renderBudget(plan) {
         ${ring.outside > 0 ? `<p class="inline-warning">Gastos fuera del presupuesto: ${formatMoney(ring.outside)}.</p>` : ""}
       </article>
 
-      ${renderPeriodCloseCard(summary, plan)}
+      ${shouldShowPeriodClose(closeReport) ? renderPeriodCloseCard(summary, plan, closeReport) : ""}
 
       <div class="plan-actions">
         <button class="plan-action" type="button" data-action="open-extra-sheet">
@@ -1339,8 +1341,7 @@ function renderBudget(plan) {
   `;
 }
 
-function renderPeriodCloseCard(summary = budgetSummary(), plan = calculatePlan()) {
-  const report = periodCloseReport(plan, summary);
+function renderPeriodCloseCard(summary = budgetSummary(), plan = calculatePlan(), report = periodCloseReport(plan, summary)) {
   const closedLine = renderPeriodCloseSavedLine(report.closure);
   const freeClass = report.freeFinal < 0 ? "negative" : "";
 
@@ -1367,6 +1368,9 @@ function renderPeriodCloseCard(summary = budgetSummary(), plan = calculatePlan()
 function renderPeriodCloseScreen(plan = calculatePlan()) {
   const summary = budgetSummary();
   const report = periodCloseReport(plan, summary);
+  if (!shouldShowPeriodClose(report)) {
+    return renderPeriodCloseWaiting(summary, report);
+  }
   const period = `${formatShortDate(summary.window.start)} - ${formatShortDate(previousDay(summary.window.end))}`;
   const freeClass = report.freeFinal < 0 ? "negative" : "positive";
 
@@ -1426,6 +1430,29 @@ function renderPeriodCloseScreen(plan = calculatePlan()) {
   `;
 }
 
+function renderPeriodCloseWaiting(summary, report) {
+  const period = `${formatShortDate(summary.window.start)} - ${formatShortDate(previousDay(summary.window.end))}`;
+  return `
+    <section class="screen-view period-close-view" aria-label="Cierre de periodo">
+      <div class="screen-title-row">
+        <div>
+          <p class="eyebrow">Cierre de periodo</p>
+          <h1>Todavia no toca cerrar</h1>
+        </div>
+        <span class="period-chip">${period}</span>
+      </div>
+      <article class="period-close-panel period-close-waiting">
+        <div class="period-close-panel-head">
+          <p class="eyebrow">Disponible al final</p>
+          <h2>Faltan ${formatDays(report.remainingDays)}</h2>
+        </div>
+        <p>El cierre aparece cuando falten ${PERIOD_CLOSE_NOTICE_DAYS} dias o menos para el proximo periodo, incluyendo el dia que se vence.</p>
+        <button class="btn ghost" type="button" data-view="budget">Volver al plan</button>
+      </article>
+    </section>
+  `;
+}
+
 function renderPeriodCloseSavedLine(closure) {
   if (!closure) {
     return "";
@@ -1467,6 +1494,10 @@ function periodCloseReport(plan = calculatePlan(), summary = budgetSummary()) {
     status,
     adjustments: periodCloseAdjustments(summary, plan, categories, freeFinal)
   };
+}
+
+function shouldShowPeriodClose(report = periodCloseReport()) {
+  return Number(report.remainingDays || 0) <= PERIOD_CLOSE_NOTICE_DAYS;
 }
 
 function periodCloseStatus(summary, exceededCategories, freeFinal, savingsGap) {
