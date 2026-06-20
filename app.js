@@ -11,7 +11,7 @@ import {
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictUntilNextPeriod as getPeriodPrediction,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260620-qa-cleanup-v28";
+} from "./finance-core.js?v=20260620-day-total-v29";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -23,7 +23,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260620-qa-cleanup-v28";
+} from "./sync-client.js?v=20260620-day-total-v29";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -2213,9 +2213,17 @@ function renderTransactionHistory(summary = budgetSummary(), sort = "recent") {
 
   return `
     <div class="transaction-history">
-      ${Object.entries(groups).map(([date, dayMovements]) => `
+      ${Object.entries(groups).map(([date, dayMovements]) => {
+        const expenseTotal = dailyExpenseTotal(dayMovements);
+        return `
         <section class="movement-day">
-          <div class="movement-day-heading"><strong>${movementDayLabel(date)}</strong><span>${dayMovements.length} ${dayMovements.length === 1 ? "movimiento" : "movimientos"}</span></div>
+          <div class="movement-day-heading">
+            <strong>${movementDayLabel(date)}</strong>
+            <span class="movement-day-meta">
+              <span>${dayMovements.length} ${dayMovements.length === 1 ? "movimiento" : "movimientos"}</span>
+              <strong>Gastos: ${formatMoney(expenseTotal)}</strong>
+            </span>
+          </div>
           ${dayMovements.map((movement) => {
             if (movement.kind === "income") {
               const extra = movement.extra;
@@ -2246,9 +2254,16 @@ function renderTransactionHistory(summary = budgetSummary(), sort = "recent") {
             `;
           }).join("")}
         </section>
-      `).join("")}
+      `;
+      }).join("")}
     </div>
   `;
+}
+
+function dailyExpenseTotal(dayMovements = []) {
+  return dayMovements
+    .filter((movement) => movement.kind === "expense")
+    .reduce((total, movement) => total + Number(movement.amount || 0), 0);
 }
 
 function renderTransactionEditor() {

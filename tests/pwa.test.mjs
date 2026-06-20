@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260620-qa-cleanup-v28";
+const ASSET_VERSION = "20260620-day-total-v29";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -169,6 +169,9 @@ test("movements combines expenses and extra income and can sort the full history
   assert.ok(app.includes('const movementCountLabel = movements.length === 1 ? "movimiento" : "movimientos"'));
   assert.ok(app.includes("${movements.length} ${movementCountLabel}"));
   assert.ok(app.includes('id="transaction-history-sort"'));
+  assert.ok(app.includes("function dailyExpenseTotal(dayMovements = [])"));
+  assert.ok(app.includes('movement.kind === "expense"'));
+  assert.ok(app.includes("Gastos: ${formatMoney(expenseTotal)}"));
   assert.ok(app.includes('value="recent"'));
   assert.ok(app.includes('value="amount"'));
   assert.ok(app.includes("transactionHistorySort"));
@@ -178,6 +181,7 @@ test("movements combines expenses and extra income and can sort the full history
   assert.ok(app.includes('String(b.date || "").localeCompare(String(a.date || ""))'));
   assert.ok(app.includes('movements: "movimientos"'));
   assert.ok(styles.includes(".history-row.is-income"));
+  assert.ok(styles.includes(".movement-day-meta"));
   assert.ok(styles.includes(".movement-type-icon.income"));
   assert.ok(styles.includes(".income-amount strong"));
   assert.ok(styles.includes(".history-row .movement-type-icon"));

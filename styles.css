@@ -3554,6 +3554,15 @@ input[type="range"] {
   text-transform: capitalize;
 }
 
+.movement-day-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 4px 8px;
+  text-align: right;
+}
+
 .movement-day-heading strong {
   color: var(--ink);
   font-size: 0.72rem;
@@ -5931,12 +5940,22 @@ select[data-invalid="true"] {
 }
 
 .movement-day-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
   padding: 2px 2px 6px;
   border-bottom: 1px solid rgba(100, 75, 38, 0.08);
 }
 
 .movement-day-heading strong {
   font-size: 0.9rem;
+}
+
+.movement-day-meta strong {
+  color: var(--ds-primary-strong);
+  font-size: 0.76rem;
+  font-weight: 780;
 }
 
 .history-row {

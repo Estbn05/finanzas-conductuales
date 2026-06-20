@@ -1,19 +1,19 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CACHE_NAME = `${CACHE_PREFIX}20260620-qa-cleanup-v28`;
+const CACHE_NAME = `${CACHE_PREFIX}20260620-day-total-v29`;
 const APP_SHELL = [
   "./",
   "index.html",
-  "styles.css?v=20260620-qa-cleanup-v28",
-  "app.js?v=20260620-qa-cleanup-v28",
-  "finance-core.js?v=20260620-qa-cleanup-v28",
-  "sync-client.js?v=20260620-qa-cleanup-v28",
-  "sync-config.js?v=20260620-qa-cleanup-v28",
-  "vendor/supabase-2.108.1.min.js?v=20260620-qa-cleanup-v28",
-  "manifest.webmanifest?v=20260620-qa-cleanup-v28",
-  "assets/icon.svg?v=20260620-qa-cleanup-v28",
-  "assets/icon-192.png?v=20260620-qa-cleanup-v28",
-  "assets/icon-512.png?v=20260620-qa-cleanup-v28",
-  "assets/apple-touch-icon.png?v=20260620-qa-cleanup-v28"
+  "styles.css?v=20260620-day-total-v29",
+  "app.js?v=20260620-day-total-v29",
+  "finance-core.js?v=20260620-day-total-v29",
+  "sync-client.js?v=20260620-day-total-v29",
+  "sync-config.js?v=20260620-day-total-v29",
+  "vendor/supabase-2.108.1.min.js?v=20260620-day-total-v29",
+  "manifest.webmanifest?v=20260620-day-total-v29",
+  "assets/icon.svg?v=20260620-day-total-v29",
+  "assets/icon-192.png?v=20260620-day-total-v29",
+  "assets/icon-512.png?v=20260620-day-total-v29",
+  "assets/apple-touch-icon.png?v=20260620-day-total-v29"
 ];
 
 self.addEventListener("install", (event) => {
