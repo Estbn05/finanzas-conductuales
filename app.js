@@ -11,7 +11,7 @@ import {
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictUntilNextPeriod as getPeriodPrediction,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260620-period-close-window-v27";
+} from "./finance-core.js?v=20260620-qa-cleanup-v28";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -23,7 +23,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260620-period-close-window-v27";
+} from "./sync-client.js?v=20260620-qa-cleanup-v28";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -601,12 +601,6 @@ function openQuickExpense() {
   }
 }
 
-function seedQuickExpenseBackEntry() {
-  const historyState = window.history.state || {};
-  window.history.replaceState(historyState, "", `#${hashFromView(state.activeView || DEFAULT_VIEW)}`);
-  window.history.pushState(historyState, "", `#${QUICK_EXPENSE_HASH}`);
-}
-
 function normalizeStartupRoute() {
   if (!isQuickExpenseLocation()) {
     return;
@@ -1023,6 +1017,7 @@ function renderToday(plan) {
   return `
     <section class="home-view" aria-label="Resumen del periodo">
       ${renderPeriodPredictionCard(homeSummary)}
+      ${renderCooldownPanel()}
       <div class="home-section-heading">
         <div>
           <p class="eyebrow">Categorias del periodo</p>
@@ -1064,6 +1059,28 @@ function renderPeriodPredictionCard(summary = budgetSummary()) {
         <span>${predictionAmountLabel(prediction)}</span>
         <strong>${formatMoney(amount)}</strong>
         <small>${statusLabel}</small>
+      </div>
+    </article>
+  `;
+}
+
+function renderCooldownPanel() {
+  const cooldowns = (state.cooldowns || [])
+    .slice()
+    .sort((a, b) => String(a.unlockAt || "").localeCompare(String(b.unlockAt || "")));
+  if (!cooldowns.length) {
+    return "";
+  }
+  return `
+    <article class="cooldown-panel" aria-label="Compras en pausa">
+      <div class="home-section-heading compact-heading">
+        <div>
+          <p class="eyebrow">Compras en pausa</p>
+          <h2>Decide con calma</h2>
+        </div>
+      </div>
+      <div class="cooldown-list">
+        ${cooldowns.map((cooldown) => renderCooldown(cooldown)).join("")}
       </div>
     </article>
   `;
@@ -1121,13 +1138,6 @@ function renderPredictionDetailsModal() {
       </section>
     </div>
   `;
-}
-
-function predictionFormulaText(prediction) {
-  if (prediction.status === "learning" || prediction.status === "empty") {
-    return `Libre hoy: ${formatMoney(prediction.freeToday)}`;
-  }
-  return `${formatMoney(prediction.freeToday)} - (${formatMoney(Math.round(prediction.dailyRate))} x ${formatDays(prediction.remainingDays)}) = ${formatMoney(prediction.projectedEndFree)}`;
 }
 
 function predictionOutcomeText(prediction) {
@@ -1239,28 +1249,6 @@ function predictionStatusLabel(status) {
 function formatDays(days) {
   const count = Math.max(0, Math.round(Number(days || 0)));
   return `${count} ${count === 1 ? "dia" : "dias"}`;
-}
-
-function renderTransactionLabeler(transaction) {
-  return `
-    <div class="transaction-row">
-      <div>
-        <strong>${escapeHtml(transaction.merchant)}</strong>
-        ${transaction.description ? `<span>${escapeHtml(transaction.description)}</span>` : ""}
-        <span>${formatMoney(transaction.amount)} · ${formatDate(transaction.date)}</span>
-      </div>
-      <select data-transaction-category="${transaction.id}" aria-label="Categoria para ${escapeAttr(transaction.merchant)}">
-        <option value="">Elegir categoria</option>
-        <option value="${FREE_CATEGORY_ID}" ${transaction.category === FREE_CATEGORY_ID ? "selected" : ""}>Libre / sin clasificar</option>
-        ${state.budgetJobs
-          .map(
-            (job) =>
-              `<option value="${escapeAttr(job.id)}" ${transaction.category === job.id ? "selected" : ""}>${escapeHtml(job.name)}</option>`
-          )
-          .join("")}
-      </select>
-    </div>
-  `;
 }
 
 function renderBudget(plan) {
@@ -2165,78 +2153,6 @@ function renderSpending(plan) {
   `;
 }
 
-function renderExtraBudgetCard(summary = budgetSummary()) {
-  return `
-    <article class="card wide-card">
-      <div class="card-heading">
-        <div>
-          <p class="eyebrow">Dinero recibido</p>
-          <h2>Sumar al presupuesto</h2>
-        </div>
-        <span class="metric-badge">${formatMoney(summary.extraIncome)} extra</span>
-      </div>
-      <p class="helper-text">Suma regalos, bonos o ayudas solo al periodo actual. Antes de guardarlo puedes separar una parte para ahorro.</p>
-      <form class="inline-form extra-budget-form" id="extra-budget-form">
-        <label>
-          Origen
-          <input name="source" type="text" maxlength="36" placeholder="Ej. Regalo, ayuda, venta" required>
-        </label>
-        <label>
-          Monto
-          <input name="amount" type="number" min="1000" step="1000" required>
-        </label>
-        <label>
-          Fecha
-          <input name="date" type="date" value="${todayKey()}" required>
-        </label>
-        <label>
-          Entra a
-          <select name="location">
-            ${renderLocationOptions("account")}
-          </select>
-        </label>
-        <button class="btn secondary" type="submit">Sumar dinero</button>
-      </form>
-      ${renderBudgetExtras(summary)}
-      ${
-        summary.extraIncome > 0
-          ? `<div class="card-actions">
-              <button class="btn danger" type="button" data-action="clear-period-extras">Quitar extra del periodo</button>
-            </div>`
-          : ""
-      }
-    </article>
-  `;
-}
-
-function renderBudgetExtras(summary = budgetSummary()) {
-  const extras = budgetExtrasForSummary(summary)
-    .slice()
-    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
-
-  if (!extras.length) {
-    return `<div class="empty-state">Aun no has sumado dinero extra en este periodo.</div>`;
-  }
-
-  return `
-    <div class="job-table extra-budget-list">
-      ${extras
-        .map(
-          (extra) => `
-            <div class="extra-budget-row">
-              <div>
-                <strong>${escapeHtml(extra.source)}</strong>
-                <span>${formatMoney(extra.amount)} · ${locationLabel(extra.location)} · ${formatDate(extra.date)}</span>
-              </div>
-              <button class="icon-btn muted" type="button" data-action="remove-extra" data-id="${escapeAttr(extra.id)}" aria-label="Eliminar ${escapeAttr(extra.source)}">x</button>
-            </div>
-          `
-        )
-        .join("")}
-    </div>
-  `;
-}
-
 function renderLocationOptions(selected) {
   return [
     ["account", "Cuenta"],
@@ -2491,82 +2407,6 @@ function renderProfile(plan) {
   `;
 }
 
-function renderStudentContextPanel() {
-  const semesterIncome = Number(state.profile.semesterIncome || STUDENT_SEMESTER_INCOME);
-  const semesterMonths = Number(state.profile.semesterMonths || STUDENT_SEMESTER_MONTHS);
-  const weeklyGas = Number(state.profile.weeklyGas || STUDENT_WEEKLY_GAS);
-  return `
-    <article class="card wide-card context-card">
-      <div class="card-heading">
-        <div>
-          <p class="eyebrow">Plantilla opcional</p>
-          <h2>Estudiante becado con moto</h2>
-        </div>
-        <span class="metric-badge">${formatMoney(monthlyFromSemester(semesterIncome, semesterMonths))} / mes</span>
-      </div>
-      <div class="context-grid">
-        <div>
-          <strong>${formatMoney(semesterIncome)}</strong>
-          <span>beca semestral</span>
-        </div>
-        <div>
-          <strong>${semesterMonths} meses</strong>
-          <span>para cubrir</span>
-        </div>
-        <div>
-          <strong>${formatMoney(weeklyGas)}</strong>
-          <span>gasolina semanal</span>
-        </div>
-        <div>
-          <strong>${formatMoney(state.profile.relationshipMonthlyBudget || 45_000)}</strong>
-          <span>salidas con novia</span>
-        </div>
-      </div>
-      <p>Este preset es solo un punto de partida. Puedes cambiar el presupuesto, su frecuencia y crear campos propios.</p>
-      <div class="card-actions">
-        <button class="btn secondary" type="button" data-action="apply-student-context">Aplicar mi contexto</button>
-      </div>
-    </article>
-  `;
-}
-
-function renderAccountPanel() {
-  return `
-    <article class="card wide-card account-card">
-      <div class="card-heading">
-        <div>
-          <p class="eyebrow">Cuenta</p>
-          <h2>${escapeHtml(cloudState.email)}</h2>
-        </div>
-      </div>
-      <div class="card-actions">
-        <button class="btn danger" type="button" data-action="cloud-sign-out">Cerrar sesion</button>
-      </div>
-    </article>
-  `;
-}
-
-function renderScriptBar(key, value) {
-  const labels = {
-    worship: "Buscar mas dinero",
-    avoidance: "Evitar mirar dinero",
-    status: "Dinero como estatus",
-    vigilance: "Control y seguridad"
-  };
-  const ratio = (Number(value) / 5) * 100;
-  return `
-    <div class="script-row">
-      <div>
-        <strong>${labels[key]}</strong>
-        <span>${Number(value).toFixed(1)} / 5</span>
-      </div>
-      <div class="bar">
-        <span style="width:${clamp(ratio, 0, 100)}%"></span>
-      </div>
-    </div>
-  `;
-}
-
 function renderIncomeCadenceOptions(selected) {
   const options = [
     ["weekly", "Semanal"],
@@ -2669,26 +2509,6 @@ function renderOnboardingModal() {
           </div>
         </form>
       </section>
-    </div>
-  `;
-}
-
-function renderOnboardingCategoryRow(index, options = {}) {
-  const { example = false, removable = false } = options;
-  const namePlaceholder = example ? "Ej. Gasolina" : "Ej. Comida";
-  const amountPlaceholder = example ? "Ej. $30.000" : "Ej. $50.000";
-
-  return `
-    <div class="onboarding-category-row ${removable ? "is-removable" : ""}" data-onboarding-category-row data-category-index="${index}">
-      <input name="categoryName${index}" type="text" maxlength="32" placeholder="${namePlaceholder}" aria-label="Nombre del campo ${index + 1}">
-      <input name="categoryAmount${index}" type="number" min="0" step="1000" inputmode="numeric" placeholder="${amountPlaceholder}" aria-label="Monto del campo ${index + 1}">
-      <select name="categoryCadence${index}" aria-label="Frecuencia del campo ${index + 1}">
-        <option value="weekly">Semanal</option>
-        <option value="biweekly">Quincenal</option>
-        <option value="monthly">Mensual</option>
-        <option value="period">Una vez</option>
-      </select>
-      ${removable ? `<button class="icon-btn muted onboarding-category-remove" type="button" data-remove-onboarding-category aria-label="Quitar este campo" title="Quitar este campo">x</button>` : ""}
     </div>
   `;
 }
@@ -2977,24 +2797,6 @@ function bindEvents() {
     });
   });
 
-  document.querySelectorAll("[data-transaction-category]").forEach((select) => {
-    select.addEventListener("change", () => {
-      const transaction = state.transactions.find((item) => item.id === select.dataset.transactionCategory);
-      if (!transaction) {
-        return;
-      }
-      transaction.category = select.value;
-      transaction.labeled = Boolean(select.value);
-      transaction.updated_at = new Date().toISOString();
-      rememberMerchantRule(transaction);
-      state.lastAlert = transaction.labeled
-        ? `${transaction.merchant} ahora tiene trabajo asignado.`
-        : "Ese movimiento sigue pendiente de categoria.";
-      saveState();
-      render();
-    });
-  });
-
   const onboardingForm = document.querySelector("#onboarding-form");
   if (onboardingForm) {
     bindOnboardingFlowV2(onboardingForm);
@@ -3182,100 +2984,6 @@ function firstFocusable(root) {
 function focusableElements(root) {
   return [...root.querySelectorAll('button, [href], input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])')]
     .filter((element) => !element.disabled && element.offsetParent !== null);
-}
-
-function bindOnboardingFlow(form) {
-  const modal = form.closest("[data-onboarding-step]");
-  const error = form.querySelector(".onboarding-error");
-  const nextButton = form.querySelector("[data-onboarding-next]");
-  const backButton = form.querySelector("[data-onboarding-back]");
-  const finishButton = form.querySelector(".onboarding-finish");
-  const skipButton = form.querySelector("[data-onboarding-skip]");
-  const balanceHint = form.querySelector("[data-onboarding-balance]");
-  const categoryList = form.querySelector(".onboarding-categories");
-  const addCategoryButton = form.querySelector("[data-add-onboarding-category]");
-  const progress = modal.querySelector(".onboarding-progress");
-
-  const updateBalanceHint = () => {
-    const data = new FormData(form);
-    const budget = numberFrom(data.get("incomeAmount"));
-    const total = numberFrom(data.get("account")) + numberFrom(data.get("cash"));
-    const matches = budget > 0 && total === budget;
-    balanceHint.textContent = matches
-      ? `Cuenta + efectivo coincide con ${formatMoney(budget)}.`
-      : `Cuenta + efectivo suma ${formatMoney(total)} de ${formatMoney(budget)}.`;
-    balanceHint.classList.toggle("is-ok", matches);
-    balanceHint.classList.toggle("is-error", !matches);
-  };
-
-  const showStep = (step) => {
-    modal.dataset.onboardingStep = String(step);
-    form.querySelectorAll("[data-step]").forEach((section) => section.classList.toggle("is-active", Number(section.dataset.step) === step));
-    modal.querySelectorAll(".onboarding-progress span").forEach((dot, index) => dot.classList.toggle("is-active", index < step));
-    progress?.setAttribute("aria-label", `Paso ${step} de 3`);
-    backButton.hidden = step === 1 || step === 3;
-    nextButton.hidden = step === 3;
-    finishButton.hidden = step !== 3;
-    skipButton.hidden = step !== 3;
-    error.textContent = "";
-    if (step === 2) {
-      updateBalanceHint();
-    }
-  };
-
-  nextButton.addEventListener("click", () => {
-    const step = Number(modal.dataset.onboardingStep || 1);
-    const message = validateOnboardingStep(form, step);
-    if (message) {
-      error.textContent = message;
-      return;
-    }
-    showStep(Math.min(3, step + 1));
-  });
-
-  backButton.addEventListener("click", () => {
-    const step = Number(modal.dataset.onboardingStep || 1);
-    showStep(Math.max(1, step - 1));
-  });
-
-  ["incomeAmount", "account", "cash"].forEach((name) => {
-    form.elements.namedItem(name)?.addEventListener("input", updateBalanceHint);
-  });
-
-  const updateCategoryControls = () => {
-    const rowCount = categoryList?.querySelectorAll("[data-onboarding-category-row]").length || 0;
-    if (addCategoryButton) {
-      addCategoryButton.disabled = rowCount >= 10;
-      addCategoryButton.title = rowCount >= 10 ? "Máximo 10 campos" : "Añadir otro campo";
-    }
-  };
-
-  addCategoryButton?.addEventListener("click", () => {
-    if (!categoryList) {
-      return;
-    }
-    const indexes = [...categoryList.querySelectorAll("[data-category-index]")].map((row) => Number(row.dataset.categoryIndex) || 0);
-    const nextIndex = Math.max(...indexes, -1) + 1;
-    if (indexes.length >= 10) {
-      return;
-    }
-    categoryList.insertAdjacentHTML("beforeend", renderOnboardingCategoryRow(nextIndex, { removable: true }));
-    const row = categoryList.querySelector(`[data-category-index="${nextIndex}"]`);
-    bindMoneyInputs(row);
-    row?.querySelector(`input[name="categoryName${nextIndex}"]`)?.focus();
-    updateCategoryControls();
-  });
-
-  categoryList?.addEventListener("click", (event) => {
-    const removeButton = event.target.closest("[data-remove-onboarding-category]");
-    if (!removeButton) {
-      return;
-    }
-    removeButton.closest("[data-onboarding-category-row]")?.remove();
-    updateCategoryControls();
-  });
-
-  updateCategoryControls();
 }
 
 function bindOnboardingFlowV2(form) {
@@ -3670,7 +3378,6 @@ function handleAction(event) {
   const action = event.currentTarget.dataset.action;
   const id = event.currentTarget.dataset.id;
   const interfaceOnlyActions = new Set([
-    "go-spending",
     "toggle-menu",
     "close-menu",
     "open-expense",
@@ -3698,7 +3405,6 @@ function handleAction(event) {
   ]);
 
   const actions = {
-    "go-spending": openQuickExpense,
     "toggle-menu": () => {
       menuOpen = !menuOpen;
       quickExpenseOpen = false;
@@ -3772,11 +3478,6 @@ function handleAction(event) {
       diagnosisValidation = { field: "", message: "" };
       state.showDiagnosis = false;
     },
-    "complete-checkin": completeCheckin,
-    "simulate-alert": simulateSpendingAlert,
-    "add-process-win": addProcessWin,
-    "apply-student-context": applyStudentContext,
-    "remove-job": () => removeBudgetJob(id),
     "remove-transaction": () => {
       removeTransaction(id);
       editingTransactionId = "";
@@ -3785,12 +3486,10 @@ function handleAction(event) {
       removeTransaction(id);
       clearSnackbar({ renderNow: false });
     },
-    "remove-extra": () => removeBudgetExtra(id),
     "remove-extra-from-editor": () => {
       removeBudgetExtra(id);
       editingExtraId = "";
     },
-    "clear-period-extras": clearCurrentPeriodExtras,
     "save-period-close": savePeriodClosure,
     "remove-merchant-rule": () => removeMerchantRule(id),
     "extra-all-free": () => applyPendingExtraAllocation(0),
@@ -3814,14 +3513,12 @@ function handleAction(event) {
     "reopen-calendar-event": () => reopenCalendarEvent(id),
     "cancel-cooldown": () => cancelCooldown(id),
     "unlock-cooldown": () => unlockCooldown(id),
-    "push-cloud-now": () => pushCloudState(),
-    "pull-cloud-now": () => pullCloudAfterLogin(),
     "cloud-sign-out": () => handleCloudSignOut()
   };
 
   if (actions[action]) {
     actions[action]();
-    const asyncCloudAction = ["push-cloud-now", "pull-cloud-now", "cloud-sign-out"].includes(action);
+    const asyncCloudAction = action === "cloud-sign-out";
     if (!asyncCloudAction && !interfaceOnlyActions.has(action)) {
       saveState();
     }
@@ -4475,72 +4172,6 @@ function clearLocalUserState() {
   clearSnackbar({ renderNow: false });
 }
 
-function completeCheckin() {
-  const today = todayKey();
-  const unlabeledToday = state.transactions.filter((transaction) => transaction.date === today && !transaction.labeled);
-  if (unlabeledToday.length) {
-    state.lastAlert = `Quedan ${unlabeledToday.length} gastos de hoy sin categoria.`;
-    return;
-  }
-
-  if (!state.checkins.includes(today)) {
-    state.checkins.push(today);
-    state.wins.push({
-      id: uid("win"),
-      date: today,
-      text: "Completaste la revision de hoy."
-    });
-  }
-  state.lastAlert = "Revision cerrada. Hoy ya quedo al dia.";
-}
-
-function simulateSpendingAlert() {
-  state.lastAlert = createSpendAlert(categoryStatus().sort((a, b) => b.ratio - a.ratio)[0]?.id);
-}
-
-function addProcessWin() {
-  state.wins.push({
-    id: uid("win"),
-    date: todayKey(),
-    text: "Revisaste el plan sin convertir un desvio en identidad."
-  });
-  state.lastAlert = "Victoria de proceso registrada.";
-}
-
-function applyStudentContext() {
-  const now = new Date().toISOString();
-  const semesterIncome = STUDENT_SEMESTER_INCOME;
-  const semesterMonths = STUDENT_SEMESTER_MONTHS;
-  const weeklyGas = STUDENT_WEEKLY_GAS;
-  state.profile = {
-    ...state.profile,
-    completed: true,
-    name: "Plan estudiante becado",
-    incomeCadence: "semester",
-    incomeAmount: semesterIncome,
-    incomeType: "variable",
-    volatility: "medium",
-    semesterIncome,
-    semesterMonths,
-    periodStart: monthStartKey(),
-    semesterStart: monthStartKey(),
-    monthlyIncome: monthlyFromSemester(semesterIncome, semesterMonths),
-    weeklyGas,
-    committedExpenses: monthlyFromWeekly(weeklyGas),
-    relationshipMonthlyBudget: 45_000,
-    giftMonthlyBudget: 20_000,
-    updated_at: now
-  };
-  state.budgetJobs = STUDENT_BUDGET_JOBS.map((job) => ({ ...job, updated_at: now }));
-  state.meta = { ...(state.meta || {}), budgetPreset: "student" };
-  state.lastAlert = "Contexto estudiante aplicado: beca semestral, moto, gasolina y salidas.";
-  state.wins.push({
-    id: uid("win"),
-    date: todayKey(),
-    text: "Personalizaste la app a tu vida de estudiante becado."
-  });
-}
-
 function startCalendarEventExpense(id) {
   const event = state.calendarEvents.find((item) => item.id === id);
   if (!event) {
@@ -4759,28 +4390,6 @@ function reverseBudgetExtra(extra) {
 function dateIsInWindow(dateValue, window) {
   const date = String(dateValue || "").slice(0, 10);
   return date >= window.start && date < window.end;
-}
-
-function clearCurrentPeriodExtras() {
-  const summary = budgetSummary();
-  const extras = budgetExtrasForSummary(summary);
-  if (!extras.length) {
-    state.lastAlert = "No hay dinero extra en este periodo.";
-    return;
-  }
-
-  const total = extras.reduce((sum, extra) => sum + Number(extra.amount || 0), 0);
-  if (typeof window.confirm === "function" && !window.confirm(`Quitar ${formatMoney(total)} de dinero extra del periodo actual?`)) {
-    state.lastAlert = "No quite ningun extra.";
-    return;
-  }
-
-  const ids = new Set(extras.map((extra) => extra.id));
-  extras.forEach((extra) => {
-    reverseBudgetExtra(extra);
-  });
-  state.budgetExtras = state.budgetExtras.filter((extra) => !ids.has(extra.id));
-  state.lastAlert = `Quite ${formatMoney(total)} de dinero extra del periodo.`;
 }
 
 function cancelCooldown(id) {
@@ -5268,16 +4877,6 @@ function dominantMoneyScript() {
   };
   const key = Object.entries(state.profile.moneyScripts).sort((a, b) => b[1] - a[1])[0][0];
   return labels[key];
-}
-
-function graduatedPresenceTask() {
-  if (state.profile.financialAnxiety >= 7) {
-    return "Clasifica un gasto y cierra la revision.";
-  }
-  if (state.profile.selfEfficacy <= 4) {
-    return "Guarda un avance antes de mirar saldos.";
-  }
-  return "Clasifica pendientes y revisa la categoria mas cercana al limite.";
 }
 
 function futureFreedom(plan) {

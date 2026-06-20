@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260620-period-close-window-v27";
+const ASSET_VERSION = "20260620-qa-cleanup-v28";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -79,13 +79,13 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(app.includes("formatCompactMoney(liquidity.cash)"));
   assert.ok(app.includes('class="expense-impact-preview" aria-live="polite"'));
 
-  const todayView = app.slice(app.indexOf("function renderToday"), app.indexOf("function renderTransactionLabeler"));
+  const todayView = app.slice(app.indexOf("function renderToday"), app.indexOf("function renderPeriodPredictionCard"));
   assert.ok(todayView.includes("Categorias del periodo"));
   assert.equal(todayView.includes("Movimientos del periodo"), false);
   assert.equal(todayView.includes("Fondo inicial"), false);
   assert.equal(todayView.includes("Pago recomendado"), false);
 
-  const fullTodayView = app.slice(app.indexOf("function renderToday"), app.indexOf("function renderTransactionLabeler"));
+  const fullTodayView = app.slice(app.indexOf("function renderToday"), app.indexOf("function renderPeriodPredictionCard"));
   assert.equal(fullTodayView.includes("Ahora"), false);
   assert.equal(fullTodayView.includes("Revision rapida"), false);
   assert.equal(fullTodayView.includes("complete-checkin"), false);
@@ -94,7 +94,7 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.equal(fullTodayView.includes("Fondo inicial"), false);
   assert.equal(fullTodayView.includes("Ahorro recomendado"), false);
   assert.equal(fullTodayView.includes("Gastos por categoria"), false);
-  assert.equal(fullTodayView.includes("Pausa de 24 horas"), false);
+  assert.ok(fullTodayView.includes("renderCooldownPanel"));
   assert.equal(fullTodayView.includes("Ajuste sin culpa"), false);
   assert.equal(fullTodayView.includes("Patron dominante"), false);
 
@@ -186,7 +186,7 @@ test("movements combines expenses and extra income and can sort the full history
   assert.ok(styles.includes(".extra-edit-allocation"));
   assert.ok(styles.includes(".income-editor-amount"));
 
-  const profile = app.slice(app.indexOf("function renderProfile"), app.indexOf("function renderStudentContextPanel"));
+  const profile = app.slice(app.indexOf("function renderProfile"), app.indexOf("function renderIncomeCadenceOptions"));
   assert.equal(profile.includes("renderTransactionHistory"), false);
   assert.equal(profile.includes("Movimientos del periodo"), false);
 });
@@ -231,7 +231,7 @@ test("period prediction, period close and merchant rules are exposed in the app 
   assert.ok(app.includes("idealPeriodSavings"));
   assert.ok(app.includes("possiblePeriodSavings"));
   assert.ok(app.includes("predictionAmountLabel"));
-  assert.ok(app.includes("predictionFormulaText"));
+  assert.ok(app.includes("predictionPaceText"));
   assert.ok(app.includes("function renderPeriodCloseCard"));
   assert.ok(app.includes('data-action="save-period-close"'));
   assert.ok(app.includes("function savePeriodClosure"));
@@ -244,7 +244,7 @@ test("period prediction, period close and merchant rules are exposed in the app 
   assert.ok(app.includes("merchantRules: []"));
   assert.ok(app.includes("data-apply-merchant-rule"));
   assert.ok(app.includes('data-action="remove-merchant-rule"'));
-  assert.ok(styles.includes("Prediction, period close and merchant rules v27"));
+  assert.ok(styles.includes("Prediction, period close and merchant rules v28"));
   assert.ok(styles.includes(".prediction-card"));
   assert.ok(styles.includes(".prediction-detail-modal"));
   assert.ok(styles.includes(".formula-list"));
@@ -286,7 +286,7 @@ test("authenticated new users get a three-step financial onboarding", async () =
 test("saving Mis datos uses one native form submission", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
   const diagnosisModal = app.slice(app.indexOf("function renderDiagnosisModal()"), app.indexOf("function renderScriptQuestion"));
-  const bindEvents = app.slice(app.indexOf("function bindEvents()"), app.indexOf("function bindOnboardingFlow"));
+  const bindEvents = app.slice(app.indexOf("function bindEvents()"), app.indexOf("function bindOnboardingFlowV2"));
 
   assert.ok(diagnosisModal.includes('<button class="btn primary" type="submit">Guardar plan</button>'));
   assert.ok(diagnosisModal.includes('<button class="btn primary" type="submit">Guardar y usar mi plan</button>'));
@@ -441,7 +441,7 @@ test("Android back navigation closes the quick expense form before leaving the a
   assert.ok(app.includes("normalizeStartupRoute();"));
   assert.ok(app.includes("function normalizeStartupRoute()"));
   assert.ok(app.includes("let quickExpenseOpen = false;"));
-  assert.ok(app.includes("function seedQuickExpenseBackEntry()"));
+  assert.equal(app.includes("function seedQuickExpenseBackEntry()"), false);
   assert.ok(app.includes("window.history.replaceState(historyState"));
   assert.equal(app.includes("required autofocus"), false);
 });
@@ -471,7 +471,10 @@ test("behavioral finance, silent sync, undo and automatic backups remain availab
   assert.ok(app.includes("Deshacer?"));
   assert.ok(app.includes('"undo-snackbar"'));
   assert.ok(app.includes("savingsPercent"));
-  assert.ok(app.includes("window.confirm"));
+  assert.ok(app.includes("function renderCooldownPanel"));
+  assert.ok(app.includes("Compras en pausa"));
+  assert.ok(app.includes('"cancel-cooldown"'));
+  assert.ok(app.includes('"unlock-cooldown"'));
   assert.ok(app.includes("stateUpdatedTime"));
   assert.ok(app.includes("cloudRecordUpdatedTime"));
   assert.ok(app.includes("hasMeaningfulLocalData"));
@@ -480,12 +483,12 @@ test("behavioral finance, silent sync, undo and automatic backups remain availab
   assert.ok(app.includes("function menuAlertText()"));
   assert.equal(app.includes("function renderCloudStatus()"), false);
   assert.equal(app.includes("Cuenta y nube"), false);
-  assert.ok(app.includes("function renderAccountPanel()"));
+  assert.equal(app.includes("function renderAccountPanel()"), false);
   assert.ok(app.includes("liquiditySummary"));
   assert.ok(app.includes("adjustLiquidity"));
   assert.ok(app.includes("validateTransactionDraft"));
   assert.ok(app.includes("remove-transaction"));
-  assert.ok(app.includes("clearCurrentPeriodExtras"));
+  assert.equal(app.includes("clearCurrentPeriodExtras"), false);
   assert.ok(app.includes("renderTransactionHistory"));
   assert.ok(!app.includes("state.transactions = []"));
 });
@@ -493,7 +496,7 @@ test("behavioral finance, silent sync, undo and automatic backups remain availab
 test("manual local backup and account plus cash panels are not shown", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
   const budget = app.slice(app.indexOf("function renderBudget("), app.indexOf("function renderBudgetJobForm"));
-  const profile = app.slice(app.indexOf("function renderProfile("), app.indexOf("function renderStudentContextPanel"));
+  const profile = app.slice(app.indexOf("function renderProfile("), app.indexOf("function renderIncomeCadenceOptions"));
 
   assert.equal(budget.includes("renderLiquidityCard"), false);
   assert.equal(budget.includes("Disponible por lugar"), false);

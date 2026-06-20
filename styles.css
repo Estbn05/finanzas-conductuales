@@ -864,23 +864,15 @@ a {
   background: rgba(32, 38, 37, 0.07);
 }
 
-.transaction-list,
 .transaction-history,
 .cooldown-list,
-.wins-list,
-.script-bars,
-.category-bars,
-.job-table {
+.category-bars {
   display: grid;
   gap: 10px;
 }
 
-.transaction-row,
 .history-row,
-.job-row,
-.extra-budget-row,
 .category-row,
-.script-row,
 .cooldown-item {
   display: grid;
   align-items: center;
@@ -893,43 +885,24 @@ a {
   background: var(--panel);
 }
 
-.transaction-row {
-  grid-template-columns: minmax(0, 1fr) minmax(150px, 220px);
-}
-
 .history-row {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.transaction-row strong,
-.transaction-row span,
 .history-row strong,
 .history-row span,
-.job-row strong,
-.job-row span,
-.extra-budget-row strong,
-.extra-budget-row span,
 .category-row strong,
 .category-row span,
-.script-row strong,
-.script-row span,
 .cooldown-item strong,
-.cooldown-item span,
-.wins-list strong,
-.wins-list span {
+.cooldown-item span {
   display: block;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.transaction-row span,
 .history-row span,
-.job-row span,
-.extra-budget-row span,
 .category-row span,
-.script-row span,
-.cooldown-item span,
-.wins-list span {
+.cooldown-item span {
   color: var(--muted);
   font-size: 0.92rem;
 }
@@ -1146,40 +1119,10 @@ input[type="range"] {
   border-left: 5px solid var(--amber);
 }
 
-.inline-form,
 .stacked-form,
 .diagnosis-form {
   display: grid;
   gap: 12px;
-}
-
-.inline-form {
-  grid-template-columns: minmax(0, 1fr) minmax(120px, 160px) auto;
-  align-items: end;
-}
-
-.extra-budget-form {
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-}
-
-.account-card {
-  border-color: rgba(21, 111, 105, 0.28);
-}
-
-.cloud-form {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  align-items: end;
-}
-
-.cloud-form-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  grid-column: 1 / -1;
-}
-
-.cloud-form-actions .btn {
-  flex: 1 1 180px;
 }
 
 .form-error {
@@ -1241,18 +1184,6 @@ label {
   padding: 0;
 }
 
-.job-row {
-  grid-template-columns: minmax(150px, 1fr) minmax(130px, 0.8fr) 34px;
-}
-
-.extra-budget-row {
-  grid-template-columns: minmax(0, 1fr) 34px;
-}
-
-.script-row {
-  grid-template-columns: minmax(150px, 1fr) minmax(150px, 0.92fr);
-}
-
 .category-row {
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
@@ -1300,23 +1231,22 @@ label {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+.cooldown-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--ds-line);
+  border-radius: var(--ds-radius-lg);
+  padding: 14px;
+  background: var(--panel);
+  box-shadow: var(--ds-shadow-xs);
+}
+
 .reframe {
   padding: 16px;
   border-left: 5px solid var(--coral);
   border-radius: var(--radius);
   background: var(--coral-2);
   color: #6d2b26;
-}
-
-.wins-list div {
-  display: grid;
-  gap: 3px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.wins-list div:last-child {
-  border-bottom: 0;
 }
 
 .modal-backdrop {
@@ -1597,16 +1527,9 @@ label {
   .split-card,
   .focus-card,
   .paying-visual,
-  .transaction-row,
   .history-row,
-  .job-row,
-  .extra-budget-row,
   .category-row,
-  .script-row,
   .cooldown-item,
-  .inline-form,
-  .extra-budget-form,
-  .cloud-form,
   .diagnosis-form,
   .phase-grid,
   .score-grid,
@@ -2297,37 +2220,6 @@ body {
   gap: 10px;
 }
 
-.onboarding-categories {
-  display: grid;
-  gap: 10px;
-}
-
-.onboarding-category-row {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(100px, 0.72fr) minmax(105px, 0.7fr);
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: rgba(45, 155, 111, 0.04);
-}
-
-.onboarding-category-row.is-removable {
-  padding-right: 52px;
-}
-
-.onboarding-category-row input,
-.onboarding-category-row select {
-  min-width: 0;
-}
-
-.onboarding-category-remove {
-  position: absolute;
-  top: 16px;
-  right: 10px;
-}
-
 .onboarding-add-category {
   display: flex;
   align-items: center;
@@ -2401,8 +2293,7 @@ body {
 }
 
 @media (max-width: 560px) {
-  .onboarding-balance-grid,
-  .onboarding-category-row {
+  .onboarding-balance-grid {
     grid-template-columns: 1fr;
   }
 
@@ -2435,12 +2326,8 @@ body {
   .auth-benefits article,
   .focus-card,
   .empty-state,
-  .transaction-row,
   .history-row,
-  .job-row,
-  .extra-budget-row,
   .category-row,
-  .script-row,
   .cooldown-item,
   .score-grid div,
   .context-grid div,
@@ -4178,9 +4065,7 @@ input[type="range"] {
 .quick-expense-form input[type="number"],
 .quick-expense-form input[data-money-input="true"],
 .stacked-form input,
-.stacked-form select,
-.inline-form input,
-.inline-form select {
+.stacked-form select {
   border-color: var(--line);
   border-radius: 10px;
   color: var(--ink) !important;
@@ -4875,8 +4760,6 @@ body {
 .quick-expense-form input[data-money-input="true"],
 .stacked-form input,
 .stacked-form select,
-.inline-form input,
-.inline-form select,
 .onboarding-form input:not([type="hidden"]) {
   border-color: rgba(100, 75, 38, 0.14) !important;
   background: var(--field-bg) !important;
@@ -5900,7 +5783,6 @@ button:disabled {
 .quick-expense-form,
 .sheet-form,
 .stacked-form,
-.inline-form,
 .financial-event-form,
 .calendar-reminder-form,
 .diagnosis-form,
@@ -5913,7 +5795,6 @@ button:disabled {
 .sheet-form label,
 .sheet-field,
 .stacked-form label,
-.inline-form label,
 .financial-event-form label,
 .diagnosis-form label,
 .onboarding-form label {
@@ -5935,8 +5816,6 @@ textarea,
 .financial-event-form select,
 .stacked-form input,
 .stacked-form select,
-.inline-form input,
-.inline-form select,
 .onboarding-form input:not([type="hidden"]) {
   min-height: 48px;
   border: 1px solid var(--ds-line) !important;
@@ -6785,8 +6664,6 @@ textarea,
 .financial-event-form select,
 .stacked-form input,
 .stacked-form select,
-.inline-form input,
-.inline-form select,
 .onboarding-form input:not([type="hidden"]),
 .onboarding-form select {
   color: var(--field-text) !important;
@@ -7182,8 +7059,6 @@ html[data-theme="dark"] .financial-event-form input,
 html[data-theme="dark"] .financial-event-form select,
 html[data-theme="dark"] .stacked-form input,
 html[data-theme="dark"] .stacked-form select,
-html[data-theme="dark"] .inline-form input,
-html[data-theme="dark"] .inline-form select,
 html[data-theme="dark"] .onboarding-form input:not([type="hidden"]),
 html[data-theme="dark"] .onboarding-form select {
   color: var(--field-text) !important;
@@ -7530,7 +7405,7 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   }
 }
 
-/* Prediction, period close and merchant rules v27 */
+/* Prediction, period close and merchant rules v28 */
 .prediction-card,
 .period-close-card,
 .merchant-rules-panel {
@@ -7606,12 +7481,6 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   cursor: pointer;
 }
 
-.period-close-calculation strong {
-  color: var(--ds-ink);
-  font-size: 0.7rem;
-  font-weight: 830;
-}
-
 .prediction-detail-modal {
   gap: 14px;
 }
@@ -7685,12 +7554,6 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   font-weight: 800;
 }
 
-.period-close-calculation {
-  color: var(--ds-muted);
-  font-size: 0.68rem;
-  line-height: 1.45;
-}
-
 .prediction-number small,
 .period-close-saved {
   display: inline-flex;
@@ -7712,8 +7575,7 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
 
 .prediction-card.risk .prediction-number small,
 .prediction-card.over_reserved .prediction-number small,
-.period-close-card.risk .period-close-saved,
-.period-close-card.over_reserved .period-close-saved {
+.period-close-card.risk .period-close-saved {
   border-color: rgba(184, 67, 60, 0.18);
   color: var(--coral);
   background: var(--coral-2);
@@ -7762,10 +7624,6 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
 .period-close-card .btn {
   justify-self: start;
   width: auto;
-}
-
-.period-close-calculation {
-  margin: -2px 0 0;
 }
 
 .period-close-view {
