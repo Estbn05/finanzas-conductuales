@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260619-prediction-details-v24";
+const ASSET_VERSION = "20260619-startup-route-v25";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -421,6 +421,9 @@ test("Android back navigation closes the quick expense form before leaving the a
   assert.ok(app.includes("function openQuickExpense()"));
   assert.ok(app.includes("function closeQuickExpense()"));
   assert.ok(app.includes("function isQuickExpenseLocation()"));
+  assert.ok(app.includes("normalizeStartupRoute();"));
+  assert.ok(app.includes("function normalizeStartupRoute()"));
+  assert.ok(app.includes("let quickExpenseOpen = false;"));
   assert.ok(app.includes("function seedQuickExpenseBackEntry()"));
   assert.ok(app.includes("window.history.replaceState(historyState"));
   assert.equal(app.includes("required autofocus"), false);

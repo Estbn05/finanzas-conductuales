@@ -1,19 +1,19 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CACHE_NAME = `${CACHE_PREFIX}20260619-prediction-details-v24`;
+const CACHE_NAME = `${CACHE_PREFIX}20260619-startup-route-v25`;
 const APP_SHELL = [
   "./",
   "index.html",
-  "styles.css?v=20260619-prediction-details-v24",
-  "app.js?v=20260619-prediction-details-v24",
-  "finance-core.js?v=20260619-prediction-details-v24",
-  "sync-client.js?v=20260619-prediction-details-v24",
-  "sync-config.js?v=20260619-prediction-details-v24",
-  "vendor/supabase-2.108.1.min.js?v=20260619-prediction-details-v24",
-  "manifest.webmanifest?v=20260619-prediction-details-v24",
-  "assets/icon.svg?v=20260619-prediction-details-v24",
-  "assets/icon-192.png?v=20260619-prediction-details-v24",
-  "assets/icon-512.png?v=20260619-prediction-details-v24",
-  "assets/apple-touch-icon.png?v=20260619-prediction-details-v24"
+  "styles.css?v=20260619-startup-route-v25",
+  "app.js?v=20260619-startup-route-v25",
+  "finance-core.js?v=20260619-startup-route-v25",
+  "sync-client.js?v=20260619-startup-route-v25",
+  "sync-config.js?v=20260619-startup-route-v25",
+  "vendor/supabase-2.108.1.min.js?v=20260619-startup-route-v25",
+  "manifest.webmanifest?v=20260619-startup-route-v25",
+  "assets/icon.svg?v=20260619-startup-route-v25",
+  "assets/icon-192.png?v=20260619-startup-route-v25",
+  "assets/icon-512.png?v=20260619-startup-route-v25",
+  "assets/apple-touch-icon.png?v=20260619-startup-route-v25"
 ];
 
 self.addEventListener("install", (event) => {

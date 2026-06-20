@@ -11,7 +11,7 @@ import {
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictUntilNextPeriod as getPeriodPrediction,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260619-prediction-details-v24";
+} from "./finance-core.js?v=20260619-startup-route-v25";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -23,7 +23,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260619-prediction-details-v24";
+} from "./sync-client.js?v=20260619-startup-route-v25";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -55,11 +55,9 @@ const APP_VIEWS = new Set([...NAV_ITEMS.map((item) => item.id), "spending"]);
 const app = document.querySelector("#app");
 let state = loadState();
 state.activeView = viewFromHash(DEFAULT_VIEW);
+normalizeStartupRoute();
 let menuOpen = false;
-let quickExpenseOpen = isQuickExpenseLocation();
-if (quickExpenseOpen) {
-  seedQuickExpenseBackEntry();
-}
+let quickExpenseOpen = false;
 let applyingCloudState = false;
 let cloudSaveTimer;
 let authUnsubscribe = () => {};
@@ -606,6 +604,15 @@ function seedQuickExpenseBackEntry() {
   const historyState = window.history.state || {};
   window.history.replaceState(historyState, "", `#${hashFromView(state.activeView || DEFAULT_VIEW)}`);
   window.history.pushState(historyState, "", `#${QUICK_EXPENSE_HASH}`);
+}
+
+function normalizeStartupRoute() {
+  if (!isQuickExpenseLocation()) {
+    return;
+  }
+  state.activeView = DEFAULT_VIEW;
+  const historyState = window.history.state || {};
+  window.history.replaceState(historyState, "", `#${hashFromView(DEFAULT_VIEW)}`);
 }
 
 function closeQuickExpense() {
