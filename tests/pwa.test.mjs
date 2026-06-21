@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260620-day-total-v29";
+const ASSET_VERSION = "20260620-expense-calendar-v30";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -152,6 +152,18 @@ test("movements combines expenses and extra income and can sort the full history
 
   assert.ok(app.includes("function renderMovements()"));
   assert.ok(app.includes("function movementsForSummary(summary = budgetSummary())"));
+  assert.ok(app.includes("function renderExpenseCalendar(summary = budgetSummary())"));
+  assert.ok(app.includes("${renderExpenseCalendar(summary)}"));
+  assert.ok(app.includes("Calendario de gastos"));
+  assert.ok(app.includes("function expenseCalendarForSummary(summary = budgetSummary())"));
+  assert.ok(app.includes("function datesInWindow(start, end)"));
+  assert.ok(app.includes("function nextMonthStartKey(dateValue = todayKey())"));
+  assert.ok(app.includes("function minDateKey(a, b)"));
+  assert.ok(app.includes("function maxDateKey(a, b)"));
+  assert.ok(app.includes("const monthStart = monthStartKey(todayKey())"));
+  assert.ok(app.includes("if (date < start || date >= end)"));
+  assert.ok(app.includes("function weekdayOffset(dateValue)"));
+  assert.ok(app.includes("transactionsForSummary(summary).reduce"));
   assert.ok(app.includes('kind: "expense"'));
   assert.ok(app.includes('kind: "income"'));
   assert.ok(app.includes('movement.kind === "income"'));
@@ -181,6 +193,9 @@ test("movements combines expenses and extra income and can sort the full history
   assert.ok(app.includes('String(b.date || "").localeCompare(String(a.date || ""))'));
   assert.ok(app.includes('movements: "movimientos"'));
   assert.ok(styles.includes(".history-row.is-income"));
+  assert.ok(styles.includes(".expense-calendar-card"));
+  assert.ok(styles.includes(".expense-calendar-grid"));
+  assert.ok(styles.includes(".expense-calendar-day.high"));
   assert.ok(styles.includes(".movement-day-meta"));
   assert.ok(styles.includes(".movement-type-icon.income"));
   assert.ok(styles.includes(".income-amount strong"));

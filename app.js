@@ -11,7 +11,7 @@ import {
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictUntilNextPeriod as getPeriodPrediction,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260620-day-total-v29";
+} from "./finance-core.js?v=20260620-expense-calendar-v30";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -23,7 +23,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260620-day-total-v29";
+} from "./sync-client.js?v=20260620-expense-calendar-v30";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -2173,6 +2173,7 @@ function renderMovements() {
         <span class="period-chip">${movements.length} ${movementCountLabel}</span>
       </div>
       ${renderMerchantRulesPanel()}
+      ${renderExpenseCalendar(summary)}
       <article class="movements-card">
         <label class="history-sort">
           Ordenar por
@@ -2185,6 +2186,120 @@ function renderMovements() {
       </article>
     </section>
   `;
+}
+
+function renderExpenseCalendar(summary = budgetSummary()) {
+  const calendar = expenseCalendarForSummary(summary);
+  if (!calendar.days.length) {
+    return "";
+  }
+  return `
+    <article class="expense-calendar-card" aria-label="Calendario de gastos del periodo">
+      <div class="expense-calendar-head">
+        <div>
+          <p class="eyebrow">Calendario de gastos</p>
+          <h2>${formatShortDate(calendar.start)} - ${formatShortDate(previousDay(calendar.end))}</h2>
+        </div>
+        <span class="metric-badge">${formatMoney(calendar.total)} gastado</span>
+      </div>
+      <div class="expense-calendar-stats">
+        <div>
+          <span>Dia mas caro</span>
+          <strong>${calendar.heaviest ? `${movementDayLabel(calendar.heaviest.date)} · ${formatMoney(calendar.heaviest.total)}` : "Sin gastos"}</strong>
+        </div>
+        <div>
+          <span>Promedio con gasto</span>
+          <strong>${formatMoney(calendar.averageActive)}</strong>
+        </div>
+      </div>
+      <div class="expense-calendar-weekdays" aria-hidden="true">
+        ${["L", "M", "M", "J", "V", "S", "D"].map((day) => `<span>${day}</span>`).join("")}
+      </div>
+      <div class="expense-calendar-grid">
+        ${calendar.blanks.map(() => `<span class="expense-calendar-blank" aria-hidden="true"></span>`).join("")}
+        ${calendar.days.map((day) => renderExpenseCalendarDay(day, calendar.maxDaily)).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderExpenseCalendarDay(day, maxDaily) {
+  const ratio = maxDaily ? day.total / maxDaily : 0;
+  const level = day.total <= 0 ? "empty" : ratio >= 0.75 ? "high" : ratio >= 0.35 ? "medium" : "low";
+  const label = `${movementDayLabel(day.date)}: ${formatMoney(day.total)} en gastos`;
+  return `
+    <div class="expense-calendar-day ${level} ${day.isToday ? "is-today" : ""}" aria-label="${escapeAttr(label)}">
+      <span>${day.dayNumber}</span>
+      ${day.total > 0 ? `<strong>${formatCompactMoney(day.total)}</strong>` : `<small>-</small>`}
+    </div>
+  `;
+}
+
+function expenseCalendarForSummary(summary = budgetSummary()) {
+  const monthStart = monthStartKey(todayKey());
+  const monthEnd = nextMonthStartKey(monthStart);
+  const start = maxDateKey(summary.window.start, monthStart);
+  const end = minDateKey(summary.window.end, monthEnd);
+  const totals = transactionsForSummary(summary).reduce((acc, transaction) => {
+    const date = String(transaction.date || todayKey()).slice(0, 10);
+    if (date < start || date >= end) {
+      return acc;
+    }
+    acc[date] = (acc[date] || 0) + Number(transaction.amount || 0);
+    return acc;
+  }, {});
+  const days = datesInWindow(start, end).map((date) => {
+    const total = totals[date] || 0;
+    return {
+      date,
+      total,
+      dayNumber: Number(date.slice(8, 10)),
+      isToday: date === todayKey()
+    };
+  });
+  const activeDays = days.filter((day) => day.total > 0);
+  const total = activeDays.reduce((sum, day) => sum + day.total, 0);
+  const heaviest = activeDays.slice().sort((a, b) => b.total - a.total || String(b.date).localeCompare(String(a.date)))[0] || null;
+  return {
+    start,
+    end,
+    days,
+    blanks: Array.from({ length: weekdayOffset(start) }),
+    total,
+    heaviest,
+    maxDaily: activeDays.reduce((max, day) => Math.max(max, day.total), 0),
+    averageActive: activeDays.length ? Math.round(total / activeDays.length) : 0
+  };
+}
+
+function datesInWindow(start, end) {
+  const dates = [];
+  const cursor = new Date(`${start}T12:00:00`);
+  const finish = new Date(`${end}T12:00:00`);
+  while (cursor < finish) {
+    dates.push(todayKey(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
+}
+
+function nextMonthStartKey(dateValue = todayKey()) {
+  const date = new Date(`${monthStartKey(dateValue)}T12:00:00`);
+  date.setMonth(date.getMonth() + 1);
+  return todayKey(date);
+}
+
+function minDateKey(a, b) {
+  return String(a) <= String(b) ? String(a) : String(b);
+}
+
+function maxDateKey(a, b) {
+  return String(a) >= String(b) ? String(a) : String(b);
+}
+
+function weekdayOffset(dateValue) {
+  const day = new Date(`${dateValue}T12:00:00`).getDay();
+  return day === 0 ? 6 : day - 1;
 }
 
 function renderTransactionHistory(summary = budgetSummary(), sort = "recent") {

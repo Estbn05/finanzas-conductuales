@@ -3542,6 +3542,125 @@ input[type="range"] {
   gap: 16px;
 }
 
+.expense-calendar-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  background: var(--panel);
+}
+
+.expense-calendar-head,
+.expense-calendar-stats {
+  display: grid;
+  gap: 10px;
+}
+
+.expense-calendar-head {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.expense-calendar-head h2 {
+  margin: 2px 0 0;
+  font-size: 1rem;
+}
+
+.expense-calendar-stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.expense-calendar-stats div {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.expense-calendar-stats span,
+.expense-calendar-weekdays,
+.expense-calendar-day small {
+  color: var(--muted);
+  font-size: 0.65rem;
+}
+
+.expense-calendar-stats span {
+  font-weight: 750;
+}
+
+.expense-calendar-stats strong {
+  color: var(--ink);
+  font-size: 0.74rem;
+}
+
+.expense-calendar-weekdays,
+.expense-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.expense-calendar-weekdays {
+  text-align: center;
+  font-weight: 750;
+}
+
+.expense-calendar-day,
+.expense-calendar-blank {
+  min-width: 0;
+  aspect-ratio: 1;
+}
+
+.expense-calendar-day {
+  display: grid;
+  align-content: space-between;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 6px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.expense-calendar-day span,
+.expense-calendar-day strong,
+.expense-calendar-day small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.expense-calendar-day span {
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+.expense-calendar-day strong {
+  font-size: 0.62rem;
+  font-weight: 850;
+  text-align: right;
+}
+
+.expense-calendar-day.low {
+  border-color: rgba(21, 144, 111, 0.18);
+  background: rgba(213, 235, 229, 0.74);
+}
+
+.expense-calendar-day.medium {
+  border-color: rgba(184, 111, 18, 0.2);
+  background: rgba(255, 240, 207, 0.84);
+}
+
+.expense-calendar-day.high {
+  border-color: rgba(184, 67, 60, 0.22);
+  background: rgba(255, 224, 219, 0.82);
+}
+
+.expense-calendar-day.is-today {
+  box-shadow: 0 0 0 2px rgba(77, 227, 185, 0.34);
+}
+
 .movement-day {
   display: grid;
   gap: 5px;
@@ -5925,6 +6044,64 @@ select[data-invalid="true"] {
   padding: 16px;
 }
 
+.expense-calendar-card {
+  border-color: var(--ds-line);
+  border-radius: var(--ds-radius-lg);
+  box-shadow: var(--ds-shadow-xs);
+}
+
+.expense-calendar-head {
+  align-items: center;
+}
+
+.expense-calendar-head h2 {
+  color: var(--ds-ink);
+  font-size: 1.02rem;
+  font-weight: 850;
+}
+
+.expense-calendar-stats {
+  gap: var(--ds-space-3);
+}
+
+.expense-calendar-stats div {
+  border-color: var(--ds-line);
+  border-radius: 16px;
+  background: rgba(255, 250, 240, 0.7);
+}
+
+.expense-calendar-stats strong {
+  color: var(--ds-ink);
+  font-size: 0.78rem;
+}
+
+.expense-calendar-weekdays,
+.expense-calendar-grid {
+  gap: 7px;
+}
+
+.expense-calendar-day {
+  border-color: rgba(100, 75, 38, 0.1);
+  border-radius: 14px;
+  background: rgba(255, 250, 240, 0.58);
+}
+
+.expense-calendar-card .metric-badge {
+  border-color: rgba(21, 144, 111, 0.22);
+  color: #0e5c4c;
+  background: rgba(213, 235, 229, 0.94);
+}
+
+.expense-calendar-day.empty {
+  color: var(--ds-muted);
+  background: rgba(255, 250, 240, 0.36);
+}
+
+.expense-calendar-day.high strong,
+.expense-calendar-day.medium strong {
+  color: var(--ds-ink);
+}
+
 .history-sort {
   grid-template-columns: auto minmax(0, 1fr);
   gap: var(--ds-space-3);
@@ -6992,6 +7169,8 @@ html[data-theme="dark"] .screen-title-row h1,
 html[data-theme="dark"] .home-section-heading h2,
 html[data-theme="dark"] .section-heading h2,
 html[data-theme="dark"] .movement-day-heading strong,
+html[data-theme="dark"] .expense-calendar-head h2,
+html[data-theme="dark"] .expense-calendar-stats strong,
 html[data-theme="dark"] .category-top strong,
 html[data-theme="dark"] .category-card-top strong,
 html[data-theme="dark"] .movement-copy strong,
@@ -7006,6 +7185,9 @@ html[data-theme="dark"] .money-bar .money-help,
 html[data-theme="dark"] .money-bar .money-split,
 html[data-theme="dark"] .movement-copy small,
 html[data-theme="dark"] .movement-amount small,
+html[data-theme="dark"] .expense-calendar-stats span,
+html[data-theme="dark"] .expense-calendar-weekdays,
+html[data-theme="dark"] .expense-calendar-day.empty,
 html[data-theme="dark"] .category-card-foot,
 html[data-theme="dark"] .category-numbers,
 html[data-theme="dark"] .category-status,
@@ -7024,6 +7206,8 @@ html[data-theme="dark"] .limit-warning,
 html[data-theme="dark"] .onboarding-preview,
 html[data-theme="dark"] .plan-distribution,
 html[data-theme="dark"] .movements-card,
+html[data-theme="dark"] .expense-calendar-card,
+html[data-theme="dark"] .expense-calendar-stats div,
 html[data-theme="dark"] .savings-hero,
 html[data-theme="dark"] .raise-simulator,
 html[data-theme="dark"] .reference-fund,
@@ -7047,6 +7231,33 @@ html[data-theme="dark"] .modal:not(.onboarding-modal) {
     linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025)),
     var(--ds-surface) !important;
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.22) !important;
+}
+
+html[data-theme="dark"] .expense-calendar-card .metric-badge {
+  border-color: rgba(103, 217, 181, 0.28) !important;
+  color: var(--ds-primary-strong) !important;
+  background: rgba(103, 217, 181, 0.16) !important;
+}
+
+html[data-theme="dark"] .expense-calendar-day {
+  border-color: rgba(255, 255, 255, 0.11) !important;
+  color: var(--ds-ink) !important;
+  background: rgba(255, 255, 255, 0.055) !important;
+}
+
+html[data-theme="dark"] .expense-calendar-day.low {
+  border-color: rgba(103, 217, 181, 0.22) !important;
+  background: rgba(103, 217, 181, 0.13) !important;
+}
+
+html[data-theme="dark"] .expense-calendar-day.medium {
+  border-color: rgba(242, 197, 108, 0.26) !important;
+  background: rgba(242, 197, 108, 0.16) !important;
+}
+
+html[data-theme="dark"] .expense-calendar-day.high {
+  border-color: rgba(255, 157, 145, 0.3) !important;
+  background: rgba(255, 157, 145, 0.16) !important;
 }
 
 html[data-theme="dark"] .history-row.is-unclassified {
