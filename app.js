@@ -11,7 +11,7 @@ import {
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictUntilNextPeriod as getPeriodPrediction,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260622-native-reminders-v32";
+} from "./finance-core.js?v=20260622-session-timeout-v33";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -23,14 +23,14 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260622-native-reminders-v32";
+} from "./sync-client.js?v=20260622-session-timeout-v33";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
 const DEFAULT_VIEW = "today";
 const QUICK_EXPENSE_HASH = "registrar-gasto";
 const PERIOD_CLOSE_NOTICE_DAYS = 5;
-const AUTH_STARTUP_TIMEOUT_MS = 25_000;
+const AUTH_STARTUP_TIMEOUT_MS = 8_000;
 const DEFAULT_REMINDER_TIME = "20:00";
 const DAILY_REMINDER_NOTIFICATION_ID = 7301;
 const TEST_REMINDER_NOTIFICATION_ID = 7302;
@@ -664,6 +664,7 @@ function render() {
   if (shouldShowSessionCheck()) {
     app.classList.remove("is-menu-open", "is-expense-open");
     app.innerHTML = renderSessionCheck();
+    bindEvents();
     return;
   }
 
@@ -850,7 +851,8 @@ function renderSessionCheck() {
     <main class="session-check" aria-busy="true" aria-live="polite">
       <section class="startup-fallback-card">
         <h1>Comprobando tu sesion</h1>
-        <p>Estamos verificando automaticamente si ya tienes una sesion iniciada.</p>
+        <p>Estamos verificando automaticamente si ya tienes una sesion iniciada. Si la red tarda, puedes entrar al acceso y la nube seguira intentando despues.</p>
+        <button class="btn secondary" type="button" data-action="recover-auth">Continuar al acceso</button>
       </section>
     </main>
   `;
@@ -3727,6 +3729,7 @@ function handleAction(event) {
     "close-period-report",
     "copy-period-report",
     "download-period-report",
+    "recover-auth",
     "open-diagnosis",
     "close-diagnosis",
     "cancel-extra-allocation",
@@ -3816,6 +3819,7 @@ function handleAction(event) {
     },
     "copy-period-report": copyPeriodReport,
     "download-period-report": downloadPeriodReport,
+    "recover-auth": recoverAuthStartup,
     "open-diagnosis": () => {
       diagnosisValidation = { field: "", message: "" };
       state.showDiagnosis = true;
@@ -5168,10 +5172,15 @@ function initializeNativeNotificationActions() {
   if (!localNotifications?.addListener) {
     return;
   }
-  localNotifications.addListener("localNotificationActionPerformed", () => {
-    window.focus?.();
-    window.location.hash = QUICK_EXPENSE_HASH;
-  }).catch(() => {});
+  try {
+    const listener = localNotifications.addListener("localNotificationActionPerformed", () => {
+      window.focus?.();
+      window.location.hash = QUICK_EXPENSE_HASH;
+    });
+    if (listener?.catch) {
+      listener.catch(() => {});
+    }
+  } catch {}
 }
 
 async function scheduleNativeDailyReminder(reminder = normalizeDailyReminder(state.dailyReminder)) {

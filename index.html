@@ -13,12 +13,12 @@
       content="App personal de finanzas conductuales con monitoreo diario, presupuesto por periodos y simulador de ahorro."
     >
     <title>Finanzas Conductuales</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20260622-native-reminders-v32">
-    <link rel="icon" href="assets/icon.svg?v=20260622-native-reminders-v32" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png?v=20260622-native-reminders-v32">
-    <link rel="stylesheet" href="styles.css?v=20260622-native-reminders-v32">
+    <link rel="manifest" href="manifest.webmanifest?v=20260622-session-timeout-v33">
+    <link rel="icon" href="assets/icon.svg?v=20260622-session-timeout-v33" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png?v=20260622-session-timeout-v33">
+    <link rel="stylesheet" href="styles.css?v=20260622-session-timeout-v33">
     <script>
-      const APP_VERSION = "20260622-native-reminders-v32";
+      const APP_VERSION = "20260622-session-timeout-v33";
       const APP_CACHE_NAME = `finanzas-conductuales-${APP_VERSION}`;
       const hadServiceWorkerController = Boolean(navigator.serviceWorker?.controller);
 
@@ -134,7 +134,19 @@
 
         await loadScript(`sync-config.js?v=${APP_VERSION}`);
         await loadScript(`vendor/supabase-2.108.1.min.js?v=${APP_VERSION}`);
-        await import(`./app.js?v=${APP_VERSION}`);
+        try {
+          await import(`./app.js?v=${APP_VERSION}`);
+        } catch (error) {
+          document.querySelector("#app").innerHTML = `
+            <main class="startup-fallback">
+              <section class="startup-fallback-card">
+                <h1>No pude iniciar la app</h1>
+                <p>Cierra y vuelve a abrir. Si se repite, instala la ultima version del APK.</p>
+              </section>
+            </main>
+          `;
+          throw error;
+        }
       });
     </script>
   </body>

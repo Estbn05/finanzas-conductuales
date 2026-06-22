@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260622-native-reminders-v32";
+const ASSET_VERSION = "20260622-session-timeout-v33";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -358,16 +358,19 @@ test("authentication gates onboarding and signed-in users can close their sessio
   assert.ok(app.includes("function shouldShowSessionCheck()"));
   assert.ok(app.includes("function renderSessionCheck()"));
   assert.ok(app.includes("function renderAuthGate()"));
-  assert.ok(app.includes("AUTH_STARTUP_TIMEOUT_MS = 25_000"));
+  assert.ok(app.includes("AUTH_STARTUP_TIMEOUT_MS = 8_000"));
   assert.ok(app.includes("function recoverAuthStartup()"));
-  assert.equal(app.includes('data-action="recover-auth"'), false);
+  assert.ok(app.includes('data-action="recover-auth"'));
+  assert.ok(app.includes('"recover-auth": recoverAuthStartup'));
   assert.equal(app.includes('data-action="reload-app"'), false);
   assert.ok(app.includes("return !cloudState.sessionReady;"));
   assert.ok(app.includes("return cloudState.sessionReady && !cloudState.signedIn;"));
   assert.ok(app.includes("Estamos verificando automaticamente si ya tienes una sesion iniciada."));
+  assert.ok(app.includes("Continuar al acceso"));
   assert.equal(app.includes("Estamos cargando tu cuenta y tus datos antes de mostrar el formulario inicial."), false);
   const renderFunction = app.slice(app.indexOf("function render()"), app.indexOf("function renderNavItem"));
   assert.ok(renderFunction.indexOf("if (shouldShowSessionCheck())") < renderFunction.indexOf("if (shouldShowAuthGate())"));
+  assert.ok(renderFunction.includes("bindEvents();"));
   assert.ok(renderFunction.indexOf("if (shouldShowAuthGate())") < renderFunction.indexOf("const plan = calculatePlan();"));
   const sessionCheck = app.slice(app.indexOf("function renderSessionCheck()"), app.indexOf("function renderAuthGate()"));
   assert.equal(sessionCheck.includes("cloud-login-form"), false);
@@ -450,6 +453,8 @@ test("static startup fallback retries automatically without manual controls", as
   assert.ok(html.includes("window.setTimeout(finish, timeoutMs)"));
   assert.equal(html.includes("cdn.jsdelivr.net/npm/@supabase/supabase-js"), false);
   assert.ok(html.includes("await import(`./app.js?v=${APP_VERSION}`)"));
+  assert.ok(html.includes("No pude iniciar la app"));
+  assert.ok(html.includes("instala la ultima version del APK"));
   assert.equal(html.includes("Continuar al acceso"), false);
   assert.equal(html.includes("Recargar aplicacion"), false);
   assert.equal(html.includes('onclick="window.location.reload()"'), false);

@@ -1,19 +1,19 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CACHE_NAME = `${CACHE_PREFIX}20260622-native-reminders-v32`;
+const CACHE_NAME = `${CACHE_PREFIX}20260622-session-timeout-v33`;
 const APP_SHELL = [
   "./",
   "index.html",
-  "styles.css?v=20260622-native-reminders-v32",
-  "app.js?v=20260622-native-reminders-v32",
-  "finance-core.js?v=20260622-native-reminders-v32",
-  "sync-client.js?v=20260622-native-reminders-v32",
-  "sync-config.js?v=20260622-native-reminders-v32",
-  "vendor/supabase-2.108.1.min.js?v=20260622-native-reminders-v32",
-  "manifest.webmanifest?v=20260622-native-reminders-v32",
-  "assets/icon.svg?v=20260622-native-reminders-v32",
-  "assets/icon-192.png?v=20260622-native-reminders-v32",
-  "assets/icon-512.png?v=20260622-native-reminders-v32",
-  "assets/apple-touch-icon.png?v=20260622-native-reminders-v32"
+  "styles.css?v=20260622-session-timeout-v33",
+  "app.js?v=20260622-session-timeout-v33",
+  "finance-core.js?v=20260622-session-timeout-v33",
+  "sync-client.js?v=20260622-session-timeout-v33",
+  "sync-config.js?v=20260622-session-timeout-v33",
+  "vendor/supabase-2.108.1.min.js?v=20260622-session-timeout-v33",
+  "manifest.webmanifest?v=20260622-session-timeout-v33",
+  "assets/icon.svg?v=20260622-session-timeout-v33",
+  "assets/icon-192.png?v=20260622-session-timeout-v33",
+  "assets/icon-512.png?v=20260622-session-timeout-v33",
+  "assets/apple-touch-icon.png?v=20260622-session-timeout-v33"
 ];
 
 self.addEventListener("install", (event) => {
