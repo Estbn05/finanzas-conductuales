@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260620-expense-calendar-v30";
+const ASSET_VERSION = "20260621-period-report-v31";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -245,6 +245,21 @@ test("period prediction, period close and merchant rules are exposed in the app 
   assert.ok(app.includes("shouldShowPeriodClose(closeReport) ? renderPeriodCloseCard"));
   assert.ok(app.includes("function renderPeriodCloseWaiting"));
   assert.ok(app.includes("El cierre aparece cuando falten"));
+  assert.ok(app.includes("function renderPeriodReportCard"));
+  assert.ok(app.includes("function renderPeriodReportModal"));
+  assert.ok(app.includes("function generatePeriodReport"));
+  assert.ok(app.includes("function periodReportDailyTotals"));
+  assert.ok(app.includes("function periodReportMerchantTotals"));
+  assert.ok(app.includes("function copyPeriodReport"));
+  assert.ok(app.includes("function downloadPeriodReport"));
+  assert.ok(app.includes("Reporte del periodo"));
+  assert.ok(app.includes("Resumen completo listo"));
+  assert.ok(app.includes("data-action=\"open-period-report\""));
+  assert.ok(app.includes("data-action=\"copy-period-report\""));
+  assert.ok(app.includes("data-action=\"download-period-report\""));
+  assert.ok(app.includes("Gasto total registrado"));
+  assert.ok(app.includes("Comercios principales"));
+  assert.ok(app.includes("Movimientos"));
   assert.ok(app.includes("function periodCloseAdjustments"));
   assert.ok(app.includes("exceededCategories"));
   assert.ok(app.includes("idealPeriodSavings"));
@@ -270,6 +285,9 @@ test("period prediction, period close and merchant rules are exposed in the app 
   assert.ok(styles.includes(".period-close-card"));
   assert.ok(styles.includes(".period-close-view"));
   assert.ok(styles.includes(".period-close-hero"));
+  assert.ok(styles.includes(".period-report-card"));
+  assert.ok(styles.includes(".period-report-output"));
+  assert.ok(styles.includes(".period-report-actions"));
   assert.ok(styles.includes(".savings-compare"));
   assert.ok(styles.includes(".period-adjustments"));
   assert.ok(styles.includes(".merchant-rule-suggestion"));

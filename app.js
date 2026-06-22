@@ -11,7 +11,7 @@ import {
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictUntilNextPeriod as getPeriodPrediction,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260620-expense-calendar-v30";
+} from "./finance-core.js?v=20260621-period-report-v31";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -23,7 +23,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260620-expense-calendar-v30";
+} from "./sync-client.js?v=20260621-period-report-v31";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -72,6 +72,7 @@ let pendingJobRemovalId = "";
 let editingTransactionId = "";
 let editingExtraId = "";
 let predictionDetailsOpen = false;
+let periodReportOpen = false;
 let expenseDraft = null;
 let diagnosisValidation = { field: "", message: "" };
 let cloudState = {
@@ -586,7 +587,7 @@ function renderCloudStatusChange() {
     render();
     return;
   }
-  if (quickExpenseOpen || state.showDiagnosis || pendingExtraAllocation || editingTransactionId || editingExtraId) {
+  if (quickExpenseOpen || state.showDiagnosis || pendingExtraAllocation || editingTransactionId || editingExtraId || periodReportOpen) {
     return;
   }
   render();
@@ -596,6 +597,7 @@ function openQuickExpense() {
   quickExpenseOpen = true;
   menuOpen = false;
   predictionDetailsOpen = false;
+  periodReportOpen = false;
   if (!isQuickExpenseLocation()) {
     window.location.hash = QUICK_EXPENSE_HASH;
   }
@@ -642,6 +644,10 @@ function syncQuickExpenseWithLocation(options = {}) {
   }
   quickExpenseOpen = shouldBeOpen;
   menuOpen = false;
+  if (shouldBeOpen) {
+    periodReportOpen = false;
+    predictionDetailsOpen = false;
+  }
   if (renderNow) {
     render();
   }
@@ -707,6 +713,7 @@ function render() {
     ${editingTransactionId ? renderTransactionEditor() : ""}
     ${editingExtraId ? renderExtraEditor() : ""}
     ${predictionDetailsOpen ? renderPredictionDetailsModal() : ""}
+    ${periodReportOpen ? renderPeriodReportModal(plan) : ""}
     ${!state.profile.completed || state.showDiagnosis ? renderDiagnosisModal() : ""}
     ${pendingExtraAllocation ? renderExtraAllocationModal() : ""}
     ${renderSnackbar()}
@@ -1289,6 +1296,7 @@ function renderBudget(plan) {
       </article>
 
       ${shouldShowPeriodClose(closeReport) ? renderPeriodCloseCard(summary, plan, closeReport) : ""}
+      ${renderPeriodReportCard(summary, plan, closeReport)}
 
       <div class="plan-actions">
         <button class="plan-action" type="button" data-action="open-extra-sheet">
@@ -1410,6 +1418,8 @@ function renderPeriodCloseScreen(plan = calculatePlan()) {
         </article>
       </div>
 
+      ${renderPeriodReportCard(summary, plan, report)}
+
       <div class="period-close-actions">
         <button class="btn primary" type="button" data-action="save-period-close">${report.closure ? "Actualizar cierre" : report.isFinal ? "Guardar cierre final" : "Guardar pre-cierre"}</button>
         <button class="btn ghost" type="button" data-view="budget">Volver al plan</button>
@@ -1437,7 +1447,59 @@ function renderPeriodCloseWaiting(summary, report) {
         <p>El cierre aparece cuando falten ${PERIOD_CLOSE_NOTICE_DAYS} dias o menos para el proximo periodo, incluyendo el dia que se vence.</p>
         <button class="btn ghost" type="button" data-view="budget">Volver al plan</button>
       </article>
+      ${renderPeriodReportCard(summary, calculatePlan(), report)}
     </section>
+  `;
+}
+
+function renderPeriodReportCard(summary = budgetSummary(), plan = calculatePlan(), report = periodCloseReport(plan, summary)) {
+  const movements = movementsForSummary(summary);
+  const expenses = movements.filter((movement) => movement.kind === "expense");
+  const totalExpenses = dailyExpenseTotal(movements);
+  const period = `${formatShortDate(summary.window.start)} - ${formatShortDate(previousDay(summary.window.end))}`;
+  return `
+    <article class="period-report-card" aria-label="Reporte completo del periodo">
+      <div class="period-report-head">
+        <div>
+          <p class="eyebrow">Reporte del periodo</p>
+          <h2>Resumen completo listo</h2>
+        </div>
+        <span class="metric-badge">${period}</span>
+      </div>
+      <div class="period-report-mini">
+        <div><span>Gastos</span><strong>${formatMoney(totalExpenses)}</strong></div>
+        <div><span>Movimientos</span><strong>${movements.length}</strong></div>
+        <div><span>Excedidas</span><strong>${report.exceededCategories.length}</strong></div>
+      </div>
+      <p>Genera un texto con libre, categorias, ahorro, prediccion, dias con gasto, comercios y movimientos del periodo.</p>
+      <button class="btn secondary" type="button" data-action="open-period-report">${expenses.length ? "Generar reporte" : "Ver reporte"}</button>
+    </article>
+  `;
+}
+
+function renderPeriodReportModal(plan = calculatePlan()) {
+  const summary = budgetSummary();
+  const report = periodCloseReport(plan, summary);
+  const content = generatePeriodReport(plan, summary, report);
+  return `
+    <div class="sheet-backdrop" role="presentation">
+      <section class="bottom-sheet period-report-modal" role="dialog" aria-modal="true" aria-labelledby="period-report-title">
+        <div class="sheet-handle"></div>
+        <div class="sheet-heading">
+          <div>
+            <p class="eyebrow">Reporte del periodo</p>
+            <h2 id="period-report-title">Resumen completo</h2>
+          </div>
+          <button class="icon-btn muted" type="button" data-action="close-period-report" aria-label="Cerrar">x</button>
+        </div>
+        <textarea id="period-report-output" class="period-report-output" readonly>${escapeHtml(content)}</textarea>
+        <div class="period-report-actions">
+          <button class="btn primary" type="button" data-action="copy-period-report">Copiar reporte</button>
+          <button class="btn secondary" type="button" data-action="download-period-report">Descargar .txt</button>
+          <button class="btn ghost" type="button" data-action="close-period-report">Cerrar</button>
+        </div>
+      </section>
+    </div>
   `;
 }
 
@@ -1577,6 +1639,137 @@ function periodCloseAdjustments(summary, plan, exceededCategories, freeFinal) {
     adjustments.push("Mantén el plan actual y registra gastos desde el primer dia del proximo periodo.");
   }
   return adjustments.slice(0, 5);
+}
+
+function generatePeriodReport(plan = calculatePlan(), summary = budgetSummary(), report = periodCloseReport(plan, summary)) {
+  const prediction = report.prediction || periodPrediction();
+  const liquidity = liquiditySummary(summary);
+  const periodEnd = previousDay(summary.window.end);
+  const transactions = transactionsForSummary(summary);
+  const movements = movementsForSummary(summary).slice().sort(compareTransactionsByRecent);
+  const totalExpenses = transactions.reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  const oneOffTotal = transactions
+    .filter((transaction) => transaction.oneOff)
+    .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  const unclassified = transactions.filter((transaction) => !transaction.labeled || !transaction.category || transaction.category === FREE_CATEGORY_ID);
+  const unclassifiedTotal = unclassified.reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  const dailyTotals = periodReportDailyTotals(summary);
+  const merchants = periodReportMerchantTotals(summary);
+  const categories = periodReportCategoryLines();
+  const movementLines = periodReportMovementLines(movements);
+  const cadence = capitalize(summary.cadenceLabel || cadenceLabel(state.profile.incomeCadence));
+  const lines = [
+    "Reporte del periodo",
+    `Periodo: ${summary.window.start} a ${periodEnd}`,
+    `Frecuencia: ${cadence}`,
+    `Generado: ${todayKey()}`,
+    "",
+    "Resumen de dinero",
+    `Ingreso base: ${formatMoney(summary.baseIncome)}`,
+    `Dinero extra: ${formatMoney(summary.extraIncome)}`,
+    `Ingreso total del periodo: ${formatMoney(summary.income)}`,
+    `Reservado en categorias: ${formatMoney(summary.reserved)}`,
+    `Dinero libre inicial: ${formatMoney(summary.freeBudget)}`,
+    `Gasto total registrado: ${formatMoney(totalExpenses)}`,
+    `Gasto libre real: ${formatMoney(summary.freeImpactSpent)}`,
+    `Libre hoy: ${formatMoney(prediction.freeToday)}`,
+    `Libre disponible visible: ${formatMoney(summary.freeRemaining)}`,
+    `Libre de cierre: ${formatMoney(report.freeFinal)}`,
+    `Saldo real en cuenta: ${formatMoney(liquidity.account)}`,
+    `Saldo real en efectivo: ${formatMoney(liquidity.cash)}`,
+    `Saldo real total: ${formatMoney(liquidity.total)}`,
+    "",
+    "Prediccion",
+    predictionOutcomeText(prediction),
+    predictionPaceText(prediction),
+    `Resultado proyectado: ${formatMoney(prediction.projectedEndFree)}`,
+    `Dias restantes: ${prediction.remainingDays}`,
+    "",
+    "Ahorro",
+    `Ahorro sugerido ideal: ${formatMoney(report.suggestedSavings)}`,
+    `Ahorro posible real: ${formatMoney(report.possibleSavings)}`,
+    `Ahorro adicional que cabe hoy: ${formatMoney(report.additionalSavingsNow)}`,
+    `Brecha contra ideal: ${formatMoney(report.savingsGap)}`,
+    "",
+    "Categorias",
+    ...categories,
+    "",
+    "Control de gasto libre",
+    `Gastos sin categoria o libre: ${formatMoney(summary.freeSpent)}`,
+    `Excesos de categorias: ${formatMoney(summary.categoryOverspent)}`,
+    `Movimientos sin clasificar: ${unclassified.length} por ${formatMoney(unclassifiedTotal)}`,
+    `Gastos unicos ignorados para ritmo diario: ${formatMoney(oneOffTotal)}`,
+    "",
+    "Dias con gasto",
+    ...(dailyTotals.length ? dailyTotals.map((day) => `${day.date}: ${formatMoney(day.total)} en ${day.count} ${day.count === 1 ? "gasto" : "gastos"}`) : ["Sin gastos registrados en este periodo."]),
+    "",
+    "Comercios principales",
+    ...(merchants.length ? merchants.map((merchant) => `${merchant.name}: ${formatMoney(merchant.total)} en ${merchant.count} ${merchant.count === 1 ? "gasto" : "gastos"}`) : ["Sin comercios registrados."]),
+    "",
+    "Que ajustar para el proximo periodo",
+    ...report.adjustments.map((item, index) => `${index + 1}. ${item}`),
+    "",
+    "Movimientos",
+    ...(movementLines.length ? movementLines : ["Sin movimientos registrados en este periodo."])
+  ];
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function periodReportCategoryLines() {
+  const categories = categoryStatus()
+    .slice()
+    .sort((a, b) => Number(b.spent || 0) - Number(a.spent || 0) || String(a.name).localeCompare(String(b.name)));
+  if (!categories.length) {
+    return ["Sin categorias creadas."];
+  }
+  return categories.map((category) => {
+    const budget = Number(category.budget || 0);
+    const spent = Number(category.spent || 0);
+    const remaining = budget - spent;
+    const status = remaining < 0 ? `excedida por ${formatMoney(Math.abs(remaining))}` : `quedan ${formatMoney(remaining)}`;
+    return `${category.name}: ${formatMoney(spent)} de ${formatMoney(budget)} (${status})`;
+  });
+}
+
+function periodReportDailyTotals(summary = budgetSummary()) {
+  const totals = transactionsForSummary(summary).reduce((acc, transaction) => {
+    const date = String(transaction.date || todayKey()).slice(0, 10);
+    acc[date] ||= { date, total: 0, count: 0 };
+    acc[date].total += Number(transaction.amount || 0);
+    acc[date].count += 1;
+    return acc;
+  }, {});
+  return Object.values(totals).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
+function periodReportMerchantTotals(summary = budgetSummary()) {
+  const totals = transactionsForSummary(summary).reduce((acc, transaction) => {
+    const name = cleanText(transaction.merchant, "Comercio");
+    const key = merchantKey(name) || name.toLowerCase();
+    acc[key] ||= { name, total: 0, count: 0 };
+    acc[key].total += Number(transaction.amount || 0);
+    acc[key].count += 1;
+    return acc;
+  }, {});
+  return Object.values(totals)
+    .sort((a, b) => b.total - a.total || b.count - a.count || String(a.name).localeCompare(String(b.name)))
+    .slice(0, 8);
+}
+
+function periodReportMovementLines(movements = []) {
+  return movements.map((movement) => {
+    if (movement.kind === "income") {
+      const extra = movement.extra;
+      const savingsAmount = Number(extra.allocation?.savingsAmount || 0);
+      const savingsText = savingsAmount > 0 ? `, ahorro ${formatMoney(savingsAmount)}` : "";
+      return `+ ${String(extra.date || "").slice(0, 10)} - ${extra.source} - ${formatMoney(extra.amount)} (${locationLabel(extra.location)}${savingsText})`;
+    }
+    const transaction = movement.transaction;
+    const category = !transaction.labeled || !transaction.category || transaction.category === FREE_CATEGORY_ID ? "Sin clasificar" : categoryName(transaction.category);
+    const oneOff = transaction.oneOff ? " - gasto unico" : "";
+    const description = transaction.description ? ` - ${transaction.description}` : "";
+    return `- ${String(transaction.date || "").slice(0, 10)} - ${transaction.merchant}${description} - ${category} - ${locationLabel(transaction.source)} - ${formatMoney(transaction.amount)}${oneOff}`;
+  });
 }
 
 function renderBudgetJobForm() {
@@ -3525,6 +3718,10 @@ function handleAction(event) {
     "close-extra-editor",
     "open-prediction-details",
     "close-prediction-details",
+    "open-period-report",
+    "close-period-report",
+    "copy-period-report",
+    "download-period-report",
     "open-diagnosis",
     "close-diagnosis",
     "cancel-extra-allocation",
@@ -3555,11 +3752,13 @@ function handleAction(event) {
       planSheet = "category";
       menuOpen = false;
       predictionDetailsOpen = false;
+      periodReportOpen = false;
     },
     "open-extra-sheet": () => {
       planSheet = "extra";
       menuOpen = false;
       predictionDetailsOpen = false;
+      periodReportOpen = false;
     },
     "close-plan-sheet": () => {
       planSheet = "";
@@ -3578,6 +3777,7 @@ function handleAction(event) {
       editingTransactionId = id;
       editingExtraId = "";
       predictionDetailsOpen = false;
+      periodReportOpen = false;
     },
     "close-transaction-editor": () => {
       editingTransactionId = "";
@@ -3586,23 +3786,37 @@ function handleAction(event) {
       editingExtraId = id;
       editingTransactionId = "";
       predictionDetailsOpen = false;
+      periodReportOpen = false;
     },
     "close-extra-editor": () => {
       editingExtraId = "";
     },
     "open-prediction-details": () => {
       predictionDetailsOpen = true;
+      periodReportOpen = false;
       menuOpen = false;
       quickExpenseOpen = false;
     },
     "close-prediction-details": () => {
       predictionDetailsOpen = false;
     },
+    "open-period-report": () => {
+      periodReportOpen = true;
+      predictionDetailsOpen = false;
+      menuOpen = false;
+      quickExpenseOpen = false;
+    },
+    "close-period-report": () => {
+      periodReportOpen = false;
+    },
+    "copy-period-report": copyPeriodReport,
+    "download-period-report": downloadPeriodReport,
     "open-diagnosis": () => {
       diagnosisValidation = { field: "", message: "" };
       state.showDiagnosis = true;
       menuOpen = false;
       predictionDetailsOpen = false;
+      periodReportOpen = false;
     },
     "close-diagnosis": () => {
       diagnosisValidation = { field: "", message: "" };
@@ -4394,6 +4608,61 @@ function savePeriodClosure() {
   }
   state.periodClosures = state.periodClosures.slice(0, 12);
   state.lastAlert = `Cierre guardado: ${formatMoney(closure.freeFinal)} libres y ${closure.exceededCategories.length} excedidos.`;
+}
+
+function currentPeriodReportText() {
+  const summary = budgetSummary();
+  const plan = calculatePlan();
+  return generatePeriodReport(plan, summary, periodCloseReport(plan, summary));
+}
+
+function copyPeriodReport() {
+  const reportText = currentPeriodReportText();
+  const success = () => showNoticeSnackbar("Reporte copiado.", { duration: 3500 });
+  const failure = () => showNoticeSnackbar("No pude copiarlo automaticamente. Puedes seleccionar el texto del reporte.", { kind: "error" });
+
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(reportText)
+      .then(success)
+      .catch(() => copyPeriodReportFallback(success, failure));
+    return;
+  }
+  copyPeriodReportFallback(success, failure);
+}
+
+function copyPeriodReportFallback(success, failure) {
+  const output = document.querySelector("#period-report-output");
+  if (!output) {
+    failure();
+    return;
+  }
+  try {
+    output.focus();
+    output.select();
+    const copied = document.execCommand("copy");
+    if (copied) {
+      success();
+    } else {
+      failure();
+    }
+  } catch {
+    failure();
+  }
+}
+
+function downloadPeriodReport() {
+  const summary = budgetSummary();
+  const reportText = currentPeriodReportText();
+  const blob = new Blob([reportText], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `reporte-periodo-${summary.window.start}.txt`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showNoticeSnackbar("Reporte descargado.", { duration: 3500, renderNow: false });
 }
 
 function periodClosureForWindow(window) {

@@ -7638,6 +7638,7 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
 /* Prediction, period close and merchant rules v28 */
 .prediction-card,
 .period-close-card,
+.period-report-card,
 .merchant-rules-panel {
   display: grid;
   gap: 12px;
@@ -7657,6 +7658,7 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
 
 .prediction-card h2,
 .period-close-card h2,
+.period-report-head h2,
 .merchant-rules-heading h2 {
   margin: 2px 0 0;
   color: var(--ds-ink);
@@ -7667,6 +7669,8 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
 
 .prediction-card span,
 .period-close-card p,
+.period-report-card p,
+.period-report-mini span,
 .merchant-rules-heading span,
 .merchant-rule-chip span,
 .period-close-saved {
@@ -7813,6 +7817,75 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
 
 .period-close-card {
   padding: 14px;
+}
+
+.period-report-card {
+  gap: 13px;
+  padding: 14px;
+}
+
+.period-report-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.period-report-head .metric-badge {
+  white-space: nowrap;
+}
+
+.period-report-mini {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.period-report-mini div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid rgba(100, 75, 38, 0.1);
+  border-radius: var(--ds-radius-md);
+  padding: 10px;
+  background: rgba(255, 250, 240, 0.66);
+}
+
+.period-report-mini strong {
+  overflow-wrap: anywhere;
+  color: var(--ds-ink);
+  font-size: 0.86rem;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+}
+
+.period-report-card .btn {
+  justify-self: start;
+  width: auto;
+}
+
+.period-report-modal {
+  gap: 14px;
+}
+
+.period-report-output {
+  min-height: min(54vh, 520px);
+  resize: vertical;
+  border: 1px solid var(--ds-line);
+  border-radius: var(--ds-radius-md);
+  padding: 12px;
+  color: var(--field-text);
+  background: var(--field-bg);
+  font: 700 0.76rem/1.55 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  -webkit-text-fill-color: var(--field-text) !important;
+}
+
+.period-report-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
 }
 
 .period-close-heading,
@@ -8067,9 +8140,11 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
 
 html[data-theme="dark"] .prediction-card,
 html[data-theme="dark"] .period-close-card,
+html[data-theme="dark"] .period-report-card,
 html[data-theme="dark"] .merchant-rules-panel,
 #app[data-theme="dark"] .prediction-card,
 #app[data-theme="dark"] .period-close-card,
+#app[data-theme="dark"] .period-report-card,
 #app[data-theme="dark"] .merchant-rules-panel {
   color: var(--ds-ink) !important;
   border-color: var(--ds-line) !important;
@@ -8079,6 +8154,7 @@ html[data-theme="dark"] .merchant-rules-panel,
 }
 
 html[data-theme="dark"] .period-close-metrics div,
+html[data-theme="dark"] .period-report-mini div,
 html[data-theme="dark"] .period-close-hero,
 html[data-theme="dark"] .period-close-panel,
 html[data-theme="dark"] .period-close-row,
@@ -8086,6 +8162,7 @@ html[data-theme="dark"] .savings-compare div,
 html[data-theme="dark"] .prediction-detail-grid div,
 html[data-theme="dark"] .merchant-rule-chip,
 #app[data-theme="dark"] .period-close-metrics div,
+#app[data-theme="dark"] .period-report-mini div,
 #app[data-theme="dark"] .period-close-hero,
 #app[data-theme="dark"] .period-close-panel,
 #app[data-theme="dark"] .period-close-row,
@@ -8128,6 +8205,8 @@ html[data-theme="dark"] .merchant-rule-suggestion,
   }
 
   .period-close-actions,
+  .period-report-actions,
+  .period-report-mini,
   .savings-compare {
     grid-template-columns: 1fr;
   }
