@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260621-period-report-v31";
+const ASSET_VERSION = "20260622-native-reminders-v32";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -15,6 +15,14 @@ test("manifest has mobile install metadata and required PNG icons", async () => 
   assert.ok(iconSizes.includes("192x192"));
   assert.ok(iconSizes.includes("512x512"));
   assert.ok(manifest.icons.every((icon) => icon.src.includes(`?v=${ASSET_VERSION}`)));
+});
+
+test("Android build includes native local notification support", async () => {
+  const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  const androidManifest = await readFile(new URL("../android/app/src/main/AndroidManifest.xml", import.meta.url), "utf8");
+
+  assert.ok(pkg.dependencies["@capacitor/local-notifications"]);
+  assert.ok(androidManifest.includes("android.permission.POST_NOTIFICATIONS"));
 });
 
 test("service worker caches the app shell and serves an offline navigation fallback", async () => {
@@ -130,6 +138,15 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(styles.includes("Calendar reminder dark contrast v13"));
   assert.ok(styles.includes(".reminder-panel .metric-badge"));
   assert.ok(styles.includes(".reminder-actions .btn:disabled"));
+  assert.ok(app.includes("function nativeLocalNotifications()"));
+  assert.ok(app.includes("function scheduleNativeDailyReminder"));
+  assert.ok(app.includes("function initializeNativeNotificationActions"));
+  assert.ok(app.includes("function refreshNativeNotificationPermission"));
+  assert.ok(app.includes("LocalNotifications"));
+  assert.ok(app.includes("DAILY_REMINDER_NOTIFICATION_ID"));
+  assert.ok(app.includes("TEST_REMINDER_NOTIFICATION_ID"));
+  assert.ok(app.includes("localNotificationActionPerformed"));
+  assert.ok(app.includes("Android mostrara el recordatorio aunque la app no este abierta."));
   assert.ok(styles.includes("Sidebar ghost button dark contrast v14"));
   assert.ok(styles.includes("html[data-theme=\"dark\"] .sidebar .menu-tools .btn.ghost"));
   assert.ok(styles.includes("Distribution brand mark v18"));

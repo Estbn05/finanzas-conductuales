@@ -11,7 +11,7 @@ import {
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictUntilNextPeriod as getPeriodPrediction,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260621-period-report-v31";
+} from "./finance-core.js?v=20260622-native-reminders-v32";
 import {
   clearStoredCloudSession,
   getCloudSession,
@@ -23,7 +23,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260621-period-report-v31";
+} from "./sync-client.js?v=20260622-native-reminders-v32";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
@@ -32,6 +32,8 @@ const QUICK_EXPENSE_HASH = "registrar-gasto";
 const PERIOD_CLOSE_NOTICE_DAYS = 5;
 const AUTH_STARTUP_TIMEOUT_MS = 25_000;
 const DEFAULT_REMINDER_TIME = "20:00";
+const DAILY_REMINDER_NOTIFICATION_ID = 7301;
+const TEST_REMINDER_NOTIFICATION_ID = 7302;
 const STUDENT_SEMESTER_INCOME = 1_750_000;
 const STUDENT_SEMESTER_MONTHS = 6;
 const STUDENT_WEEKLY_GAS = 30_000;
@@ -66,6 +68,7 @@ let authMode = "";
 let transactionHistorySort = "recent";
 let snackbar = null;
 let snackbarTimer;
+let nativeNotificationPermission = "";
 let pendingExtraAllocation = null;
 let planSheet = "";
 let pendingJobRemovalId = "";
@@ -88,6 +91,8 @@ let dailyReminderTimer;
 
 applyThemePreference();
 render();
+initializeNativeNotificationActions();
+refreshNativeNotificationPermission({ renderNow: true });
 window.setTimeout(recoverAuthStartup, AUTH_STARTUP_TIMEOUT_MS);
 initializeCloudSync();
 scheduleDailyReminder();
@@ -4382,6 +4387,9 @@ async function handleDailyReminderSubmit(event) {
   }
 
   saveState();
+  if (enabled && permission === "granted") {
+    scheduleDailyReminder();
+  }
   render();
 }
 
@@ -4418,6 +4426,9 @@ async function requestReminderPermission() {
   const permission = await requestNotificationPermission();
   if (permission === "granted") {
     state.lastAlert = "Notificaciones permitidas. Ya puedes activar o probar el recordatorio.";
+    if (normalizeDailyReminder(state.dailyReminder).enabled) {
+      scheduleDailyReminder();
+    }
   } else if (permission === "denied") {
     state.lastAlert = "El navegador bloqueo las notificaciones. Cambialo desde los ajustes del sitio.";
     showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
@@ -4429,9 +4440,14 @@ async function requestReminderPermission() {
   render();
 }
 
-function sendTestReminder() {
-  showDailyReminderNotification({ test: true });
-  state.lastAlert = "Notificacion de prueba enviada.";
+async function sendTestReminder() {
+  const sent = await showDailyReminderNotification({ test: true });
+  state.lastAlert = sent ? "Notificacion de prueba enviada." : "No pude enviar la notificacion de prueba.";
+  if (!sent) {
+    showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
+  }
+  saveState({ touch: false });
+  render();
 }
 
 async function handleCloudLoginSubmit(event) {
@@ -4970,6 +4986,10 @@ function calendarEstimateForDays(days) {
 function scheduleDailyReminder() {
   clearTimeout(dailyReminderTimer);
   const reminder = normalizeDailyReminder(state.dailyReminder);
+  if (nativeLocalNotifications()) {
+    scheduleNativeDailyReminder(reminder);
+    return;
+  }
   if (!reminder.enabled) {
     return;
   }
@@ -5009,6 +5029,9 @@ function handleDailyReminderDue() {
 }
 
 function notificationPermissionStatus() {
+  if (nativeLocalNotifications()) {
+    return nativeNotificationPermission || "default";
+  }
   if (!("Notification" in window)) {
     return "unsupported";
   }
@@ -5016,6 +5039,23 @@ function notificationPermissionStatus() {
 }
 
 async function requestNotificationPermission() {
+  const localNotifications = nativeLocalNotifications();
+  if (localNotifications) {
+    try {
+      const current = await localNotifications.checkPermissions();
+      const currentStatus = normalizeNativeNotificationPermission(current);
+      if (currentStatus === "granted") {
+        nativeNotificationPermission = currentStatus;
+        return currentStatus;
+      }
+      const requested = await localNotifications.requestPermissions();
+      nativeNotificationPermission = normalizeNativeNotificationPermission(requested);
+      return nativeNotificationPermission;
+    } catch {
+      nativeNotificationPermission = "unsupported";
+      return "unsupported";
+    }
+  }
   if (!("Notification" in window)) {
     return "unsupported";
   }
@@ -5032,12 +5072,32 @@ async function requestNotificationPermission() {
 async function showDailyReminderNotification(options = {}) {
   const permission = notificationPermissionStatus();
   if (permission !== "granted") {
-    return;
+    return false;
   }
 
   const title = options.test ? "Prueba de recordatorio" : "Revision de gastos";
   const body = "Quieres registrar tus gastos de hoy?";
   const data = { url: `${selfLocationOrigin()}#${QUICK_EXPENSE_HASH}` };
+  const localNotifications = nativeLocalNotifications();
+  if (localNotifications) {
+    try {
+      await localNotifications.schedule({
+        notifications: [
+          {
+            id: options.test ? TEST_REMINDER_NOTIFICATION_ID : DAILY_REMINDER_NOTIFICATION_ID,
+            title,
+            body,
+            schedule: { at: new Date(Date.now() + 1200) },
+            extra: { route: QUICK_EXPENSE_HASH }
+          }
+        ]
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   try {
     const registration = navigator.serviceWorker ? await navigator.serviceWorker.ready : null;
     if (registration?.showNotification) {
@@ -5049,7 +5109,7 @@ async function showDailyReminderNotification(options = {}) {
         icon: "assets/icon-192.png",
         badge: "assets/icon-192.png"
       });
-      return;
+      return true;
     }
   } catch {
     // Fall back to the page Notification API below.
@@ -5066,7 +5126,83 @@ async function showDailyReminderNotification(options = {}) {
       window.focus();
       window.location.hash = QUICK_EXPENSE_HASH;
     };
+    return true;
   } catch {}
+  return false;
+}
+
+function nativeLocalNotifications() {
+  return window.Capacitor?.Plugins?.LocalNotifications || null;
+}
+
+function normalizeNativeNotificationPermission(permission) {
+  const display = permission?.display || "";
+  if (display === "granted") {
+    return "granted";
+  }
+  if (display === "denied") {
+    return "denied";
+  }
+  return "default";
+}
+
+async function refreshNativeNotificationPermission(options = {}) {
+  const { renderNow = false } = options;
+  const localNotifications = nativeLocalNotifications();
+  if (!localNotifications) {
+    return notificationPermissionStatus();
+  }
+  try {
+    nativeNotificationPermission = normalizeNativeNotificationPermission(await localNotifications.checkPermissions());
+  } catch {
+    nativeNotificationPermission = "unsupported";
+  }
+  if (renderNow) {
+    render();
+  }
+  return nativeNotificationPermission;
+}
+
+function initializeNativeNotificationActions() {
+  const localNotifications = nativeLocalNotifications();
+  if (!localNotifications?.addListener) {
+    return;
+  }
+  localNotifications.addListener("localNotificationActionPerformed", () => {
+    window.focus?.();
+    window.location.hash = QUICK_EXPENSE_HASH;
+  }).catch(() => {});
+}
+
+async function scheduleNativeDailyReminder(reminder = normalizeDailyReminder(state.dailyReminder)) {
+  const localNotifications = nativeLocalNotifications();
+  if (!localNotifications) {
+    return false;
+  }
+  try {
+    await localNotifications.cancel({ notifications: [{ id: DAILY_REMINDER_NOTIFICATION_ID }] });
+    if (!reminder.enabled || notificationPermissionStatus() !== "granted") {
+      return false;
+    }
+    await localNotifications.schedule({
+      notifications: [
+        {
+          id: DAILY_REMINDER_NOTIFICATION_ID,
+          title: "Revision de gastos",
+          body: "Quieres registrar tus gastos de hoy?",
+          schedule: {
+            at: nextReminderDate(reminder.time),
+            repeats: true,
+            every: "day"
+          },
+          extra: { route: QUICK_EXPENSE_HASH }
+        }
+      ]
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function selfLocationOrigin() {
@@ -5084,6 +5220,18 @@ function notificationStatusLabel(permission) {
 }
 
 function reminderSupportNote(permission) {
+  if (nativeLocalNotifications()) {
+    if (permission === "granted") {
+      return "Android mostrara el recordatorio aunque la app no este abierta. Tocar la notificacion abre registrar gasto.";
+    }
+    if (permission === "denied") {
+      return "Android bloqueo las notificaciones para esta app. Cambialo en ajustes del sistema.";
+    }
+    if (permission === "unsupported") {
+      return "El plugin nativo de notificaciones no esta disponible en esta instalacion.";
+    }
+    return "Permite notificaciones para activar el recordatorio diario en Android.";
+  }
   if (permission === "granted") {
     return "El recordatorio queda programado localmente en este dispositivo. Si el sistema cierra la app por completo, se reprograma al volver a abrirla.";
   }

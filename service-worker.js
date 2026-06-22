@@ -1,19 +1,19 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CACHE_NAME = `${CACHE_PREFIX}20260621-period-report-v31`;
+const CACHE_NAME = `${CACHE_PREFIX}20260622-native-reminders-v32`;
 const APP_SHELL = [
   "./",
   "index.html",
-  "styles.css?v=20260621-period-report-v31",
-  "app.js?v=20260621-period-report-v31",
-  "finance-core.js?v=20260621-period-report-v31",
-  "sync-client.js?v=20260621-period-report-v31",
-  "sync-config.js?v=20260621-period-report-v31",
-  "vendor/supabase-2.108.1.min.js?v=20260621-period-report-v31",
-  "manifest.webmanifest?v=20260621-period-report-v31",
-  "assets/icon.svg?v=20260621-period-report-v31",
-  "assets/icon-192.png?v=20260621-period-report-v31",
-  "assets/icon-512.png?v=20260621-period-report-v31",
-  "assets/apple-touch-icon.png?v=20260621-period-report-v31"
+  "styles.css?v=20260622-native-reminders-v32",
+  "app.js?v=20260622-native-reminders-v32",
+  "finance-core.js?v=20260622-native-reminders-v32",
+  "sync-client.js?v=20260622-native-reminders-v32",
+  "sync-config.js?v=20260622-native-reminders-v32",
+  "vendor/supabase-2.108.1.min.js?v=20260622-native-reminders-v32",
+  "manifest.webmanifest?v=20260622-native-reminders-v32",
+  "assets/icon.svg?v=20260622-native-reminders-v32",
+  "assets/icon-192.png?v=20260622-native-reminders-v32",
+  "assets/icon-512.png?v=20260622-native-reminders-v32",
+  "assets/apple-touch-icon.png?v=20260622-native-reminders-v32"
 ];
 
 self.addEventListener("install", (event) => {
