@@ -6,3 +6,5 @@ www/
 android-sdk/
 .env
 .edge-*/
+android/keystores/
+android/key.properties
