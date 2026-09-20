@@ -8,3 +8,18 @@ android-sdk/
 .edge-*/
 android/keystores/
 android/key.properties
+
+# Perfiles de Edge usados en pruebas QA: contienen "Login Data", "Vpn Tokens" y cookies
+# de sesion reales. El patron .edge-*/ de arriba no los cubre por el prefijo.
+.qa-edge-profile*/
+.real-login-cycle-test/
+.session-backup-test/
+
+# Adjuntos de sesiones de herramientas de IA, no son fuente del proyecto
+.codex-remote-attachments/
+
+# Grafo de conocimiento generado por `graphify update .` (regenerable, ~28 MB)
+graphify-out/
+
+# Ajustes personales de Claude Code; lo compartido vive en .claude/settings.json
+.claude/settings.local.json

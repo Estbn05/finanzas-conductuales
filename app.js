@@ -4,6 +4,7 @@ import {
   budgetAmountForJob as getBudgetAmountForJob,
   budgetRingAllocation as getBudgetRingAllocation,
   budgetSummary as getBudgetSummary,
+  budgetWindow as getBudgetWindow,
   calculatePlan as calculateFinancePlan,
   categoryStatus as getCategoryStatus,
   getPeriodIncome,
@@ -11,26 +12,40 @@ import {
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictUntilNextPeriod as getPeriodPrediction,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=20260622-session-timeout-v33";
+} from "./finance-core.js?v=1.0.9";
 import {
   clearStoredCloudSession,
+  deleteCloudAccount,
+  deleteCloudAppState,
   getCloudSession,
   isCloudConfigured,
   isCloudLibraryLoaded,
   loadCloudState,
   onCloudAuthChange,
+  requestPasswordReset,
   saveCloudState,
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=20260622-session-timeout-v33";
+} from "./sync-client.js?v=1.0.9";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
+const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
+// Lock constants live at the top so loadLockConfig() (called during module init,
+// before the lock helper block below) can read LOCK_STORAGE_KEY without hitting a
+// temporal-dead-zone ReferenceError. A previous version declared these next to the
+// helpers far below; the TDZ error was silently caught and the lock always read as off.
+const LOCK_STORAGE_KEY = "finanzas-conductuales-lock:v1";
+const LOCK_PIN_LENGTH = 4;
+const LOCK_MAX_ATTEMPTS = 5;
+const LOCK_COOLDOWN_MS = 30000;
 const DEFAULT_VIEW = "today";
 const QUICK_EXPENSE_HASH = "registrar-gasto";
 const PERIOD_CLOSE_NOTICE_DAYS = 5;
 const AUTH_STARTUP_TIMEOUT_MS = 8_000;
+const SESSION_CHECK_MANUAL_DELAY_MS = 3_000;
+const LOCAL_STATE_POLL_DURATION_MS = 1_500;
 const DEFAULT_REMINDER_TIME = "20:00";
 const DAILY_REMINDER_NOTIFICATION_ID = 7301;
 const TEST_REMINDER_NOTIFICATION_ID = 7302;
@@ -51,21 +66,29 @@ const NAV_ITEMS = [
   { id: "savings", label: "Ahorro", icon: "03" },
   { id: "calendar", label: "Calendario", icon: "04" },
   { id: "movements", label: "Movimientos", icon: "05" },
-  { id: "profile", label: "Datos", icon: "06" }
+  { id: "progress", label: "Progreso", icon: "06" },
+  { id: "profile", label: "Datos", icon: "07" }
 ];
 const APP_VIEWS = new Set([...NAV_ITEMS.map((item) => item.id), "spending", "periodClose"]);
 
 const app = document.querySelector("#app");
 let state = loadState();
 state.activeView = viewFromHash(DEFAULT_VIEW);
+let startupRouteNormalized = false;
 normalizeStartupRoute();
 let menuOpen = false;
 let quickExpenseOpen = false;
+let quickExpenseAdvancedOpen = false;
 let applyingCloudState = false;
 let cloudSaveTimer;
 let authUnsubscribe = () => {};
 let authMode = "";
+let authEmailDraft = "";
+let authNotice = null;
 let transactionHistorySort = "recent";
+let transactionHistoryFilter = "all";
+let transactionHistorySearch = "";
+let transactionHistoryDate = "";
 let snackbar = null;
 let snackbarTimer;
 let nativeNotificationPermission = "";
@@ -76,6 +99,8 @@ let editingTransactionId = "";
 let editingExtraId = "";
 let predictionDetailsOpen = false;
 let periodReportOpen = false;
+let quickClassifyQueue = [];
+let deleteAccountOpen = false;
 let expenseDraft = null;
 let diagnosisValidation = { field: "", message: "" };
 let cloudState = {
@@ -88,12 +113,44 @@ let cloudState = {
   status: isCloudConfigured() ? "checking" : "local"
 };
 let dailyReminderTimer;
+let sessionCheckManualReady = false;
+let lockConfig = loadLockConfig();
+let lockMode = lockConfig.enabled ? "unlock" : "";
+let lockDigits = "";
+let lockFirstEntry = "";
+let lockError = "";
+let lastBackgroundAt = 0;
+let lockCooldownTimer;
+let biometricAutoTried = false;
+let biometricPromptActive = false;
 
-applyThemePreference();
 render();
 initializeNativeNotificationActions();
 refreshNativeNotificationPermission({ renderNow: true });
+bindHardwareBackButton();
+bindAppLock();
+syncHomeWidget();
+initializeWidgetQuickAddDeepLink();
 window.setTimeout(recoverAuthStartup, AUTH_STARTUP_TIMEOUT_MS);
+window.setTimeout(() => {
+  sessionCheckManualReady = true;
+  if (shouldShowSessionCheck()) {
+    render();
+  }
+}, SESSION_CHECK_MANUAL_DELAY_MS);
+(function pollLocalStateUntilStable(deadline) {
+  const reloaded = loadState();
+  if (JSON.stringify(reloaded) !== JSON.stringify(state)) {
+    state = reloaded;
+    state.activeView = viewFromHash(DEFAULT_VIEW);
+    normalizeStartupRoute();
+    render();
+    return;
+  }
+  if (performance.now() < deadline) {
+    window.requestAnimationFrame(() => pollLocalStateUntilStable(deadline));
+  }
+})(performance.now() + LOCAL_STATE_POLL_DURATION_MS);
 initializeCloudSync();
 scheduleDailyReminder();
 window.addEventListener("hashchange", () => {
@@ -114,6 +171,12 @@ window.addEventListener("hashchange", () => {
 });
 window.addEventListener("popstate", syncQuickExpenseWithLocation);
 window.addEventListener("online", render);
+// Follow the OS live, but only while the user has not picked a theme themselves.
+window.matchMedia?.("(prefers-color-scheme: dark)")?.addEventListener?.("change", () => {
+  if (!storedThemeChoice()) {
+    render();
+  }
+});
 window.addEventListener("offline", render);
 
 function createDefaultState() {
@@ -123,7 +186,8 @@ function createDefaultState() {
   return {
     activeView: DEFAULT_VIEW,
     showDiagnosis: false,
-    lastAlert: "Registra cada gasto en menos de un minuto. Usa Mis datos para ajustar tus numeros reales.",
+    diagnosisSection: "plan",
+    lastAlert: "Registra cada gasto en menos de un minuto. Usa Editar mi plan para ajustar tus números reales.",
     updated_at: now,
     meta: {
       updatedAt: now,
@@ -164,7 +228,9 @@ function createDefaultState() {
     settings: {
       monthlyRaisePct: 8,
       escalationPct: 50,
-      theme: "light",
+      // Empty means "follow the system". Forcing "light" here made the app fight the
+      // prefers-color-scheme rules on a phone set to dark mode.
+      theme: "",
       updated_at: now
     },
     budgetExtras: [],
@@ -181,6 +247,7 @@ function createDefaultState() {
       initialized: false,
       updated_at: now
     },
+    periodIncomeStatus: null,
     budgetJobs: [],
     transactions: [],
     cooldowns: [],
@@ -209,6 +276,7 @@ function migrateState(savedState) {
     ...defaults,
     activeView: savedState.activeView || defaults.activeView,
     showDiagnosis: Boolean(savedState.showDiagnosis),
+    diagnosisSection: DIAGNOSIS_SECTIONS[savedState.diagnosisSection] ? savedState.diagnosisSection : defaults.diagnosisSection,
     lastAlert: savedState.lastAlert || defaults.lastAlert,
     updated_at: savedState.updated_at || defaults.updated_at,
     meta: { ...defaults.meta, ...(savedState.meta || {}) },
@@ -216,7 +284,10 @@ function migrateState(savedState) {
     settings: {
       monthlyRaisePct: Number(savedState.settings?.monthlyRaisePct ?? defaults.settings.monthlyRaisePct),
       escalationPct: Number(savedState.settings?.escalationPct ?? defaults.settings.escalationPct),
-      theme: normalizeTheme(savedState.settings?.theme || defaults.settings.theme),
+      theme:
+        savedState.settings?.theme === "dark" || savedState.settings?.theme === "light"
+          ? savedState.settings.theme
+          : defaults.settings.theme,
       updated_at: savedState.settings?.updated_at || defaults.settings.updated_at
     },
     transactions: normalizeTransactions(savedState.transactions || defaults.transactions),
@@ -224,6 +295,7 @@ function migrateState(savedState) {
     calendarEvents: normalizeCalendarEvents(savedState.calendarEvents || defaults.calendarEvents),
     dailyReminder: normalizeDailyReminder(savedState.dailyReminder || defaults.dailyReminder),
     liquidity: normalizeLiquidity(savedState.liquidity || defaults.liquidity),
+    periodIncomeStatus: savedState.periodIncomeStatus || null,
     cooldowns: savedState.cooldowns || defaults.cooldowns,
     periodClosures: normalizePeriodClosures(savedState.periodClosures || defaults.periodClosures),
     merchantRules: normalizeMerchantRules(savedState.merchantRules || defaults.merchantRules, savedState.transactions || defaults.transactions),
@@ -253,8 +325,10 @@ function saveState(options = {}) {
     state.meta.updated_at = now;
   }
   state.meta.cloudUserEmail = cloudState.email || state.meta?.cloudUserEmail || "";
+  ensurePeriodIncomeApplication();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   scheduleDailyReminder();
+  syncHomeWidget();
   if (sync && !applyingCloudState) {
     scheduleCloudSave();
   }
@@ -263,7 +337,7 @@ function saveState(options = {}) {
 async function initializeCloudSync() {
   if (!cloudState.configured) {
     cloudState.status = "local";
-    cloudState.error = "Configura Supabase para activar sincronizacion.";
+    cloudState.error = "Configura Supabase para activar sincronización.";
     cloudState.sessionReady = true;
     renderCloudStatusChange();
     return;
@@ -271,7 +345,7 @@ async function initializeCloudSync() {
 
   if (!cloudState.libraryLoaded) {
     cloudState.status = "local";
-    cloudState.error = "No se pudo cargar la libreria de autenticacion. Revisa internet y vuelve a cargar.";
+    cloudState.error = "No se pudo cargar la librería de autenticación. Revisa internet y vuelve a cargar.";
     cloudState.sessionReady = true;
     renderCloudStatusChange();
     return;
@@ -284,14 +358,14 @@ async function initializeCloudSync() {
     if (session) {
       cloudState.status = "syncing";
     }
-    authUnsubscribe = onCloudAuthChange((nextSession) => {
+    authUnsubscribe = onCloudAuthChange((nextSession, event) => {
       if (nextSession) {
         applyCloudSession(nextSession);
         cloudState.sessionReady = true;
         if (cloudState.status !== "syncing") {
           pullCloudAfterLogin();
         }
-      } else {
+      } else if (event === "SIGNED_OUT") {
         clearLocalUserState();
         cloudState.signedIn = false;
         cloudState.email = "";
@@ -346,10 +420,9 @@ async function pullCloudAfterLogin() {
   try {
     const remote = await loadCloudState();
     if (remote?.app_state) {
-      const localTime = stateUpdatedTime(state);
-      const remoteTime = cloudRecordUpdatedTime(remote);
       const localHasData = hasMeaningfulLocalData(state);
       const remoteHasData = hasMeaningfulLocalData(remote.app_state);
+      const remoteAhead = remoteChangedSinceLastSync(remote);
 
       if (localHasData && !remoteHasData) {
         const saved = await saveCloudState(getCloudPayload());
@@ -360,17 +433,28 @@ async function pullCloudAfterLogin() {
         return;
       }
 
-      if (localTime > remoteTime && localHasData) {
-        const saved = await saveCloudState(getCloudPayload());
-        markCloudSynced(saved?.updated_at || new Date().toISOString());
-        state.lastAlert = "Tus cambios locales eran mas recientes y se subieron a la nube.";
+      // El servidor tiene una version mas nueva que la ultima que sincronizamos (otro
+      // dispositivo la edito) → bajarla. Solo aqui se sobreescribe lo local.
+      if (remoteAhead && remoteHasData) {
+        applyRemoteState(remote.app_state, remote.updated_at, "Nube sincronizada automáticamente.");
         cloudState.status = "synced";
         renderCloudStatusChange();
         return;
       }
 
-      if ((remoteTime > localTime && remoteHasData) || (!localHasData && remoteHasData)) {
-        applyRemoteState(remote.app_state, remote.updated_at, "Nube sincronizada automaticamente.");
+      // La nube no cambio desde nuestra ultima sincronizacion: lo local manda. Subimos
+      // nuestros cambios (aunque el reloj del telefono vaya atras del servidor).
+      if (localHasData) {
+        const saved = await saveCloudState(getCloudPayload());
+        markCloudSynced(saved?.updated_at || new Date().toISOString());
+        cloudState.status = "synced";
+        renderCloudStatusChange();
+        return;
+      }
+
+      // No teniamos datos locales; adoptar lo que haya en la nube.
+      if (remoteHasData) {
+        applyRemoteState(remote.app_state, remote.updated_at, "Nube sincronizada automáticamente.");
         cloudState.status = "synced";
         renderCloudStatusChange();
         return;
@@ -378,7 +462,7 @@ async function pullCloudAfterLogin() {
 
       markCloudSynced(remote.updated_at || new Date().toISOString());
       cloudState.status = "synced";
-      state.lastAlert = "Nube al dia.";
+      state.lastAlert = "Nube al día.";
       renderCloudStatusChange();
       return;
     }
@@ -424,31 +508,14 @@ async function pushCloudState() {
   try {
     const remote = await loadCloudState();
     if (remote?.app_state) {
-      const localTime = stateUpdatedTime(state);
-      const remoteTime = cloudRecordUpdatedTime(remote);
-      const localHasData = hasMeaningfulLocalData(state);
       const remoteHasData = hasMeaningfulLocalData(remote.app_state);
 
-      if (localHasData && !remoteHasData) {
-        const saved = await saveCloudState(getCloudPayload());
-        markCloudSynced(saved?.updated_at || new Date().toISOString());
+      // Solo cedemos ante la nube si de verdad cambio en el servidor desde nuestra
+      // ultima sincronizacion (otro dispositivo). Si no, subimos nuestros cambios: esta
+      // funcion se dispara justo despues de una edicion local, asi que lo local manda.
+      if (remoteChangedSinceLastSync(remote) && remoteHasData) {
+        applyRemoteState(remote.app_state, remote.updated_at, "La nube tenía cambios más recientes. Descargue esa version.");
         cloudState.status = "synced";
-        cloudState.error = "";
-        renderCloudStatusChange();
-        return;
-      }
-
-      if ((remoteTime > localTime && remoteHasData) || (!localHasData && remoteHasData)) {
-        applyRemoteState(remote.app_state, remote.updated_at, "La nube tenia cambios mas recientes. Descargue esa version.");
-        cloudState.status = "synced";
-        renderCloudStatusChange();
-        return;
-      }
-
-      if (remoteTime === localTime) {
-        markCloudSynced(remote.updated_at || new Date().toISOString());
-        cloudState.status = "synced";
-        cloudState.error = "";
         renderCloudStatusChange();
         return;
       }
@@ -486,7 +553,15 @@ function applyRemoteState(remoteState, remoteUpdatedAt, alert) {
   editingTransactionId = "";
   editingExtraId = "";
   clearSnackbar({ renderNow: false });
-  activateView(DEFAULT_VIEW);
+  // Adopting remote state normally forces the user back to the default view (editing a
+  // transaction/extra that no longer exists in the new state would be unsafe to keep open).
+  // But skip that when the widget's quick-add deep link just navigated here — this runs on
+  // essentially every logged-in cold start (see pullCloudAfterLogin), racing against
+  // initializeWidgetQuickAddDeepLink's async getLaunchUrl() call, and registering a new
+  // expense never references anything from the old state, so it's safe to leave open.
+  if (!isQuickExpenseLocation()) {
+    activateView(DEFAULT_VIEW);
+  }
   state.lastAlert = alert;
   markCloudSynced(remoteUpdatedAt || new Date().toISOString(), { persist: false });
   saveState({ sync: false, touch: false });
@@ -505,17 +580,17 @@ function markCloudSynced(updatedAt, options = {}) {
   }
 }
 
-function stateUpdatedTime(payload) {
-  return Math.max(
-    timestampValue(payload?.updated_at),
-    timestampValue(payload?.meta?.updated_at),
-    timestampValue(payload?.meta?.updatedAt),
-    timestampValue(payload?.meta?.cloudUpdatedAt)
-  );
-}
-
-function cloudRecordUpdatedTime(record) {
-  return Math.max(timestampValue(record?.updated_at), stateUpdatedTime(record?.app_state));
+// ¿El registro remoto cambió en el SERVIDOR desde la última vez que sincronizamos?
+// Compara la marca `updated_at` del servidor contra la última marca del servidor que
+// guardamos (state.meta.cloudUpdatedAt). Ambas vienen del reloj del servidor, así que
+// no las afecta el desfase entre el reloj del teléfono y el del servidor. Antes se
+// comparaba la marca del dispositivo (updated_at local) contra la del servidor, y como
+// el servidor suele ir unos segundos adelante, un cambio local recién hecho parecía
+// "más viejo" que la nube y un pull automático (por refresco de token) lo borraba.
+function remoteChangedSinceLastSync(remote) {
+  const remoteServerTime = timestampValue(remote?.updated_at);
+  const lastSyncedServerTime = timestampValue(state.meta?.cloudUpdatedAt);
+  return remoteServerTime > lastSyncedServerTime;
 }
 
 function timestampValue(value) {
@@ -573,16 +648,16 @@ function friendlyCloudError(error) {
   const message = error?.message || String(error);
   const normalizedMessage = message.toLowerCase();
   if (normalizedMessage.includes("row-level security") || normalizedMessage.includes("42501")) {
-    return "Supabase bloqueo el guardado por permisos de esta sesion. Tus datos locales siguen aqui; cierra sesion e inicia de nuevo. Si se repite, actualiza las politicas SQL de finance_app_state.";
+    return "Supabase bloqueó el guardado por permisos de esta sesión. Tus datos locales siguen aquí; cierra sesión e inicia de nuevo. Si se repite, actualiza las políticas SQL de finance_app_state.";
   }
   if (normalizedMessage.includes("invalid login")) {
-    return "Correo o contrasena incorrectos.";
+    return "Correo o contraseña incorrectos.";
   }
   if (normalizedMessage.includes("fetch")) {
     return "No pude conectar con la nube. Revisa internet.";
   }
-  if (normalizedMessage.includes("libreria de nube")) {
-    return "No pude cargar Supabase. Revisa internet y recarga la pagina.";
+  if (normalizedMessage.includes("librería de nube")) {
+    return "No pude cargar Supabase. Revisa internet y recarga la página.";
   }
   return message;
 }
@@ -592,7 +667,7 @@ function renderCloudStatusChange() {
     render();
     return;
   }
-  if (quickExpenseOpen || state.showDiagnosis || pendingExtraAllocation || editingTransactionId || editingExtraId || periodReportOpen) {
+  if (quickExpenseOpen || state.showDiagnosis || pendingExtraAllocation || editingTransactionId || editingExtraId || periodReportOpen || quickClassifyQueue.length || deleteAccountOpen) {
     return;
   }
   render();
@@ -600,6 +675,7 @@ function renderCloudStatusChange() {
 
 function openQuickExpense() {
   quickExpenseOpen = true;
+  quickExpenseAdvancedOpen = false;
   menuOpen = false;
   predictionDetailsOpen = false;
   periodReportOpen = false;
@@ -608,7 +684,16 @@ function openQuickExpense() {
   }
 }
 
+// Only clears a stale #registrar-gasto hash left over from a previous session, on the
+// very first check. Without this guard, the poll loop below (pollLocalStateUntilStable)
+// calls this again whenever cloud sync updates localStorage during startup, wiping out a
+// hash that the widget's quick-add deep link (initializeWidgetQuickAddDeepLink) sets
+// asynchronously — moments after startup — via a Capacitor plugin promise.
 function normalizeStartupRoute() {
+  if (startupRouteNormalized) {
+    return;
+  }
+  startupRouteNormalized = true;
   if (!isQuickExpenseLocation()) {
     return;
   }
@@ -619,6 +704,7 @@ function normalizeStartupRoute() {
 
 function closeQuickExpense() {
   quickExpenseOpen = false;
+  quickExpenseAdvancedOpen = false;
   expenseDraft = null;
   if (isQuickExpenseLocation()) {
     window.history.back();
@@ -660,7 +746,18 @@ function syncQuickExpenseWithLocation(options = {}) {
 }
 
 function render() {
-  const currentTheme = applyThemePreference();
+  // Must run before the early returns below: the lock, session-check and auth
+  // screens are rendered without ever reaching the main branch, so otherwise they
+  // keep whatever data-theme index.html guessed at load time.
+  applyThemePreference();
+
+  if (lockMode) {
+    app.classList.remove("is-menu-open", "is-expense-open");
+    app.innerHTML = renderLockScreen();
+    bindEvents();
+    return;
+  }
+
   if (shouldShowSessionCheck()) {
     app.classList.remove("is-menu-open", "is-expense-open");
     app.innerHTML = renderSessionCheck();
@@ -675,6 +772,8 @@ function render() {
     return;
   }
 
+  const currentTheme = applyThemePreference();
+  ensurePeriodIncomeApplication();
   const plan = calculatePlan();
   app.classList.toggle("is-menu-open", menuOpen);
   app.classList.toggle("is-expense-open", quickExpenseOpen);
@@ -701,8 +800,8 @@ function render() {
         </nav>
         ${renderThemeSwitcher(currentTheme)}
         <div class="menu-tools">
-          <button class="btn primary" type="button" data-action="open-diagnosis">Mis datos</button>
-          <button class="btn ghost" type="button" data-action="cloud-sign-out">Cerrar sesion</button>
+          <button class="btn primary" type="button" data-action="open-diagnosis">Editar mi plan</button>
+          <button class="btn ghost" type="button" data-action="cloud-sign-out">Cerrar sesión</button>
           ${menuAlertText() ? `<div class="menu-notice" role="status">${escapeHtml(menuAlertText())}</div>` : ""}
         </div>
       </div>
@@ -716,11 +815,13 @@ function render() {
     ${quickExpenseOpen ? renderQuickExpensePanel() : ""}
     ${planSheet ? renderPlanSheet() : ""}
     ${pendingJobRemovalId ? renderJobRemovalConfirmation() : ""}
+    ${deleteAccountOpen ? renderDeleteAccountConfirmation() : ""}
     ${editingTransactionId ? renderTransactionEditor() : ""}
     ${editingExtraId ? renderExtraEditor() : ""}
+    ${quickClassifyQueue.length ? renderQuickClassifyPanel() : ""}
     ${predictionDetailsOpen ? renderPredictionDetailsModal() : ""}
     ${periodReportOpen ? renderPeriodReportModal(plan) : ""}
-    ${!state.profile.completed || state.showDiagnosis ? renderDiagnosisModal() : ""}
+    ${profileNeedsOnboarding() || state.showDiagnosis ? renderDiagnosisModal() : ""}
     ${pendingExtraAllocation ? renderExtraAllocationModal() : ""}
     ${renderSnackbar()}
   `;
@@ -758,8 +859,21 @@ function normalizeTheme(theme) {
   return theme === "dark" ? "dark" : "light";
 }
 
+function systemPrefersDark() {
+  return Boolean(window.matchMedia?.("(prefers-color-scheme: dark)")?.matches);
+}
+
+// "" (or anything unrecognised) means the user never picked a theme.
+function storedThemeChoice() {
+  const theme = state.settings?.theme;
+  return theme === "dark" || theme === "light" ? theme : "";
+}
+
+// Without an explicit choice we must follow the OS, otherwise data-theme says
+// "light" while the prefers-color-scheme rules paint dark, and the two halves of
+// the stylesheet render on top of each other (invisible text on the auth screen).
 function themePreference() {
-  return normalizeTheme(state.settings?.theme);
+  return storedThemeChoice() || (systemPrefersDark() ? "dark" : "light");
 }
 
 function applyThemePreference() {
@@ -772,7 +886,7 @@ function applyThemePreference() {
 
 function renderBottomNavigation() {
   return `
-    <nav class="bottom-nav" aria-label="Navegacion rapida">
+    <nav class="bottom-nav" aria-label="Navegación rápida">
       <button class="bottom-nav-item ${state.activeView === "today" ? "is-active" : ""}" type="button" data-view="today">
         <span class="bottom-nav-icon" aria-hidden="true">${renderIcon("home")}</span>
         <span>Inicio</span>
@@ -807,7 +921,22 @@ function renderIcon(name) {
     menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
     account: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 9h18M7 15h3"/>',
     cash: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 9.5a3 3 0 0 1-1.5 1.5A3 3 0 0 1 7 14.5M17 9.5a3 3 0 0 0 1.5 1.5 3 3 0 0 0-1.5 3.5"/><circle cx="12" cy="12" r="2.25"/>',
-    income: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v10M8.5 10h5.25a2.25 2.25 0 0 1 0 4.5H10.5a2.25 2.25 0 0 1-2-1.25"/>'
+    income: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v10M8.5 10h5.25a2.25 2.25 0 0 1 0 4.5H10.5a2.25 2.25 0 0 1-2-1.25"/>',
+    calculator: '<rect x="5" y="3" width="14" height="18" rx="2.5"/><path d="M8 7h8"/><circle cx="8.5" cy="12" r="0.9" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none"/><circle cx="15.5" cy="12" r="0.9" fill="currentColor" stroke="none"/><circle cx="8.5" cy="16" r="0.9" fill="currentColor" stroke="none"/><circle cx="12" cy="16" r="0.9" fill="currentColor" stroke="none"/><circle cx="15.5" cy="16" r="0.9" fill="currentColor" stroke="none"/>',
+    wallet: '<path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h11A2.5 2.5 0 0 1 19 7.5V8H5.5A2.5 2.5 0 0 1 3 5.5Z"/><rect x="3" y="8" width="18" height="11" rx="2.5"/><circle cx="16" cy="13.5" r="1.4" fill="currentColor" stroke="none"/>',
+    list: '<circle cx="5" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="5" cy="17" r="1" fill="currentColor" stroke="none"/><path d="M9.5 7h10M9.5 12h10M9.5 17h10"/>',
+    ban: '<circle cx="12" cy="12" r="8.5"/><path d="M6.2 6.2 17.8 17.8"/>',
+    fuel: '<path d="M4 21V6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v15"/><path d="M4 11h8"/><path d="M14 8.5 17 11v6a1.7 1.7 0 0 0 3.4 0V9.8a2 2 0 0 0-.6-1.4L17.5 6"/><path d="M4 21h10"/>',
+    food: '<path d="M7 3v7a1.8 1.8 0 0 0 3.6 0V3M8.8 10v11M16.5 3c-1.4 0-2.3 1.6-2.3 4.5S15.1 12 16.5 12s2.3-1.6 2.3-4.5S17.9 3 16.5 3ZM16.5 12v9"/>',
+    car: '<path d="M4 16V11.5L6 7h12l2 4.5V16"/><path d="M4 16h16v2.5a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1V17H7v1.5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1Z"/><circle cx="7.5" cy="16" r="1.3" fill="currentColor" stroke="none"/><circle cx="16.5" cy="16" r="1.3" fill="currentColor" stroke="none"/>',
+    tag: '<path d="M11.5 3.5H5A1.5 1.5 0 0 0 3.5 5v6.5a1.5 1.5 0 0 0 .44 1.06l9 9a1.5 1.5 0 0 0 2.12 0l6.5-6.5a1.5 1.5 0 0 0 0-2.12l-9-9a1.5 1.5 0 0 0-1.06-.44Z"/><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none"/>',
+    target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.75"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>',
+    user: '<circle cx="12" cy="8.5" r="3.75"/><path d="M4.5 20c0-3.9 3.36-6.5 7.5-6.5s7.5 2.6 7.5 6.5"/>',
+    trend: '<path d="M4 16.5 9.5 11l4 4 6.5-7"/><path d="M15.5 8h4.5v4.5"/>',
+    search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.8-4.8"/>',
+    lock: '<rect x="5" y="10.5" width="14" height="9.5" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/><circle cx="12" cy="15" r="1.4" fill="currentColor" stroke="none"/>',
+    eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>',
+    "eye-off": '<path d="M3 3l18 18"/><path d="M10.6 5.7A9.9 9.9 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a15.6 15.6 0 0 1-3.4 4.2M6.6 6.6C4 8.3 2.5 12 2.5 12S6 18.5 12 18.5a9.6 9.6 0 0 0 3.4-.6"/><path d="M9.9 10a3 3 0 0 0 4.2 4.2"/>'
   };
   return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">${paths[name] || paths.menu}</svg>`;
 }
@@ -833,76 +962,187 @@ function renderConnectionBanner() {
   return `
     <div class="connection-banner" role="status">
       <span class="connection-dot" aria-hidden="true"></span>
-      <div><strong>Sin conexion</strong><span>Tus datos locales siguen disponibles.</span></div>
+      <div><strong>Sin conexión</strong><span>Tus datos locales siguen disponibles.</span></div>
     </div>
   `;
 }
 
+function cloudStillResolving() {
+  return cloudState.configured && (cloudState.status === "checking" || cloudState.status === "syncing");
+}
+
 function shouldShowSessionCheck() {
-  return !cloudState.sessionReady;
+  if (!cloudState.sessionReady) {
+    return true;
+  }
+  return !state.profile.completed && cloudStillResolving();
 }
 
 function shouldShowAuthGate() {
   return cloudState.sessionReady && !cloudState.signedIn;
 }
 
+function profileNeedsOnboarding() {
+  return !state.profile.completed && !cloudStillResolving();
+}
+
 function renderSessionCheck() {
   return `
     <main class="session-check" aria-busy="true" aria-live="polite">
       <section class="startup-fallback-card">
-        <h1>Comprobando tu sesion</h1>
-        <p>Estamos verificando automaticamente si ya tienes una sesion iniciada. Si la red tarda, puedes entrar al acceso y la nube seguira intentando despues.</p>
-        <button class="btn secondary" type="button" data-action="recover-auth">Continuar al acceso</button>
+        <h1>Comprobando tu sesión</h1>
+        <p>Estamos verificando automáticamente si ya tienes una sesión iniciada. Si la red tarda, puedes entrar al acceso y la nube seguirá intentando después.</p>
+        ${sessionCheckManualReady ? `<button class="btn secondary" type="button" data-action="recover-auth">Continuar al acceso</button>` : ""}
       </section>
     </main>
+  `;
+}
+
+function renderAuthNoticeCard(notice) {
+  const exists = notice.kind === "exists";
+  const resetSent = notice.kind === "reset-sent";
+  const icon = exists ? "user" : resetSent ? "lock" : "income";
+  const heading = exists ? "Ese correo ya tiene cuenta" : resetSent ? "Revisa tu correo" : "Revisa tu correo";
+  return `
+    <article class="auth-card auth-notice-card ${exists ? "is-exists" : "is-sent"}">
+      <span class="auth-notice-icon" aria-hidden="true">${renderIcon(icon)}</span>
+      <div class="auth-notice-copy">
+        <h2>${heading}</h2>
+        <p>
+          ${
+            exists
+              ? `Ya existe una cuenta registrada con <strong>${escapeHtml(notice.email)}</strong>. Inicia sesión con tu contraseña en vez de crear otra.`
+              : resetSent
+                ? `Enviamos un enlace a <strong>${escapeHtml(notice.email)}</strong> para elegir una contraseña nueva. Abrelo desde ese correo y después inicia sesión aquí con la contraseña nueva.`
+                : `Enviamos un enlace de confirmación a <strong>${escapeHtml(notice.email)}</strong>. Abrelo para activar tu cuenta y después inicia sesión.`
+          }
+        </p>
+      </div>
+      <div class="auth-notice-actions">
+        <button class="btn primary" type="button" data-action="show-auth-form" data-auth-mode="signin">Iniciar sesión</button>
+        <button class="btn ghost" type="button" data-action="back-auth-options">Volver</button>
+      </div>
+    </article>
   `;
 }
 
 function renderAuthGate() {
   const submittingAccess = cloudState.status === "syncing" && !cloudState.sessionReady;
   const unavailable = !cloudState.configured || !cloudState.libraryLoaded;
-  const selectedAuthMode = ["signin", "signup"].includes(authMode) ? authMode : "";
-  const signInForm = `
-    <article class="auth-card">
-      <button class="auth-back" type="button" data-action="back-auth-options">Volver</button>
-      <div>
-        <p class="eyebrow">Ya tengo cuenta</p>
-        <h2>Iniciar sesion</h2>
-      </div>
-      <form class="stacked-form auth-form" id="cloud-signin-form" data-cloud-auth-form data-cloud-mode="signin">
-        <label>
-          Correo
-          <input name="email" type="email" autocomplete="email" placeholder="tu@email.com" required>
-        </label>
-        <label>
-          Contrasena
-          <input name="password" type="password" autocomplete="current-password" minlength="6" placeholder="Tu contrasena" required>
-        </label>
-        <button class="btn primary" type="submit" data-cloud-mode="signin" ${submittingAccess ? "disabled" : ""}>Iniciar sesion</button>
-      </form>
-    </article>
-  `;
-  const signUpForm = `
-    <article class="auth-card">
-      <button class="auth-back" type="button" data-action="back-auth-options">Volver</button>
-      <div>
-        <p class="eyebrow">Primera vez</p>
-        <h2>Crear cuenta</h2>
-      </div>
-      <p class="auth-form-note">Despues de registrarte configuras tu presupuesto y tus campos habituales.</p>
-      <form class="stacked-form auth-form" id="cloud-signup-form" data-cloud-auth-form data-cloud-mode="signup">
-        <label>
-          Correo
-          <input name="email" type="email" autocomplete="email" placeholder="tu@email.com" required>
-        </label>
-        <label>
-          Contrasena
-          <input name="password" type="password" autocomplete="new-password" minlength="6" placeholder="Minimo 6 caracteres" required>
-        </label>
-        <button class="btn secondary" type="submit" data-cloud-mode="signup" ${submittingAccess ? "disabled" : ""}>Registrarse</button>
-      </form>
-    </article>
-  `;
+  const selectedAuthMode = ["signin", "signup", "forgot"].includes(authMode) ? authMode : "";
+  const emailValue = escapeAttr(authEmailDraft);
+  const inlineError = cloudState.error
+    ? `<p class="auth-inline-error" role="alert"><span class="auth-inline-error-icon" aria-hidden="true">!</span>${escapeHtml(cloudState.error)}</p>`
+    : "";
+  if (unavailable) {
+    return `
+      <main class="auth-gate auth-gate-focused">
+        <section class="auth-screen">
+          <div class="auth-screen-copy">
+            <h1>Acceso no disponible</h1>
+            <p class="auth-screen-lead">La autenticación no está disponible. Revisa la configuración de Supabase y vuelve a cargar la aplicación.</p>
+          </div>
+        </section>
+      </main>
+    `;
+  }
+
+  if (authNotice) {
+    return `
+      <main class="auth-gate auth-gate-focused">
+        <section class="auth-screen">
+          ${renderAuthNoticeCard(authNotice)}
+        </section>
+      </main>
+    `;
+  }
+
+  if (selectedAuthMode === "forgot") {
+    return `
+      <main class="auth-gate auth-gate-focused">
+        <section class="auth-screen" aria-labelledby="auth-screen-title">
+          <header class="auth-screen-head">
+            <button class="auth-screen-back" type="button" data-action="show-auth-form" data-auth-mode="signin" aria-label="Volver">&#8592;</button>
+            <span class="auth-screen-brand" aria-hidden="true">${renderBrandMark()}</span>
+          </header>
+          <div class="auth-screen-copy">
+            <p class="eyebrow">Recuperar acceso</p>
+            <h1 id="auth-screen-title">¿Olvidaste tu contraseña?</h1>
+            <p class="auth-screen-lead">Escribe el correo con el que te registraste y te enviamos un enlace para elegir una contraseña nueva.</p>
+          </div>
+          ${inlineError}
+          <form class="stacked-form auth-form" id="cloud-forgot-form" data-cloud-forgot-form>
+            <label>
+              Correo
+              <input name="email" type="email" autocomplete="email" placeholder="tu@email.com" value="${emailValue}" required>
+            </label>
+            <button class="btn primary" type="submit" ${submittingAccess ? "disabled" : ""}>
+              Enviar enlace
+            </button>
+          </form>
+          <p class="auth-switch">
+            <button class="auth-switch-link" type="button" data-action="show-auth-form" data-auth-mode="signin">
+              Volver a iniciar sesión
+            </button>
+          </p>
+        </section>
+      </main>
+    `;
+  }
+
+  // Each mode is its own full screen, not a form that unfolds inside the landing.
+  if (selectedAuthMode) {
+    const isSignIn = selectedAuthMode === "signin";
+    return `
+      <main class="auth-gate auth-gate-focused">
+        <section class="auth-screen" aria-labelledby="auth-screen-title">
+          <header class="auth-screen-head">
+            <button class="auth-screen-back" type="button" data-action="back-auth-options" aria-label="Volver">&#8592;</button>
+            <span class="auth-screen-brand" aria-hidden="true">${renderBrandMark()}</span>
+          </header>
+          <div class="auth-screen-copy">
+            <p class="eyebrow">${isSignIn ? "Ya tengo cuenta" : "Primera vez"}</p>
+            <h1 id="auth-screen-title">${isSignIn ? "Iniciar sesión" : "Crear cuenta"}</h1>
+            <p class="auth-screen-lead">
+              ${
+                isSignIn
+                  ? "Entra con el correo y la contraseña que registraste."
+                  : "Después de registrarte configuras tu presupuesto y tus campos habituales."
+              }
+            </p>
+          </div>
+          ${inlineError}
+          <form class="stacked-form auth-form" id="cloud-${isSignIn ? "signin" : "signup"}-form" data-cloud-auth-form data-cloud-mode="${isSignIn ? "signin" : "signup"}">
+            <label>
+              Correo
+              <input name="email" type="email" autocomplete="email" placeholder="tu@email.com" value="${emailValue}" required>
+            </label>
+            <label>
+              Contraseña
+              <div class="password-field">
+                <input name="password" type="password" autocomplete="${isSignIn ? "current-password" : "new-password"}" minlength="6" placeholder="${isSignIn ? "Tu contraseña" : "Mínimo 6 caracteres"}" required data-password-input>
+                <button type="button" class="password-toggle" data-password-toggle aria-label="Mostrar contraseña" aria-pressed="false">${renderIcon("eye")}</button>
+              </div>
+            </label>
+            ${
+              isSignIn
+                ? `<button class="auth-forgot-link" type="button" data-action="show-auth-form" data-auth-mode="forgot">¿Olvidaste tu contraseña?</button>`
+                : ""
+            }
+            <button class="btn ${isSignIn ? "primary" : "secondary"}" type="submit" data-cloud-mode="${isSignIn ? "signin" : "signup"}" ${submittingAccess ? "disabled" : ""}>
+              ${isSignIn ? "Iniciar sesión" : "Registrarse"}
+            </button>
+          </form>
+          <p class="auth-switch">
+            ${isSignIn ? "No tienes cuenta?" : "Ya tienes cuenta?"}
+            <button class="auth-switch-link" type="button" data-action="show-auth-form" data-auth-mode="${isSignIn ? "signup" : "signin"}">
+              ${isSignIn ? "Registrate" : "Inicia sesión"}
+            </button>
+          </p>
+        </section>
+      </main>
+    `;
+  }
 
   return `
     <main class="auth-gate">
@@ -916,50 +1156,56 @@ function renderAuthGate() {
             </div>
           </div>
           <p class="auth-lead">
-            Una app para registrar gastos, ver cuanto dinero queda libre y separar categorias del periodo sin convertir cada compra en culpa.
+            Una app para registrar gastos, ver cuanto dinero queda libre y separar categorías del periodo sin convertir cada compra en culpa.
           </p>
           <div class="auth-benefits" aria-label="Para que sirve la app">
             <article>
               <strong>Dinero libre visible</strong>
-              <span>El inicio muestra lo disponible despues de reservas, categorias y gastos reales.</span>
+              <span>El inicio muestra lo disponible después de reservas, categorías y gastos reales.</span>
             </article>
             <article>
-              <strong>Plan por categorias</strong>
-              <span>Define limites para gasolina, salidas, universidad o cualquier campo que quieras cuidar.</span>
+              <strong>Plan por categorías</strong>
+              <span>Define límites para gasolina, salidas, universidad o cualquier campo que quieras cuidar.</span>
             </article>
             <article>
-              <strong>Sincronizacion segura</strong>
-              <span>Tu cuenta guarda una copia en la nube y conserva una copia local para el dia a dia.</span>
+              <strong>Sincronización segura</strong>
+              <span>Tu cuenta guarda una copia en la nube y conserva una copia local para el día a día.</span>
             </article>
           </div>
         </div>
 
-        <div class="auth-actions" aria-label="Acceso a la aplicacion">
-          ${
-            unavailable
-              ? `<article class="auth-card">
-                  <h2>Acceso no disponible</h2>
-                  <p>La autenticacion no esta disponible. Revisa la configuracion de Supabase y vuelve a cargar la aplicacion.</p>
-                </article>`
-              : selectedAuthMode === "signin"
-                ? signInForm
-                : selectedAuthMode === "signup"
-                  ? signUpForm
-                  : `<article class="auth-card auth-choice-card">
-                      <div>
-                        <p class="eyebrow">Acceso</p>
-                        <h2>Elige como entrar</h2>
-                      </div>
-                      <div class="auth-choice-actions">
-                        <button class="btn primary" type="button" data-action="show-auth-form" data-auth-mode="signin">Iniciar sesion</button>
-                        <button class="btn secondary" type="button" data-action="show-auth-form" data-auth-mode="signup">Registrarse</button>
-                      </div>
-                    </article>`
-          }
-          ${cloudState.error ? `<p class="form-error auth-error" role="alert">${escapeHtml(cloudState.error)}</p>` : ""}
+        <div class="auth-actions" aria-label="Acceso a la aplicación">
+          <article class="auth-card auth-choice-card">
+            <div>
+              <p class="eyebrow">Acceso</p>
+              <h2>Elige como entrar</h2>
+            </div>
+            ${inlineError}
+            <div class="auth-choice-actions">
+              <button class="btn primary" type="button" data-action="show-auth-form" data-auth-mode="signin">Iniciar sesión</button>
+              <button class="btn secondary" type="button" data-action="show-auth-form" data-auth-mode="signup">Registrarse</button>
+            </div>
+          </article>
         </div>
       </section>
     </main>
+  `;
+}
+
+function renderIncomeAppliedBanner() {
+  const status = state.periodIncomeStatus;
+  if (!status?.applied || status.bannerDismissed) {
+    return "";
+  }
+  return `
+    <div class="income-applied-banner" role="status">
+      <p>Se sumó automáticamente tu ingreso periódico de <strong>${formatMoney(status.amount)}</strong> a tu saldo real (cuenta).</p>
+      <p class="income-applied-banner-note">Si aún no te ha llegado, deshazlo aquí o corrige el saldo en Datos &gt; Saldos.</p>
+      <div class="income-applied-banner-actions">
+        <button class="btn ghost" type="button" data-action="undo-income-application">Aún no me pagan, deshacer</button>
+        <button class="btn primary" type="button" data-action="dismiss-income-banner">Entendido</button>
+      </div>
+    </div>
   `;
 }
 
@@ -971,8 +1217,17 @@ function renderHeader(plan) {
     summary.extraIncome > 0
       ? `<span class="money-split">Total incluye extra: ${periodExtraSourceLabel(summary)}. Base ${formatMoney(summary.baseIncome)} · Total ${formatMoney(summary.income)}</span>`
       : "";
+  // Once "libre" is computed from the real balance (finance-core.js), showing
+  // "Saldo extra sin usar" again here would just repeat the exact same number under a
+  // different label.
+  const showUnclaimedLiquidity = !summary.usesLiquidityBasedFree && summary.unclaimedLiquidity > 0;
+  // Before payday, fixed-income users (who already have a real balance on file) don't
+  // have this period's money yet: show the expected amount as informational only,
+  // never counted inside "libre".
+  const showPendingIncome = summary.usesLiquidityBasedFree && !summary.incomeApplied && summary.freeBudget > 0;
 
   return `
+    ${renderIncomeAppliedBanner()}
     <header class="money-bar ${summary.overReserved ? "danger" : ""}" role="status" aria-label="Dinero libre sin asignar">
       <div class="money-context"><span>Tu dinero libre</span><span>${period}</span></div>
       <strong>${formatMoney(summary.freeRemaining)}</strong>
@@ -982,12 +1237,33 @@ function renderHeader(plan) {
           ? `<span class="money-split danger-text">Exceso sobre topes: ${formatMoney(summary.categoryOverspent)}</span>`
           : ""
       }
-      <div class="money-location-chips">
-        <div><span>Cuenta</span><strong>${formatMoney(liquidity.account)}</strong></div>
-        <div><span>Efectivo</span><strong>${formatMoney(liquidity.cash)}</strong></div>
-        <div><span>Total real</span><strong>${formatMoney(liquidity.total)}</strong></div>
+      <div class="money-location-list">
+        <div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("account")}</span><span class="money-location-text"><span>Cuenta</span><strong>${formatMoney(liquidity.account)}</strong></span></div>
+        <div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("cash")}</span><span class="money-location-text"><span>Efectivo</span><strong>${formatMoney(liquidity.cash)}</strong></span></div>
+        <div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("calculator")}</span><span class="money-location-text"><span>Total real</span><strong>${formatMoney(liquidity.total)}</strong></span></div>
+        ${
+          showUnclaimedLiquidity
+            ? `<div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("calculator")}</span><span class="money-location-text"><span>Saldo extra sin usar</span><strong>${formatMoney(summary.unclaimedLiquidity)}</strong></span></div>`
+            : ""
+        }
+        ${
+          showPendingIncome
+            ? `<div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("calculator")}</span><span class="money-location-text"><span>Por recibir (aún no cuenta como libre)</span><strong>${formatMoney(summary.freeBudget)}</strong></span></div>`
+            : ""
+        }
       </div>
-      <p class="money-help">Libre ya descuenta las reservas. Solo baja por gastos sin categoria o por exceder un limite. Total real muestra cuenta + efectivo.</p>
+      <details class="money-help-toggle">
+        <summary>Por que libre no es igual a total real</summary>
+        <p class="money-help">${
+          summary.usesLiquidityBasedFree
+            ? `Como tienes un ingreso fijo programado, libre es tu saldo real (cuenta + efectivo) menos lo reservado en categorías — nunca incluye dinero que aún no te ha llegado. El día que te pagan, ese ingreso se suma automáticamente a tu saldo real, y "libre" sube en ese momento, no antes. Total real es cuenta + efectivo ahora mismo, incluyendo lo reservado en categorías.`
+            : `Libre es tu cupo de este periodo menos lo ya gastado sin categoria. Total real es cuenta + efectivo ahora mismo, incluyendo lo que si esta reservado en categorias y cualquier saldo extra que aun no has clasificado.${
+                summary.unclaimedLiquidity > 0
+                  ? ` "Saldo extra sin usar" (${formatMoney(summary.unclaimedLiquidity)}) es dinero real que ya tienes y que ninguna categoria reclama todavia. Si ya sabes que es parte de tu ingreso de este periodo, regístralo como ingreso para que se sume a libre.`
+                  : ""
+              }`
+        }</p>
+      </details>
     </header>
   `;
 }
@@ -1003,7 +1279,7 @@ function periodExtraSourceLabel(summary = budgetSummary()) {
     .map((extra) => `${escapeHtml(extra.source)} ${formatMoney(extra.amount)}`)
     .join(" · ");
   const hiddenCount = extras.length - 2;
-  return hiddenCount > 0 ? `${labels} · +${hiddenCount} mas` : labels;
+  return hiddenCount > 0 ? `${labels} · +${hiddenCount} más` : labels;
 }
 
 function menuAlertText() {
@@ -1020,6 +1296,7 @@ function renderView(plan) {
     calendar: renderCalendar,
     spending: renderSpending,
     movements: renderMovements,
+    progress: renderProgressView,
     profile: renderProfile
   };
   return views[state.activeView](plan);
@@ -1032,12 +1309,17 @@ function renderToday(plan) {
     <section class="home-view" aria-label="Resumen del periodo">
       ${renderPeriodPredictionCard(homeSummary)}
       ${renderCooldownPanel()}
+      <button class="setaside-action" type="button" data-action="open-setaside-sheet">
+        <span class="setaside-action-icon" aria-hidden="true">$</span>
+        <span><strong>Apartar dinero</strong><small>Guarda plata para algo, sin gastarla todavía</small></span>
+        <b aria-hidden="true">&rsaquo;</b>
+      </button>
       <div class="home-section-heading">
         <div>
-          <p class="eyebrow">Categorias del periodo</p>
+          <p class="eyebrow">Categorías del periodo</p>
           <h2>Lo que vas usando</h2>
         </div>
-        <button class="home-plan-link" type="button" data-view="budget">Editar limites</button>
+        <button class="home-plan-link" type="button" data-view="budget">Editar límites</button>
       </div>
       ${renderCategoryBars(plan, visibleCategoryCount)}
       ${
@@ -1045,9 +1327,9 @@ function renderToday(plan) {
           ? ""
           : `<div class="empty-state home-empty actionable-empty">
               <span class="empty-icon" aria-hidden="true">+</span>
-              <strong>Tu plan aun no tiene categorias</strong>
-              <span>Separa dinero para comida, transporte o cualquier proposito habitual.</span>
-              <button class="btn primary" type="button" data-action="open-category-sheet">Crear primera categoria</button>
+              <strong>Tu plan aun no tiene categorías</strong>
+              <span>Aparta dinero para comida, transporte o cualquier propósito.</span>
+              <button class="btn primary" type="button" data-action="open-setaside-sheet">Apartar dinero</button>
             </div>`
       }
       <div class="home-period-note">Presupuesto ${formatMoney(homeSummary.income)} · ${Math.round((homeSummary.freeRemaining / Math.max(1, homeSummary.income)) * 100)}% sigue libre</div>
@@ -1062,12 +1344,12 @@ function renderPeriodPredictionCard(summary = budgetSummary()) {
   const endDate = formatShortDate(previousDay(summary.window.end));
   const amount = predictionDisplayAmount(prediction);
   return `
-    <article class="prediction-card ${prediction.status}" aria-label="Prediccion hasta el proximo periodo">
+    <article class="prediction-card ${prediction.status}" aria-label="Predicción hasta el próximo periodo">
       <div>
-        <p class="eyebrow">Prediccion hasta el proximo periodo</p>
+        <p class="eyebrow">Predicción hasta el próximo periodo</p>
         <h2>${predictionHeadline(prediction)}</h2>
         <span>${predictionCopy(prediction, endDate)}</span>
-        <button class="text-link prediction-detail-link" type="button" data-action="open-prediction-details">Como se calculo</button>
+        <button class="text-link prediction-detail-link" type="button" data-action="open-prediction-details">Cómo se calculó</button>
       </div>
       <div class="prediction-number">
         <span>${predictionAmountLabel(prediction)}</span>
@@ -1109,8 +1391,8 @@ function renderPredictionDetailsModal() {
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
           <div>
-            <p class="eyebrow">Prediccion hasta el proximo periodo</p>
-            <h2 id="prediction-detail-title">Como se calculo</h2>
+            <p class="eyebrow">Predicción hasta el próximo periodo</p>
+            <h2 id="prediction-detail-title">Cómo se calculó</h2>
           </div>
           <button class="icon-btn muted" type="button" data-action="close-prediction-details" aria-label="Cerrar">x</button>
         </div>
@@ -1128,7 +1410,7 @@ function renderPredictionDetailsModal() {
             <strong>${formatMoney(Math.round(prediction.dailyRate))} diarios</strong>
           </div>
           <div>
-            <span>Dias restantes</span>
+            <span>Días restantes</span>
             <strong>${prediction.remainingDays}</strong>
           </div>
         </div>
@@ -1139,8 +1421,13 @@ function renderPredictionDetailsModal() {
           <p><strong>gasto_libre_real</strong> = gastos_sin_categoria + excesos_de_categorias</p>
           <code>${formatMoney(prediction.freeSpent)} + ${formatMoney(prediction.categoryOverspent)} = ${formatMoney(prediction.actualFreeImpactSpent)}</code>
           ${prediction.ignoredOneOffSpent > 0 ? `<p><strong>gasto_unico</strong> = ${formatMoney(prediction.ignoredOneOffSpent)}. Baja el libre hoy, pero no se usa para ritmo diario.</p>` : ""}
-          <p><strong>libre_hoy</strong> = dinero_libre_inicial - gasto_libre_real</p>
-          <code>${formatMoney(prediction.freeBudget)} - ${formatMoney(prediction.actualFreeImpactSpent)} = ${formatMoney(prediction.freeToday)}</code>
+          ${
+            prediction.usesLiquidityBasedFree
+              ? `<p><strong>libre_hoy</strong> = saldo_real_en_cuenta_y_efectivo - reservado_en_categorias${prediction.incomeApplied ? " (ya te pagaron este periodo)" : " (aun no te pagan este periodo: el cupo no cuenta todavia)"}</p>
+                 <code>${formatMoney(prediction.liquidityTotal)} - ${formatMoney(prediction.reservedRemaining)} = ${formatMoney(prediction.freeToday)}</code>`
+              : `<p><strong>libre_hoy</strong> = dinero_libre_inicial - gasto_libre_real</p>
+                 <code>${formatMoney(prediction.freeBudget)} - ${formatMoney(prediction.actualFreeImpactSpent)} = ${formatMoney(prediction.freeToday)}</code>`
+          }
           <p><strong>ritmo_diario</strong> = ${prediction.ignoredOneOffSpent > 0 ? "gasto_libre_real_sin_unicos" : "gasto_libre_real"} / dias_observados</p>
           <code>${formatMoney(prediction.observedFreeSpent)} / ${prediction.observedDays} = ${formatMoney(Math.round(prediction.observedDailyRate))} diarios</code>
           <p><strong>gasto_estimado_restante</strong> = ritmo_diario * dias_hasta_proximo_pago</p>
@@ -1159,21 +1446,21 @@ function predictionOutcomeText(prediction) {
     return `Si sigues a este ritmo, podrian faltar ${formatMoney(prediction.shortage)}.`;
   }
   if (prediction.status === "healthy" || prediction.status === "tight") {
-    return `Si sigues a este ritmo, llegarias con ${formatMoney(Math.max(0, prediction.projectedEndFree))}.`;
+    return `Si sigues a este ritmo, llegarías con ${formatMoney(Math.max(0, prediction.projectedEndFree))}.`;
   }
   if (prediction.status === "learning") {
-    return "Aun no proyecto el resultado final porque faltan dias observados.";
+    return "Aun no proyecto el resultado final porque faltan días observados.";
   }
   if (prediction.status === "over_reserved") {
-    return `Hay ${formatMoney(prediction.overReserved)} mas reservado que presupuesto.`;
+    return `Hay ${formatMoney(prediction.overReserved)} más reservado que presupuesto.`;
   }
   return "Aun no hay gasto libre para calcular un ritmo.";
 }
 
 function predictionPaceText(prediction) {
-  const ignored = prediction.ignoredOneOffSpent > 0 ? ` Gasto unico ignorado para ritmo: ${formatMoney(prediction.ignoredOneOffSpent)}.` : "";
+  const ignored = prediction.ignoredOneOffSpent > 0 ? ` Gasto único ignorado para ritmo: ${formatMoney(prediction.ignoredOneOffSpent)}.` : "";
   if (prediction.remainingDays <= 0) {
-    return "El periodo termina hoy; no hay dias futuros que proyectar.";
+    return "El periodo termina hoy; no hay días futuros que proyectar.";
   }
   if (prediction.status === "empty") {
     return `Gasto libre que cuenta para ritmo: ${formatMoney(0)}.${ignored}`;
@@ -1186,7 +1473,7 @@ function predictionPaceText(prediction) {
 
 function predictionHeadline(prediction) {
   if (prediction.status === "over_reserved") {
-    return "Tu plan esta sobreasignado";
+    return "Tu plan está sobreasignado";
   }
   if (prediction.status === "empty") {
     return "Aun no hay gasto libre que proyectar";
@@ -1195,12 +1482,12 @@ function predictionHeadline(prediction) {
     return "Aun no hay tendencia suficiente";
   }
   if (prediction.status === "risk") {
-    return "Si sigues asi, no alcanza";
+    return "Si sigues así, no alcanza";
   }
   if (prediction.status === "tight") {
     return "Llegas con poco margen";
   }
-  return "Vas bien para el proximo pago";
+  return "Vas bien para el próximo pago";
 }
 
 function predictionCopy(prediction, endDate) {
@@ -1208,10 +1495,10 @@ function predictionCopy(prediction, endDate) {
     return "El periodo termina hoy. Guarda el resultado real antes de ajustar el siguiente plan.";
   }
   if (prediction.status === "empty") {
-    return `Quedan ${formatDays(prediction.remainingDays)} hasta ${endDate}. Cuando haya gasto libre real, la app empezara a observar el ritmo.`;
+    return `Quedan ${formatDays(prediction.remainingDays)} hasta ${endDate}. Cuando haya gasto libre real, la app empezará a observar el ritmo.`;
   }
   if (prediction.status === "learning") {
-    return `Quedan ${formatDays(prediction.remainingDays)} hasta ${endDate}. Hay datos, pero todavia no los extrapolo para evitar falsas alarmas.`;
+    return `Quedan ${formatDays(prediction.remainingDays)} hasta ${endDate}. Hay datos, pero todavía no los extrapolo para evitar falsas alarmas.`;
   }
   if (prediction.status === "risk") {
     if (prediction.freeToday < 0 && prediction.dailyRate === 0) {
@@ -1219,7 +1506,7 @@ function predictionCopy(prediction, endDate) {
     }
     return `Quedan ${formatDays(prediction.remainingDays)} hasta ${endDate}. Si el ritmo se mantiene, podrian faltar ${formatMoney(prediction.shortage)}.`;
   }
-  return `Quedan ${formatDays(prediction.remainingDays)} hasta ${endDate}. Si el ritmo se mantiene, llegarias con ${formatMoney(Math.max(0, prediction.projectedEndFree))}.`;
+  return `Quedan ${formatDays(prediction.remainingDays)} hasta ${endDate}. Si el ritmo se mantiene, llegarías con ${formatMoney(Math.max(0, prediction.projectedEndFree))}.`;
 }
 
 function predictionAmountLabel(prediction) {
@@ -1230,7 +1517,7 @@ function predictionAmountLabel(prediction) {
     return "Podrian faltar";
   }
   if (prediction.status === "healthy" || prediction.status === "tight") {
-    return "Llegarias con";
+    return "Llegarías con";
   }
   return "Libre hoy";
 }
@@ -1262,7 +1549,107 @@ function predictionStatusLabel(status) {
 
 function formatDays(days) {
   const count = Math.max(0, Math.round(Number(days || 0)));
-  return `${count} ${count === 1 ? "dia" : "dias"}`;
+  return `${count} ${count === 1 ? "día" : "días"}`;
+}
+
+function polarPoint(cx, cy, r, angleDeg) {
+  const rad = ((angleDeg - 90) * Math.PI) / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+
+function donutSegmentPath(cx, cy, rOuter, rInner, startDeg, endDeg) {
+  const largeArc = endDeg - startDeg > 180 ? 1 : 0;
+  const p0 = polarPoint(cx, cy, rOuter, startDeg);
+  const p1 = polarPoint(cx, cy, rOuter, endDeg);
+  const p2 = polarPoint(cx, cy, rInner, endDeg);
+  const p3 = polarPoint(cx, cy, rInner, startDeg);
+  return [
+    `M ${p0.x} ${p0.y}`,
+    `A ${rOuter} ${rOuter} 0 ${largeArc} 1 ${p1.x} ${p1.y}`,
+    `L ${p2.x} ${p2.y}`,
+    `A ${rInner} ${rInner} 0 ${largeArc} 0 ${p3.x} ${p3.y}`,
+    "Z"
+  ].join(" ");
+}
+
+function animateBudgetRingCharts() {
+  const arcs = document.querySelectorAll(".budget-ring-arc");
+  if (!arcs.length) {
+    return;
+  }
+  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const items = Array.from(arcs).map((arc) => ({
+    arc,
+    cx: Number(arc.dataset.cx),
+    cy: Number(arc.dataset.cy),
+    rOuter: Number(arc.dataset.router),
+    rInner: Number(arc.dataset.rinner),
+    start: Number(arc.dataset.start),
+    end: Number(arc.dataset.end)
+  }));
+  if (reduceMotion) {
+    items.forEach(({ arc, cx, cy, rOuter, rInner, start, end }) => {
+      arc.setAttribute("d", donutSegmentPath(cx, cy, rOuter, rInner, start, end));
+    });
+    return;
+  }
+  const duration = 700;
+  const start = performance.now();
+  const ease = (t) => 1 - Math.pow(1 - t, 3);
+  function step(now) {
+    const progress = Math.min(1, (now - start) / duration);
+    const eased = ease(progress);
+    items.forEach(({ arc, cx, cy, rOuter, rInner, start: startDeg, end: endDeg }) => {
+      const currentEnd = startDeg + (endDeg - startDeg) * eased;
+      arc.setAttribute("d", donutSegmentPath(cx, cy, rOuter, rInner, startDeg, currentEnd));
+    });
+    if (progress < 1) {
+      requestAnimationFrame(step);
+    }
+  }
+  requestAnimationFrame(step);
+}
+
+function renderBudgetRingChart(segments, totalText, freeText) {
+  const cx = 160;
+  const cy = 112;
+  const rOuter = 72;
+  const rInner = 54;
+  const lineStart = 76;
+  const lineElbow = 98;
+  const labelGap = 4;
+
+  let cursor = 0;
+  const parts = segments
+    .filter((segment) => segment.ratio > 0.05)
+    .map((segment) => {
+      const startDeg = (cursor / 100) * 360;
+      cursor += segment.ratio;
+      const endDeg = (cursor / 100) * 360;
+      const midDeg = (startDeg + endDeg) / 2;
+      const arcPath = donutSegmentPath(cx, cy, rOuter, rInner, startDeg, startDeg);
+      const lineFrom = polarPoint(cx, cy, lineStart, midDeg);
+      const lineTo = polarPoint(cx, cy, lineElbow, midDeg);
+      const onRight = lineTo.x >= cx;
+      const labelX = lineTo.x + (onRight ? labelGap : -labelGap);
+      const anchor = onRight ? "start" : "end";
+      return `
+        <path class="budget-ring-arc" d="${arcPath}" fill="${segment.color}" data-cx="${cx}" data-cy="${cy}" data-router="${rOuter}" data-rinner="${rInner}" data-start="${startDeg.toFixed(3)}" data-end="${endDeg.toFixed(3)}"></path>
+        <line class="budget-ring-line" x1="${lineFrom.x.toFixed(1)}" y1="${lineFrom.y.toFixed(1)}" x2="${lineTo.x.toFixed(1)}" y2="${lineTo.y.toFixed(1)}" stroke="${segment.color}"></line>
+        <text class="budget-ring-label-name" x="${labelX.toFixed(1)}" y="${(lineTo.y - 4).toFixed(1)}" text-anchor="${anchor}" fill="${segment.color}">${escapeHtml(segment.label)}</text>
+        <text class="budget-ring-label-amount" x="${labelX.toFixed(1)}" y="${(lineTo.y + 11).toFixed(1)}" text-anchor="${anchor}">${escapeHtml(segment.amountLabel)}</text>
+      `;
+    })
+    .join("");
+
+  return `
+    <svg class="budget-ring-svg" viewBox="0 0 320 224" role="img" aria-label="Distribución del presupuesto: ${segments.map((s) => `${s.label} ${Math.round(s.ratio)} por ciento`).join(", ")}">
+      ${parts}
+      <text class="budget-ring-center-eyebrow" x="${cx}" y="${cy - 22}" text-anchor="middle">Total</text>
+      <text class="budget-ring-center-amount" x="${cx}" y="${cy + 4}" text-anchor="middle">${escapeHtml(totalText)}</text>
+      <text class="budget-ring-center-free" x="${cx}" y="${cy + 26}" text-anchor="middle">${escapeHtml(freeText)}</text>
+    </svg>
+  `;
 }
 
 function renderBudget(plan) {
@@ -1285,20 +1672,15 @@ function renderBudget(plan) {
       </div>
 
       <article class="plan-distribution">
-        <div class="distribution-labels">
-          <span><i class="dist-reserved"></i>Reservado <strong>${formatCompactMoney(ring.reserved)}</strong></span>
-          <span><i class="dist-spent"></i>Gastado <strong>${formatCompactMoney(ring.spent)}</strong></span>
-          <span><i class="dist-free"></i>Libre <strong>${formatCompactMoney(ring.free)}</strong></span>
-        </div>
-        <div class="distribution-bar" aria-label="Distribucion del presupuesto">
-          <span class="dist-reserved" style="width:${reservedRatio}%"></span>
-          <span class="dist-spent" style="width:${spentRatio}%"></span>
-          <span class="dist-free" style="width:${freeRatio}%"></span>
-        </div>
-        <div class="distribution-foot">
-          <span>Presupuesto total: ${formatMoney(summary.income)}</span>
-          <strong>${Math.round(freeRatio)}% libre</strong>
-        </div>
+        ${renderBudgetRingChart(
+          [
+            { key: "reserved", label: "Reservado", ratio: reservedRatio, amountLabel: formatCompactMoney(ring.reserved), color: "var(--ds-plum, #6b5a8d)" },
+            { key: "spent", label: "Gastado", ratio: spentRatio, amountLabel: formatCompactMoney(ring.spent), color: "var(--ds-amber)" },
+            { key: "free", label: "Libre", ratio: freeRatio, amountLabel: formatCompactMoney(ring.free), color: "#69d5b5" }
+          ],
+          formatMoney(summary.income),
+          `${Math.round(freeRatio)}% libre`
+        )}
         ${ring.outside > 0 ? `<p class="inline-warning">Gastos fuera del presupuesto: ${formatMoney(ring.outside)}.</p>` : ""}
       </article>
 
@@ -1319,7 +1701,7 @@ function renderBudget(plan) {
       </div>
 
       <div class="section-heading">
-        <h2>Categorias <span>(${state.budgetJobs.length} de 10)</span></h2>
+        <h2>Categorías <span>(${state.budgetJobs.length} de 10)</span></h2>
         <span>${formatMoney(summary.freeBudget)} reservables</span>
       </div>
 
@@ -1329,15 +1711,20 @@ function renderBudget(plan) {
             ? state.budgetJobs.map((job) => renderBudgetJob(job)).join("")
             : `<div class="empty-state actionable-empty">
                 <span class="empty-icon" aria-hidden="true">+</span>
-                <strong>Aun no separas dinero por categorias</strong>
-                <span>Crea una categoria y veras su limite siempre antes de gastar.</span>
-                <button class="btn primary" type="button" data-action="open-category-sheet">Crear categoria</button>
+                <strong>Aun no separas dinero por categorías</strong>
+                <span>Aparta plata para algo y verás su límite siempre antes de gastar.</span>
+                <button class="btn primary" type="button" data-action="open-setaside-sheet">Apartar dinero</button>
               </div>`
         }
+        <button class="add-category-row" type="button" data-action="open-setaside-sheet" ${state.budgetJobs.length >= 10 ? "disabled" : ""}>
+          <span aria-hidden="true">$</span>
+          <strong>Apartar dinero</strong>
+          <small>Una vez, en este periodo · max. ${formatCompactMoney(summary.freeBudget)}</small>
+        </button>
         <button class="add-category-row" type="button" data-action="open-category-sheet" ${state.budgetJobs.length >= 10 ? "disabled" : ""}>
           <span aria-hidden="true">+</span>
-          <strong>Crear categoria</strong>
-          <small>max. ${formatCompactMoney(summary.freeBudget)} reservables</small>
+          <strong>Apartar cada semana o mes</strong>
+          <small>Para algo que pagas siempre, como el mercado</small>
         </button>
       </div>
     </section>
@@ -1353,13 +1740,13 @@ function renderPeriodCloseCard(summary = budgetSummary(), plan = calculatePlan()
       <div class="period-close-heading">
         <div>
           <p class="eyebrow">Cierre de periodo</p>
-          <h2>${report.isFinal ? "Resultado listo para guardar" : "Prepara el proximo plan"}</h2>
+          <h2>${report.isFinal ? "Resultado listo para guardar" : "Prepara el próximo plan"}</h2>
         </div>
         ${closedLine}
       </div>
       <div class="period-close-metrics">
-        <div><span>${report.isFinal ? "Libre final" : "Libre si cerraras hoy"}</span><strong class="${freeClass}">${formatMoney(report.freeFinal)}</strong></div>
-        <div><span>Categorias excedidas</span><strong>${report.exceededCategories.length}</strong></div>
+        <div><span>${report.isFinal ? "Libre final" : "Libre si cerrarás hoy"}</span><strong class="${freeClass}">${formatMoney(report.freeFinal)}</strong></div>
+        <div><span>Categorías excedidas</span><strong>${report.exceededCategories.length}</strong></div>
         <div><span>Ahorro posible</span><strong>${formatMoney(report.possibleSavings)}</strong></div>
       </div>
       <p>${periodCloseCardText(report)}</p>
@@ -1388,7 +1775,7 @@ function renderPeriodCloseScreen(plan = calculatePlan()) {
       </div>
 
       <article class="period-close-hero ${freeClass}">
-        <span>${report.isFinal ? "Libre final" : "Libre si cerraras hoy"}</span>
+        <span>${report.isFinal ? "Libre final" : "Libre si cerrarás hoy"}</span>
         <strong>${formatMoney(report.freeFinal)}</strong>
         <p>${periodCloseHeroText(report)}</p>
       </article>
@@ -1396,7 +1783,7 @@ function renderPeriodCloseScreen(plan = calculatePlan()) {
       <div class="period-close-grid">
         <article class="period-close-panel">
           <div class="period-close-panel-head">
-            <p class="eyebrow">Categorias excedidas</p>
+            <p class="eyebrow">Categorías excedidas</p>
             <h2>${report.exceededCategories.length ? `${report.exceededCategories.length} por ajustar` : "Sin excedidos"}</h2>
           </div>
           ${renderExceededCategories(report)}
@@ -1405,7 +1792,7 @@ function renderPeriodCloseScreen(plan = calculatePlan()) {
         <article class="period-close-panel">
           <div class="period-close-panel-head">
             <p class="eyebrow">Ahorro sugerido vs posible</p>
-            <h2>${report.savingsGap > 0 ? `Faltaria ${formatMoney(report.savingsGap)}` : "Cabe en el plan"}</h2>
+            <h2>${report.savingsGap > 0 ? `Faltaría ${formatMoney(report.savingsGap)}` : "Cabe en el plan"}</h2>
           </div>
           <div class="savings-compare">
             <div><span>Sugerido ideal</span><strong>${formatMoney(report.suggestedSavings)}</strong></div>
@@ -1416,7 +1803,7 @@ function renderPeriodCloseScreen(plan = calculatePlan()) {
 
         <article class="period-close-panel period-close-adjust-panel">
           <div class="period-close-panel-head">
-            <p class="eyebrow">Que ajustar para el proximo</p>
+            <p class="eyebrow">Qué ajustar para el próximo</p>
             <h2>${report.adjustments.length ? "Acciones concretas" : "Mantener plan"}</h2>
           </div>
           <ol class="period-adjustments">
@@ -1442,7 +1829,7 @@ function renderPeriodCloseWaiting(summary, report) {
       <div class="screen-title-row">
         <div>
           <p class="eyebrow">Cierre de periodo</p>
-          <h1>Todavia no toca cerrar</h1>
+          <h1>Todavía no toca cerrar</h1>
         </div>
         <span class="period-chip">${period}</span>
       </div>
@@ -1451,7 +1838,7 @@ function renderPeriodCloseWaiting(summary, report) {
           <p class="eyebrow">Disponible al final</p>
           <h2>Faltan ${formatDays(report.remainingDays)}</h2>
         </div>
-        <p>El cierre aparece cuando falten ${PERIOD_CLOSE_NOTICE_DAYS} dias o menos para el proximo periodo, incluyendo el dia que se vence.</p>
+        <p>El cierre aparece cuando falten ${PERIOD_CLOSE_NOTICE_DAYS} días o menos para el próximo periodo, incluyendo el día que se vence.</p>
         <button class="btn ghost" type="button" data-view="budget">Volver al plan</button>
       </article>
       ${renderPeriodReportCard(summary, calculatePlan(), report)}
@@ -1474,11 +1861,11 @@ function renderPeriodReportCard(summary = budgetSummary(), plan = calculatePlan(
         <span class="metric-badge">${period}</span>
       </div>
       <div class="period-report-mini">
-        <div><span>Gastos</span><strong>${formatMoney(totalExpenses)}</strong></div>
-        <div><span>Movimientos</span><strong>${movements.length}</strong></div>
-        <div><span>Excedidas</span><strong>${report.exceededCategories.length}</strong></div>
+        <div><span class="mini-icon" aria-hidden="true">${renderIcon("wallet")}</span><span>Gastos</span><strong>${formatMoney(totalExpenses)}</strong></div>
+        <div><span class="mini-icon" aria-hidden="true">${renderIcon("list")}</span><span>Movimientos</span><strong>${movements.length}</strong></div>
+        <div><span class="mini-icon" aria-hidden="true">${renderIcon("ban")}</span><span>Excedidas</span><strong>${report.exceededCategories.length}</strong></div>
       </div>
-      <p>Genera un texto con libre, categorias, ahorro, prediccion, dias con gasto, comercios y movimientos del periodo.</p>
+      <p>Genera un texto con libre, categorías, ahorro, predicción, días con gasto, comercios y movimientos del periodo.</p>
       <button class="btn secondary" type="button" data-action="open-period-report">${expenses.length ? "Generar reporte" : "Ver reporte"}</button>
     </article>
   `;
@@ -1572,24 +1959,24 @@ function periodCloseCardText(report) {
     return `Faltan ${formatDays(report.remainingDays)}. Puedes revisar el cierre hoy y ajustar el siguiente plan antes de que se acabe el periodo.`;
   }
   if (report.freeFinal < 0) {
-    return `El periodo cerro con faltante de dinero libre. Guarda el cierre y baja gasto libre o sube limites realistas.`;
+    return `El periodo cerro con faltante de dinero libre. Guarda el cierre y baja gasto libre o sube límites realistas.`;
   }
-  return `Guarda una foto del resultado final y usa los ajustes para el proximo periodo.`;
+  return `Guarda una foto del resultado final y usa los ajustes para el próximo periodo.`;
 }
 
 function periodCloseHeroText(report) {
   if (!report.isFinal) {
-    return `Todavia no termina: faltan ${formatDays(report.remainingDays)}. Este numero muestra como quedaria si cerraras el periodo hoy.`;
+    return `Todavía no termina: faltan ${formatDays(report.remainingDays)}. Este número muestra como quedaría si cerrarás el periodo hoy.`;
   }
   if (report.freeFinal < 0) {
-    return `Faltaron ${formatMoney(Math.abs(report.freeFinal))} de dinero libre despues de gastos sin categoria y excesos.`;
+    return `Faltaron ${formatMoney(Math.abs(report.freeFinal))} de dinero libre después de gastos sin categoría y excesos.`;
   }
-  return `Quedaron ${formatMoney(report.freeFinal)} libres despues de gastos sin categoria y excesos.`;
+  return `Quedaron ${formatMoney(report.freeFinal)} libres después de gastos sin categoría y excesos.`;
 }
 
 function renderExceededCategories(report) {
   if (!report.exceededCategories.length) {
-    return `<div class="empty-state compact-empty">No hay categorias por encima del limite. Buen cierre.</div>`;
+    return `<div class="empty-state compact-empty">No hay categorías por encima del límite. Buen cierre.</div>`;
   }
   return `
     <div class="period-close-list">
@@ -1610,40 +1997,40 @@ function renderExceededCategories(report) {
 
 function periodCloseSavingsText(report) {
   if (report.savingsGap > 0) {
-    return `El ahorro ideal no cupo completo. Lo posible incluye lo ya reservado mas ${formatMoney(report.additionalSavingsNow)} que todavia caben desde el libre.`;
+    return `El ahorro ideal no cupo completo. Lo posible incluye lo ya reservado más ${formatMoney(report.additionalSavingsNow)} que todavía caben desde el libre.`;
   }
   if (report.possibleSavings > 0) {
     return `El ahorro sugerido cabe en este periodo. Puedes separar hasta ${formatMoney(report.additionalSavingsNow)} adicionales sin forzar el plan.`;
   }
-  return `No hay ahorro posible en este cierre. Primero libera gasto libre o reduce categorias excedidas.`;
+  return `No hay ahorro posible en este cierre. Primero libera gasto libre o reduce categorías excedidas.`;
 }
 
 function periodCloseAdjustments(summary, plan, exceededCategories, freeFinal) {
   const adjustments = [];
   if (freeFinal < 0) {
-    adjustments.push(`Recupera ${formatMoney(Math.abs(freeFinal))} bajando gasto libre o moviendo dinero desde una categoria menos usada.`);
+    adjustments.push(`Recupera ${formatMoney(Math.abs(freeFinal))} bajando gasto libre o moviendo dinero desde una categoría menos usada.`);
   }
   if (summary.overReserved > 0) {
-    adjustments.push(`Baja reservas por ${formatMoney(summary.overReserved)}; el plan separa mas dinero del que entra.`);
+    adjustments.push(`Baja reservas por ${formatMoney(summary.overReserved)}; el plan separa más dinero del que entra.`);
   }
   exceededCategories.slice(0, 3).forEach((category) => {
     if (category.id === FREE_CATEGORY_ID) {
-      adjustments.push(`Convierte ${formatMoney(category.over)} de gasto libre repetido en una categoria con limite propio.`);
+      adjustments.push(`Convierte ${formatMoney(category.over)} de gasto libre repetido en una categoría con límite propio.`);
       return;
     }
-    adjustments.push(`Ajusta ${category.name}: sube el limite a ${formatMoney(category.spent)} o baja ${formatMoney(category.over)} de gasto.`);
+    adjustments.push(`Ajusta ${category.name}: sube el límite a ${formatMoney(category.spent)} o baja ${formatMoney(category.over)} de gasto.`);
   });
   if (summary.freeSpent > 0 && !exceededCategories.some((category) => category.id === FREE_CATEGORY_ID)) {
-    adjustments.push(`Revisa ${formatMoney(summary.freeSpent)} sin categoria para decidir si era gasto libre real o falta una regla por comercio.`);
+    adjustments.push(`Revisa ${formatMoney(summary.freeSpent)} sin categoría para decidir si era gasto libre real o falta una regla por comercio.`);
   }
   if (Number(plan.savingsCapacityGap || 0) > 0) {
-    adjustments.push(`Para acercarte al ahorro ideal, libera ${formatMoney(plan.savingsCapacityGap)} en el proximo periodo.`);
+    adjustments.push(`Para acercarte al ahorro ideal, libera ${formatMoney(plan.savingsCapacityGap)} en el próximo periodo.`);
   }
   if (!adjustments.length && freeFinal > 0) {
-    adjustments.push(`Mantén los limites y considera mover ${formatMoney(freeFinal)} sobrantes a ahorro antes de iniciar el proximo periodo.`);
+    adjustments.push(`Mantén los límites y considera mover ${formatMoney(freeFinal)} sobrantes a ahorro antes de iniciar el próximo periodo.`);
   }
   if (!adjustments.length) {
-    adjustments.push("Mantén el plan actual y registra gastos desde el primer dia del proximo periodo.");
+    adjustments.push("Mantén el plan actual y registra gastos desde el primer día del próximo periodo.");
   }
   return adjustments.slice(0, 5);
 }
@@ -1675,10 +2062,11 @@ function generatePeriodReport(plan = calculatePlan(), summary = budgetSummary(),
     `Ingreso base: ${formatMoney(summary.baseIncome)}`,
     `Dinero extra: ${formatMoney(summary.extraIncome)}`,
     `Ingreso total del periodo: ${formatMoney(summary.income)}`,
-    `Reservado en categorias: ${formatMoney(summary.reserved)}`,
+    `Reservado en categorías: ${formatMoney(summary.reserved)}`,
     `Dinero libre inicial: ${formatMoney(summary.freeBudget)}`,
     `Gasto total registrado: ${formatMoney(totalExpenses)}`,
     `Gasto libre real: ${formatMoney(summary.freeImpactSpent)}`,
+    `Saldo no comprometido (ya en tu cuenta/efectivo): ${formatMoney(summary.unclaimedLiquidity)}`,
     `Libre hoy: ${formatMoney(prediction.freeToday)}`,
     `Libre disponible visible: ${formatMoney(summary.freeRemaining)}`,
     `Libre de cierre: ${formatMoney(report.freeFinal)}`,
@@ -1686,11 +2074,11 @@ function generatePeriodReport(plan = calculatePlan(), summary = budgetSummary(),
     `Saldo real en efectivo: ${formatMoney(liquidity.cash)}`,
     `Saldo real total: ${formatMoney(liquidity.total)}`,
     "",
-    "Prediccion",
+    "Predicción",
     predictionOutcomeText(prediction),
     predictionPaceText(prediction),
     `Resultado proyectado: ${formatMoney(prediction.projectedEndFree)}`,
-    `Dias restantes: ${prediction.remainingDays}`,
+    `Días restantes: ${prediction.remainingDays}`,
     "",
     "Ahorro",
     `Ahorro sugerido ideal: ${formatMoney(report.suggestedSavings)}`,
@@ -1698,22 +2086,22 @@ function generatePeriodReport(plan = calculatePlan(), summary = budgetSummary(),
     `Ahorro adicional que cabe hoy: ${formatMoney(report.additionalSavingsNow)}`,
     `Brecha contra ideal: ${formatMoney(report.savingsGap)}`,
     "",
-    "Categorias",
+    "Categorías",
     ...categories,
     "",
     "Control de gasto libre",
-    `Gastos sin categoria o libre: ${formatMoney(summary.freeSpent)}`,
-    `Excesos de categorias: ${formatMoney(summary.categoryOverspent)}`,
+    `Gastos sin categoría o libre: ${formatMoney(summary.freeSpent)}`,
+    `Excesos de categorías: ${formatMoney(summary.categoryOverspent)}`,
     `Movimientos sin clasificar: ${unclassified.length} por ${formatMoney(unclassifiedTotal)}`,
-    `Gastos unicos ignorados para ritmo diario: ${formatMoney(oneOffTotal)}`,
+    `Gastos únicos ignorados para ritmo diario: ${formatMoney(oneOffTotal)}`,
     "",
-    "Dias con gasto",
+    "Días con gasto",
     ...(dailyTotals.length ? dailyTotals.map((day) => `${day.date}: ${formatMoney(day.total)} en ${day.count} ${day.count === 1 ? "gasto" : "gastos"}`) : ["Sin gastos registrados en este periodo."]),
     "",
     "Comercios principales",
     ...(merchants.length ? merchants.map((merchant) => `${merchant.name}: ${formatMoney(merchant.total)} en ${merchant.count} ${merchant.count === 1 ? "gasto" : "gastos"}`) : ["Sin comercios registrados."]),
     "",
-    "Que ajustar para el proximo periodo",
+    "Qué ajustar para el próximo periodo",
     ...report.adjustments.map((item, index) => `${index + 1}. ${item}`),
     "",
     "Movimientos",
@@ -1727,7 +2115,7 @@ function periodReportCategoryLines() {
     .slice()
     .sort((a, b) => Number(b.spent || 0) - Number(a.spent || 0) || String(a.name).localeCompare(String(b.name)));
   if (!categories.length) {
-    return ["Sin categorias creadas."];
+    return ["Sin categorías creadas."];
   }
   return categories.map((category) => {
     const budget = Number(category.budget || 0);
@@ -1773,7 +2161,7 @@ function periodReportMovementLines(movements = []) {
     }
     const transaction = movement.transaction;
     const category = !transaction.labeled || !transaction.category || transaction.category === FREE_CATEGORY_ID ? "Sin clasificar" : categoryName(transaction.category);
-    const oneOff = transaction.oneOff ? " - gasto unico" : "";
+    const oneOff = transaction.oneOff ? " - gasto único" : "";
     const description = transaction.description ? ` - ${transaction.description}` : "";
     return `- ${String(transaction.date || "").slice(0, 10)} - ${transaction.merchant}${description} - ${category} - ${locationLabel(transaction.source)} - ${formatMoney(transaction.amount)}${oneOff}`;
   });
@@ -1800,28 +2188,89 @@ function renderBudgetJobForm() {
         ], "monthly")}
       </div>
       <div class="conversion-box" data-category-conversion>
-        <span>Conversion automatica</span>
+        <span>Conversión automática</span>
         <strong>Escribe un monto para ver su valor en este periodo.</strong>
         <small>Disponible para reservar: ${formatMoney(summary.freeBudget)}</small>
       </div>
       <div class="limit-warning" data-category-limit-warning hidden>
         <span aria-hidden="true">!</span>
-        <p>Esta categoria excede el dinero libre del periodo.</p>
+        <p>Esta categoría excede el dinero libre del periodo.</p>
       </div>
-      <button class="btn primary" type="submit" data-category-submit>Agregar categoria</button>
+      <button class="btn primary" type="submit" data-category-submit>Agregar categoría</button>
       <button class="btn ghost" type="button" data-action="close-plan-sheet">Cancelar</button>
     </form>
   `;
 }
 
+// Plain-language front door for reserving money, in the "envelope" mental model people
+// already use ("aparté plata para los remedios"). Deliberately asks only two things —
+// how much, and what for — where renderBudgetJobForm also asks for a frequency: this
+// reserves once for the current period (cadence "period"), which is what a one-off
+// "aparté esto ahora" actually means. Recurring reserves still go through the full form.
+function renderSetAsideSheet() {
+  const summary = budgetSummary();
+  const reusable = state.budgetJobs.slice(0, 6);
+  return `
+    <div class="sheet-backdrop" role="presentation">
+      <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="setaside-sheet-title">
+        <div class="sheet-handle"></div>
+        <div class="sheet-heading">
+          <div><p class="eyebrow">Tu plata</p><h2 id="setaside-sheet-title">Apartar dinero</h2></div>
+          <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">x</button>
+        </div>
+        <p class="setaside-note">Guardas esta plata para algo, y deja de contar como libre. Tu cuenta y tu efectivo siguen igual: aquí no se mueve dinero de verdad.</p>
+        <form class="sheet-form setaside-form" id="setaside-form">
+          <label>
+            ¿Cuánto quieres apartar?
+            <input name="amount" type="number" min="1000" step="1000" inputmode="numeric" placeholder="$0" required>
+          </label>
+          <label>
+            ¿Para qué es?
+            <input name="name" type="text" maxlength="32" placeholder="Ej. Remedios, mercado" autocomplete="off" required>
+          </label>
+          ${
+            reusable.length
+              ? `<div class="setaside-suggestions">
+                  <span class="sheet-label">O toca una que ya tienes</span>
+                  <div class="setaside-chips">
+                    ${reusable
+                      .map(
+                        (job) => `<button class="choice-pill" type="button" data-setaside-name="${escapeAttr(job.name)}">${escapeHtml(job.name)}</button>`
+                      )
+                      .join("")}
+                  </div>
+                </div>`
+              : ""
+          }
+          <div class="conversion-box" data-setaside-preview aria-live="polite">
+            <span>Después de apartar</span>
+            <strong>Escribe un monto para ver cuánto te queda libre.</strong>
+            <small>Ahora tienes ${formatMoney(summary.freeRemaining)} libres.</small>
+          </div>
+          <div class="limit-warning" data-setaside-warning hidden>
+            <span aria-hidden="true">!</span>
+            <p>No puedes apartar más de lo que tienes libre.</p>
+          </div>
+          <button class="btn primary" type="submit" data-setaside-submit>Apartar dinero</button>
+          <button class="btn ghost" type="button" data-action="close-plan-sheet">Cancelar</button>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
 function renderPlanSheet() {
+  if (planSheet === "setaside") {
+    return renderSetAsideSheet();
+  }
+
   if (planSheet === "category") {
     return `
       <div class="sheet-backdrop" role="presentation">
         <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="category-sheet-title">
           <div class="sheet-handle"></div>
           <div class="sheet-heading">
-            <div><p class="eyebrow">Plan</p><h2 id="category-sheet-title">Nueva categoria</h2></div>
+            <div><p class="eyebrow">Plan</p><h2 id="category-sheet-title">Apartar cada semana o mes</h2></div>
             <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">x</button>
           </div>
           ${renderBudgetJobForm()}
@@ -1835,7 +2284,7 @@ function renderPlanSheet() {
       <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="extra-sheet-title">
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
-          <div><span class="extra-badge">Dinero extra</span><h2 id="extra-sheet-title">¿De donde viene?</h2></div>
+          <div><span class="extra-badge">Dinero extra</span><h2 id="extra-sheet-title">¿De dónde viene?</h2></div>
           <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">x</button>
         </div>
         <form class="sheet-form" id="extra-budget-form">
@@ -1843,7 +2292,7 @@ function renderPlanSheet() {
           <label>Monto<input name="amount" type="number" min="1000" step="1000" inputmode="numeric" placeholder="$0" required></label>
           <input name="date" type="hidden" value="${todayKey()}">
           <div class="sheet-field">
-            <span class="sheet-label">¿Donde entro?</span>
+            <span class="sheet-label">¿Dónde entró?</span>
             ${renderChoicePills("location", [
               { value: "account", label: "Cuenta" },
               { value: "cash", label: "Efectivo" }
@@ -1866,20 +2315,34 @@ function renderAllocation(label, amount, type) {
   `;
 }
 
+function categoryIconFor(name) {
+  const value = String(name || "").toLowerCase();
+  if (/gasolina|combust|carro|transporte|uber|taxi|bus|moto/.test(value)) {
+    return /transporte|uber|taxi|bus/.test(value) ? "car" : "fuel";
+  }
+  if (/comida|mercado|almuerzo|restaurante|alimentaci/.test(value)) {
+    return "food";
+  }
+  return "tag";
+}
+
 function renderBudgetJob(job) {
   const spent = spendByCategory()[job.id] || 0;
   const budget = getBudgetAmountForJob(job, state.profile);
   const ratio = budget ? (spent / budget) * 100 : 0;
   const band = ratio > 90 ? "danger" : ratio > 65 ? "warning" : "good";
   const remaining = Math.max(0, budget - spent);
-  const status = ratio > 100 ? "Excedida" : ratio > 90 ? "Critica" : ratio > 65 ? "Atencion" : "Saludable";
+  const status = categoryStatusLabel(ratio);
 
   return `
     <article class="plan-category-card ${band}">
       <div class="category-card-top">
-        <div>
-          <strong>${escapeHtml(job.name)}</strong>
-          <span>${capitalize(cadenceLabel(job.cadence))} · ${formatMoney(job.amount)}</span>
+        <div class="category-card-heading">
+          <span class="category-card-icon" aria-hidden="true">${renderIcon(categoryIconFor(job.name))}</span>
+          <div>
+            <strong>${escapeHtml(job.name)}</strong>
+            <span>${capitalize(cadenceLabel(job.cadence))} · ${formatMoney(job.amount)}</span>
+          </div>
         </div>
         <button class="category-menu-btn" type="button" data-action="request-remove-job" data-id="${escapeAttr(job.id)}" aria-label="Eliminar ${escapeAttr(job.name)}">&middot;&middot;&middot;</button>
       </div>
@@ -1906,13 +2369,33 @@ function renderJobRemovalConfirmation() {
         <div class="sheet-handle"></div>
         <span class="destructive-icon" aria-hidden="true">!</span>
         <h2 id="remove-category-title">Eliminar ${escapeHtml(job.name)}</h2>
-        <p>La reserva desaparecera del plan. Tus movimientos no se borran.</p>
+        <p>La reserva desaparecerá del plan. Tus movimientos no se borran.</p>
         <div class="destructive-consequence">
-          <strong>${affected} ${affected === 1 ? "gasto quedara" : "gastos quedaran"} sin clasificar</strong>
-          <span>Podras reclasificarlos despues desde Movimientos.</span>
+          <strong>${affected} ${affected === 1 ? "gasto quedará" : "gastos quedarán"} sin clasificar</strong>
+          <span>Podrás reclasificarlos después desde Movimientos.</span>
         </div>
-        <button class="btn danger" type="button" data-action="confirm-remove-job">Eliminar categoria</button>
-        <button class="btn ghost" type="button" data-action="cancel-remove-job">Conservar categoria</button>
+        <button class="btn danger" type="button" data-action="confirm-remove-job">Eliminar categoría</button>
+        <button class="btn ghost" type="button" data-action="cancel-remove-job">Conservar categoría</button>
+      </section>
+    </div>
+  `;
+}
+
+function renderDeleteAccountConfirmation() {
+  return `
+    <div class="sheet-backdrop destructive-backdrop" role="presentation">
+      <section class="bottom-sheet destructive-sheet" role="alertdialog" aria-modal="true" aria-labelledby="delete-account-title">
+        <div class="sheet-handle"></div>
+        <span class="destructive-icon" aria-hidden="true">!</span>
+        <h2 id="delete-account-title">Eliminar tu cuenta y tus datos</h2>
+        <p>Se borraran tu presupuesto, movimientos, categorías y ahorro guardados en la nube. Esto no se puede deshacer.</p>
+        <div class="destructive-consequence">
+          <strong>También se cerrará tu sesión en este dispositivo</strong>
+          <span>Tu correo queda registrado por si quieres volver a crear un plan. Para retirarlo por completo de nuestro sistema, escribenos a ${escapeHtml(SUPPORT_EMAIL)}.</span>
+        </div>
+        ${cloudState.status === "error" && cloudState.error ? `<p class="form-error" role="alert">${escapeHtml(cloudState.error)}</p>` : ""}
+        <button class="btn danger" type="button" data-action="confirm-delete-account">Eliminar cuenta y datos</button>
+        <button class="btn ghost" type="button" data-action="cancel-delete-account">Cancelar</button>
       </section>
     </div>
   `;
@@ -1930,36 +2413,36 @@ function renderSavings(plan) {
   return `
     <section class="screen-view savings-view" aria-label="Ahorro">
       <div class="screen-title-row">
-        <div><p class="eyebrow">Recomendacion del periodo</p><h1>Ahorro</h1></div>
+        <div><p class="eyebrow">Recomendación del periodo</p><h1>Ahorro</h1></div>
       </div>
 
       <article class="savings-hero">
         <div class="trust-tags"><span>Orientativo</span><span>No mueve dinero</span></div>
-        <p>Podrias apartar</p>
+        <p>Podrías apartar</p>
         <strong>${formatMoney(plan.suggestedPeriodSavings)}</strong>
         <span>durante este periodo ${summary.cadenceLabel}</span>
         <div class="savings-fit ${plan.savingsCapacityGap > 0 ? "warning" : ""}">
           ${
             plan.savingsCapacityGap > 0
-              ? `La meta ideal no cabe completa. Faltaria liberar ${formatMoney(plan.savingsCapacityGap)}.`
-              : `La recomendacion cabe y deja ${formatMoney(plan.freeAfterSuggestion)} libres.`
+              ? `La meta ideal no cabe completa. Faltaría liberar ${formatMoney(plan.savingsCapacityGap)}.`
+              : `La recomendación cabe y deja ${formatMoney(plan.freeAfterSuggestion)} libres.`
           }
         </div>
       </article>
 
-      <div class="savings-metrics">
-        <div><span>Meta ideal</span><strong>${formatMoney(plan.idealPeriodSavings)}</strong></div>
-        <div><span>Ya reservado</span><strong>${formatMoney(plan.savingsReserved)}</strong></div>
-        <div><span>Momento sugerido</span><strong>${suggestedSavingsMoment()}</strong></div>
+      <div class="money-location-list">
+        <div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("target")}</span><span class="money-location-text"><span>Meta ideal</span><strong>${formatMoney(plan.idealPeriodSavings)}</strong></span></div>
+        <div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("wallet")}</span><span class="money-location-text"><span>Ya reservado</span><strong>${formatMoney(plan.savingsReserved)}</strong></span></div>
+        <div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("calendar")}</span><span class="money-location-text"><span>Momento sugerido</span><strong>${suggestedSavingsMoment()}</strong></span></div>
       </div>
 
       <details class="calculation-accordion">
-        <summary><span><strong>Como se calculo</strong><small>Ver presupuesto, compromisos y reservas</small></span><b>+</b></summary>
+        <summary><span><strong>Cómo se calculó</strong><small>Ver presupuesto, compromisos y reservas</small></span><b>+</b></summary>
         <div class="calculation-body">
           <p>${plan.incomeNote}</p>
           ${renderAllocation("Presupuesto del periodo", plan.periodIncome, "reserved")}
           ${renderAllocation("Gastos comprometidos", plan.committedForPeriod, "expenses")}
-          ${renderAllocation("Categorias de gasto", summary.expenseReserved, "expenses")}
+          ${renderAllocation("Categorías de gasto", summary.expenseReserved, "expenses")}
           ${renderAllocation("Ahorro proyectado", plan.projectedPeriodSavings, "savings")}
         </div>
       </details>
@@ -1973,21 +2456,21 @@ function renderSavings(plan) {
         </div>
         <form id="smart-form" class="simulator-form" data-monthly-income="${getMonthlyIncome(state.profile)}">
           <label>
-            <span>Aumento hipotetico <output data-raise-output>${state.settings.monthlyRaisePct}%</output></span>
+            <span>Aumento hipotético <output data-raise-output>${state.settings.monthlyRaisePct}%</output></span>
             <input name="monthlyRaisePct" type="range" min="0" max="100" step="1" value="${state.settings.monthlyRaisePct}">
           </label>
           <label>
-            <span>Porcion del aumento al ahorro <output data-escalation-output>${state.settings.escalationPct}%</output></span>
+            <span>Porción del aumento al ahorro <output data-escalation-output>${state.settings.escalationPct}%</output></span>
             <input name="escalationPct" type="range" min="0" max="100" step="5" value="${state.settings.escalationPct}">
           </label>
-          <button class="btn primary" type="submit">Guardar simulacion</button>
+          <button class="btn primary" type="submit">Guardar simulación</button>
         </form>
       </article>
 
       <article class="reference-fund">
         <div><p class="eyebrow">Fondo de referencia</p><h2>${targetCovered ? "Meta cubierta" : `${periodsToTarget || "Sin"} periodos estimados`}</h2></div>
         ${renderProgress(plan.emergencyProgress, "Avance simulado con el ahorro actual")}
-        <p>${futureFreedom(plan)}. Es una proyeccion orientativa, no una promesa.</p>
+        <p>${futureFreedom(plan)}. Es una proyección orientativa, no una promesa.</p>
       </article>
     </section>
   `;
@@ -2014,7 +2497,7 @@ function renderCalendar() {
 
       <div class="calendar-summary-grid">
         <article>
-          <span>Proximos 30 dias</span>
+          <span>Próximos 30 días</span>
           <strong>${formatMoney(nextThirtyTotal)}</strong>
         </article>
         <article>
@@ -2030,7 +2513,7 @@ function renderCalendar() {
       <article class="calendar-panel reminder-panel">
         <div class="calendar-panel-heading">
           <div>
-            <p class="eyebrow">Revision diaria</p>
+            <p class="eyebrow">Revisión diaria</p>
             <h2>Recordatorio de gastos</h2>
           </div>
           <span class="metric-badge ${permission === "granted" ? "under" : permission === "denied" ? "danger" : ""}">${notificationStatusLabel(permission)}</span>
@@ -2039,7 +2522,7 @@ function renderCalendar() {
           <label class="toggle-row">
             <input name="enabled" type="checkbox" ${reminder.enabled ? "checked" : ""}>
             <span>
-              <strong>Preguntar cada dia</strong>
+              <strong>Preguntar cada día</strong>
               <small>Mensaje: "Quieres registrar tus gastos de hoy?"</small>
             </span>
           </label>
@@ -2077,7 +2560,7 @@ function renderCalendar() {
             <input name="amount" type="number" min="0" step="1000" inputmode="numeric" placeholder="$0" required>
           </label>
           <label>
-            Categoria
+            Categoría
             <select name="category">
               ${renderCategoryOptions(FREE_CATEGORY_ID)}
             </select>
@@ -2182,11 +2665,11 @@ function renderQuickExpensePanel() {
           </label>
           ${renderMerchantRuleSuggestion(draft.merchant || "")}
           <label>
-            Descripcion opcional
+            Descripción opcional
             <input name="description" type="text" maxlength="90" placeholder="Ej. Tanqueada, regalo, almuerzo" value="${escapeAttr(draft.description || "")}">
           </label>
           <div class="quick-field">
-            <span class="quick-label">Categoria</span>
+            <span class="quick-label">Categoría</span>
             ${renderChoicePills("category", categoryChoiceOptions(), selectedCategory)}
           </div>
           <div class="quick-field">
@@ -2200,14 +2683,19 @@ function renderQuickExpensePanel() {
             <span>Disponible antes de registrar</span>
             <strong>${formatMoney(summary.freeRemaining)} libre · ${formatMoney(liquidity.total)} total real</strong>
           </div>
-          <label class="check-row quick-check-row">
-            <input name="budgeted" type="checkbox" checked>
-            Ya estaba previsto en el plan
-          </label>
-          <label class="check-row quick-check-row">
-            <input name="oneOff" type="checkbox">
-            Gasto unico: no usar para ritmo diario
-          </label>
+          <button class="quick-advanced-toggle" type="button" data-action="toggle-quick-expense-advanced" aria-expanded="${quickExpenseAdvancedOpen ? "true" : "false"}">
+            ${quickExpenseAdvancedOpen ? "Menos opciones" : "Más opciones"}
+          </button>
+          <div class="quick-expense-advanced" ${quickExpenseAdvancedOpen ? "" : "hidden"}>
+            <label class="check-row quick-check-row">
+              <input name="budgeted" type="checkbox" checked>
+              <span>Ya lo tenía planeado<small>Si NO lo tenías planeado y es un gasto grande, te damos 24 horas antes de registrarlo para pensarlo con calma.</small></span>
+            </label>
+            <label class="check-row quick-check-row">
+              <input name="oneOff" type="checkbox">
+              <span>No fue un gasto de todos los días<small>Actívalo en compras grandes que no se repiten (un viaje, un regalo), para que no afecten el cálculo de cuánto gastas por día normalmente.</small></span>
+            </label>
+          </div>
           <button class="btn primary quick-submit" type="submit">Registrar gasto</button>
         </form>
       </section>
@@ -2303,12 +2791,12 @@ function renderSpending(plan) {
           </label>
           ${renderMerchantRuleSuggestion()}
           <label>
-            Descripcion opcional
+            Descripción opcional
             <input name="description" type="text" maxlength="90" placeholder="Ej. Tanqueada, regalo, almuerzo">
           </label>
           <div class="transaction-options-row">
             <label>
-              Categoria
+              Categoría
               <select name="category" required>
                 <option value="${FREE_CATEGORY_ID}">Libre / sin clasificar</option>
                 ${state.budgetJobs.map((job) => `<option value="${escapeAttr(job.id)}">${escapeHtml(job.name)}</option>`).join("")}
@@ -2330,11 +2818,11 @@ function renderSpending(plan) {
           </div>
           <label class="check-row">
             <input name="budgeted" type="checkbox" checked>
-            Ya estaba previsto en el plan
+            <span>Ya lo tenía planeado<small>Si NO lo tenías planeado y es un gasto grande, te damos 24 horas antes de registrarlo para pensarlo con calma.</small></span>
           </label>
           <label class="check-row">
             <input name="oneOff" type="checkbox">
-            Gasto unico: no usar para ritmo diario
+            <span>No fue un gasto de todos los días<small>Actívalo en compras grandes que no se repiten (un viaje, un regalo), para que no afecten el cálculo de cuánto gastas por día normalmente.</small></span>
           </label>
         </form>
       </article>
@@ -2342,7 +2830,7 @@ function renderSpending(plan) {
       <article class="card wide-card">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">Gasto por categoria</p>
+            <p class="eyebrow">Gasto por categoría</p>
             <h2>Lo que va usado</h2>
           </div>
           <span class="metric-badge">Compra grande: ${formatMoney(threshold)}</span>
@@ -2366,24 +2854,68 @@ function renderMovements() {
   const summary = budgetSummary();
   const movements = movementsForSummary(summary);
   const movementCountLabel = movements.length === 1 ? "movimiento" : "movimientos";
+  const pendingCount = unclassifiedTransactionsForSummary(summary).length;
   return `
     <section class="screen-view movements-view" aria-label="Movimientos">
       <div class="screen-title-row movements-heading">
         <div><p class="eyebrow">Historial del periodo</p><h1>Movimientos</h1></div>
         <span class="period-chip">${movements.length} ${movementCountLabel}</span>
       </div>
-      ${renderMerchantRulesPanel()}
+      ${
+        pendingCount > 0
+          ? `<button class="classify-banner" type="button" data-action="start-quick-classify">
+              <span class="classify-banner-icon" aria-hidden="true">${renderIcon("tag")}</span>
+              <span class="classify-banner-text"><strong>Clasificar pendientes</strong><span>${pendingCount} ${pendingCount === 1 ? "movimiento sin categoría" : "movimientos sin categoría"}</span></span>
+              <span class="classify-banner-arrow" aria-hidden="true">&rsaquo;</span>
+            </button>`
+          : ""
+      }
       ${renderExpenseCalendar(summary)}
-      <article class="movements-card">
-        <label class="history-sort">
-          Ordenar por
-          <select id="transaction-history-sort">
-            <option value="recent" ${transactionHistorySort === "recent" ? "selected" : ""}>Mas recientes</option>
-            <option value="amount" ${transactionHistorySort === "amount" ? "selected" : ""}>Mayor cantidad</option>
-          </select>
-        </label>
-        ${renderTransactionHistory(summary, transactionHistorySort)}
+      <article class="movements-card" id="transaction-history-card">
+        <div class="movements-toolbar">
+          <label class="history-search">
+            <span class="history-search-icon" aria-hidden="true">${renderIcon("search")}</span>
+            <input type="search" id="transaction-history-search" placeholder="Buscar por nombre o nota" value="${escapeAttr(transactionHistorySearch)}" aria-label="Buscar movimientos">
+          </label>
+          <div class="movements-controls">
+            <label class="history-sort">
+              Ordenar por
+              <select id="transaction-history-sort">
+                <option value="recent" ${transactionHistorySort === "recent" ? "selected" : ""}>Más recientes</option>
+                <option value="amount" ${transactionHistorySort === "amount" ? "selected" : ""}>Mayor cantidad</option>
+              </select>
+            </label>
+            <label class="history-sort history-filter">
+              Filtrar
+              <select id="transaction-history-filter">
+                <option value="all" ${transactionHistoryFilter === "all" ? "selected" : ""}>Todos</option>
+                <option value="expense" ${transactionHistoryFilter === "expense" ? "selected" : ""}>Gastos</option>
+                <option value="income" ${transactionHistoryFilter === "income" ? "selected" : ""}>Ingresos</option>
+                <option value="uncategorized" ${transactionHistoryFilter === "uncategorized" ? "selected" : ""}>Sin categoría</option>
+                ${state.budgetJobs
+                  .map(
+                    (job) =>
+                      `<option value="cat:${escapeAttr(job.id)}" ${transactionHistoryFilter === `cat:${job.id}` ? "selected" : ""}>${escapeHtml(job.name)}</option>`
+                  )
+                  .join("")}
+              </select>
+            </label>
+          </div>
+          <button class="btn ghost history-export-btn" type="button" data-action="export-movements-csv">Exportar CSV</button>
+        </div>
+        ${
+          transactionHistoryDate
+            ? `<p class="history-date-chip">
+                <span>Mostrando ${movementDayLabel(transactionHistoryDate)}</span>
+                <button type="button" data-action="clear-movements-date-filter" aria-label="Quitar filtro de fecha">&times;</button>
+              </p>`
+            : ""
+        }
+        <div id="transaction-history-results">
+          ${renderTransactionHistory(summary, transactionHistorySort, transactionHistoryFilter, transactionHistorySearch, transactionHistoryDate)}
+        </div>
       </article>
+      ${renderMerchantRulesPanel()}
     </section>
   `;
 }
@@ -2404,7 +2936,7 @@ function renderExpenseCalendar(summary = budgetSummary()) {
       </div>
       <div class="expense-calendar-stats">
         <div>
-          <span>Dia mas caro</span>
+          <span>Día más caro</span>
           <strong>${calendar.heaviest ? `${movementDayLabel(calendar.heaviest.date)} · ${formatMoney(calendar.heaviest.total)}` : "Sin gastos"}</strong>
         </div>
         <div>
@@ -2426,12 +2958,13 @@ function renderExpenseCalendar(summary = budgetSummary()) {
 function renderExpenseCalendarDay(day, maxDaily) {
   const ratio = maxDaily ? day.total / maxDaily : 0;
   const level = day.total <= 0 ? "empty" : ratio >= 0.75 ? "high" : ratio >= 0.35 ? "medium" : "low";
-  const label = `${movementDayLabel(day.date)}: ${formatMoney(day.total)} en gastos`;
+  const label = `Ver movimientos del ${movementDayLabel(day.date)}: ${formatMoney(day.total)} en gastos`;
+  const selected = day.date === transactionHistoryDate;
   return `
-    <div class="expense-calendar-day ${level} ${day.isToday ? "is-today" : ""}" aria-label="${escapeAttr(label)}">
+    <button type="button" class="expense-calendar-day ${level} ${day.isToday ? "is-today" : ""} ${selected ? "is-selected" : ""}" aria-label="${escapeAttr(label)}" aria-pressed="${selected}" data-action="filter-movements-by-date" data-date="${escapeAttr(day.date)}">
       <span>${day.dayNumber}</span>
       ${day.total > 0 ? `<strong>${formatCompactMoney(day.total)}</strong>` : `<small>-</small>`}
-    </div>
+    </button>
   `;
 }
 
@@ -2502,9 +3035,50 @@ function weekdayOffset(dateValue) {
   return day === 0 ? 6 : day - 1;
 }
 
-function renderTransactionHistory(summary = budgetSummary(), sort = "recent") {
+function movementMatchesFilter(movement, filter) {
+  if (!filter || filter === "all") {
+    return true;
+  }
+  if (filter === "expense" || filter === "income") {
+    return movement.kind === filter;
+  }
+  if (movement.kind !== "expense") {
+    return false;
+  }
+  const category = movement.transaction.category || FREE_CATEGORY_ID;
+  const unlabeled = !movement.transaction.labeled || category === FREE_CATEGORY_ID;
+  if (filter === "uncategorized") {
+    return unlabeled;
+  }
+  if (filter.startsWith("cat:")) {
+    return category === filter.slice(4);
+  }
+  return true;
+}
+
+function movementMatchesSearch(movement, query) {
+  if (!query) {
+    return true;
+  }
+  const needle = query.trim().toLowerCase();
+  if (!needle) {
+    return true;
+  }
+  const haystack =
+    movement.kind === "income"
+      ? movement.extra.source || ""
+      : `${movement.transaction.merchant || ""} ${movement.transaction.description || ""}`;
+  return haystack.toLowerCase().includes(needle);
+}
+
+function renderTransactionHistory(summary = budgetSummary(), sort = "recent", filter = "all", search = "", date = "") {
   const movements = movementsForSummary(summary)
-    .slice()
+    .filter(
+      (movement) =>
+        movementMatchesFilter(movement, filter) &&
+        movementMatchesSearch(movement, search) &&
+        (!date || String(movement.date || "").slice(0, 10) === date)
+    )
     .sort((a, b) =>
       sort === "amount"
         ? Number(b.amount || 0) - Number(a.amount || 0) || compareTransactionsByRecent(a, b)
@@ -2512,10 +3086,22 @@ function renderTransactionHistory(summary = budgetSummary(), sort = "recent") {
     );
 
   if (!movements.length) {
-    return `<div class="empty-state actionable-empty">
+    return date
+      ? `<div class="empty-state actionable-empty">
+          <span class="empty-icon" aria-hidden="true">+</span>
+          <strong>Sin movimientos ese día</strong>
+          <span>El ${movementDayLabel(date)} no tiene gastos ni ingresos registrados.</span>
+        </div>`
+      : filter !== "all" || search.trim()
+        ? `<div class="empty-state actionable-empty">
+          <span class="empty-icon" aria-hidden="true">+</span>
+          <strong>Sin movimientos con esa busqueda</strong>
+          <span>Prueba otro termino, filtro u orden.</span>
+        </div>`
+        : `<div class="empty-state actionable-empty">
       <span class="empty-icon" aria-hidden="true">+</span>
-      <strong>Todavia no hay movimientos</strong>
-      <span>Cuando registres un gasto o sumes dinero extra aparecera aqui.</span>
+      <strong>Todavía no hay movimientos</strong>
+      <span>Cuando registres un gasto o sumes dinero extra aparecerá aquí.</span>
       <button class="btn primary" type="button" data-action="open-expense">Registrar gasto</button>
     </div>`;
   }
@@ -2597,7 +3183,7 @@ function renderTransactionEditor() {
         <div class="editor-amount">${formatMoney(transaction.amount)}<span>${formatDate(transaction.date)}</span></div>
         <form class="sheet-form" id="transaction-edit-form">
           <div class="sheet-field">
-            <span class="sheet-label">Categoria</span>
+            <span class="sheet-label">Categoría</span>
             ${renderChoicePills("category", categoryChoiceOptions(), transaction.category || FREE_CATEGORY_ID)}
           </div>
           <div class="sheet-field">
@@ -2609,11 +3195,63 @@ function renderTransactionEditor() {
           </div>
           <label class="check-row">
             <input name="oneOff" type="checkbox" ${transaction.oneOff ? "checked" : ""}>
-            Gasto unico: no usar para ritmo diario
+            <span>No fue un gasto de todos los días<small>Actívalo en compras grandes que no se repiten (un viaje, un regalo), para que no afecten el cálculo de cuánto gastas por día normalmente.</small></span>
           </label>
           <button class="btn primary" type="submit">Guardar cambios</button>
           <button class="btn danger subtle-danger" type="button" data-action="remove-transaction" data-id="${escapeAttr(transaction.id)}">Eliminar gasto y devolver saldo</button>
         </form>
+      </section>
+    </div>
+  `;
+}
+
+function unclassifiedTransactionsForSummary(summary = budgetSummary()) {
+  return transactionsForSummary(summary).filter(
+    (transaction) => !transaction.labeled || !transaction.category || transaction.category === FREE_CATEGORY_ID
+  );
+}
+
+function renderQuickClassifyPanel() {
+  const pending = quickClassifyQueue.map((id) => state.transactions.find((item) => item.id === id)).filter(Boolean);
+  if (!pending.length) {
+    return "";
+  }
+  const categoryChips = categoryChoiceOptions().filter((option) => option.value !== FREE_CATEGORY_ID);
+  return `
+    <div class="sheet-backdrop" role="presentation">
+      <section class="bottom-sheet quick-classify-panel" role="dialog" aria-modal="true" aria-labelledby="quick-classify-title">
+        <div class="sheet-handle"></div>
+        <div class="sheet-heading">
+          <div><p class="eyebrow">Clasificar pendientes</p><h2 id="quick-classify-title">${pending.length} ${pending.length === 1 ? "movimiento sin categoría" : "movimientos sin categoría"}</h2></div>
+          <button class="icon-btn muted" type="button" data-action="close-quick-classify" aria-label="Cerrar">x</button>
+        </div>
+        <div class="quick-classify-list">
+          ${pending
+            .map(
+              (transaction) => `
+                <article class="quick-classify-row">
+                  <div class="quick-classify-row-head">
+                    <strong>${escapeHtml(transaction.merchant)}</strong>
+                    <span>${formatMoney(transaction.amount)} · ${formatDate(transaction.date)}</span>
+                  </div>
+                  ${
+                    categoryChips.length
+                      ? `<div class="choice-pills">
+                          ${categoryChips
+                            .map(
+                              (option) => `
+                                <button class="choice-pill" type="button" data-action="quick-classify" data-id="${escapeAttr(transaction.id)}" data-category="${escapeAttr(option.value)}">${escapeHtml(option.label)}</button>
+                              `
+                            )
+                            .join("")}
+                        </div>`
+                      : `<p class="quick-classify-empty">Aun no tienes categorías creadas. Crea una desde Plan para poder clasificar.</p>`
+                  }
+                </article>
+              `
+            )
+            .join("")}
+        </div>
       </section>
     </div>
   `;
@@ -2705,35 +3343,316 @@ function renderProfile(plan) {
   return `
     <section class="screen-view data-view" aria-label="Datos">
       <div class="screen-title-row">
-        <div><p class="eyebrow">Configuracion y contexto</p><h1>Datos</h1></div>
+        <div><p class="eyebrow">Configuración y contexto</p><h1>Datos</h1></div>
       </div>
 
       <article class="data-section">
-        <div class="data-section-heading"><span class="data-icon">P</span><div><strong>Plan basico</strong><small>Ingreso y frecuencia del periodo</small></div><button type="button" data-action="open-diagnosis">Editar</button></div>
+        <div class="data-section-heading"><span class="data-icon">${renderIcon("plan")}</span><div><strong>Plan básico</strong><small>Ingreso y frecuencia del periodo</small></div><button type="button" data-action="open-diagnosis" data-section="plan">Editar</button></div>
         <div class="data-metrics"><div><span>Presupuesto</span><strong>${formatMoney(getPeriodIncome(state.profile))}</strong></div><div><span>Frecuencia</span><strong>${capitalize(cadenceLabel(state.profile.incomeCadence))}</strong></div></div>
       </article>
 
       <article class="data-section">
-        <div class="data-section-heading"><span class="data-icon">S</span><div><strong>Saldos</strong><small>Dinero disponible hoy</small></div><button type="button" data-action="open-diagnosis">Editar</button></div>
-        <div class="data-metrics three"><div><span>Cuenta</span><strong>${formatMoney(liquidity.account)}</strong></div><div><span>Efectivo</span><strong>${formatMoney(liquidity.cash)}</strong></div><div><span>Total real</span><strong>${formatMoney(liquidity.total)}</strong></div></div>
+        <div class="data-section-heading"><span class="data-icon">${renderIcon("wallet")}</span><div><strong>Saldos</strong><small>Dinero disponible hoy</small></div><button type="button" data-action="open-diagnosis" data-section="balances">Editar</button></div>
+        <div class="money-location-list">
+          <div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("account")}</span><span class="money-location-text"><span>Cuenta</span><strong>${formatMoney(liquidity.account)}</strong></span></div>
+          <div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("cash")}</span><span class="money-location-text"><span>Efectivo</span><strong>${formatMoney(liquidity.cash)}</strong></span></div>
+          <div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("calculator")}</span><span class="money-location-text"><span>Total real</span><strong>${formatMoney(liquidity.total)}</strong></span></div>
+        </div>
       </article>
 
       <article class="data-section">
-        <div class="data-section-heading"><span class="data-icon">R</span><div><strong>Recomendacion</strong><small>Orientacion mensual simple</small></div><button type="button" data-view="savings">Ver ahorro</button></div>
+        <div class="data-section-heading"><span class="data-icon">${renderIcon("income")}</span><div><strong>Recomendación</strong><small>Orientación mensual simple</small></div><button type="button" data-view="savings">Ver ahorro</button></div>
         <div class="data-metrics three"><div><span>Ingreso mensual</span><strong>${formatMoney(monthlyIncome)}</strong></div><div><span>Ahorro proyectado</span><strong>${formatMoney(plan.savings)}</strong></div><div><span>Para gastos</span><strong>${formatMoney(plan.expenses)}</strong></div></div>
-        <p class="data-note">Es una simulacion: no modifica tu presupuesto ni tus saldos.</p>
+        <p class="data-note">Es una simulación: no modifica tu presupuesto ni tus saldos.</p>
       </article>
 
       <article class="data-section">
-        <div class="data-section-heading"><span class="data-icon">C</span><div><strong>Perfil conductual</strong><small>Opcional, ayuda a orientar el tono</small></div><button type="button" data-action="open-diagnosis">Editar</button></div>
+        <div class="data-section-heading"><span class="data-icon">${renderIcon("user")}</span><div><strong>Perfil conductual</strong><small>Opcional, ayuda a orientar el tono</small></div><button type="button" data-action="open-diagnosis" data-section="behavior">Editar</button></div>
         <div class="data-metrics three"><div><span>Patron dominante</span><strong>${script.name}</strong></div><div><span>Confianza</span><strong>${state.profile.selfEfficacy}/10</strong></div><div><span>Ansiedad</span><strong>${state.profile.financialAnxiety}/10</strong></div></div>
       </article>
 
+      <article class="data-section">
+        <div class="data-section-heading"><span class="data-icon">${renderIcon("lock")}</span><div><strong>Bloqueo con PIN</strong><small>${lockConfig.enabled ? "Activado. Pedimos tu PIN al abrir la app." : "Protege la app con un PIN de 4 digitos."}</small></div></div>
+        <div class="lock-settings-actions">
+          ${
+            lockConfig.enabled
+              ? `<button class="btn ghost" type="button" data-action="open-lock-setup">Cambiar PIN</button>
+                 ${
+                   lockConfig.biometric
+                     ? `<button class="btn ghost" type="button" data-action="disable-biometric">Quitar huella</button>`
+                     : `<button class="btn ghost" type="button" data-action="enable-biometric">Activar huella</button>`
+                 }
+                 <button class="btn danger" type="button" data-action="open-lock-disable">Desactivar</button>`
+              : `<button class="btn primary" type="button" data-action="open-lock-setup">Activar bloqueo</button>`
+          }
+        </div>
+      </article>
+
       <article class="sign-out-section">
-        <div><strong>${escapeHtml(cloudState.email)}</strong><span>La copia local se retirara de este dispositivo.</span></div>
-        <button class="btn danger" type="button" data-action="cloud-sign-out">Cerrar sesion</button>
+        <div><strong>${escapeHtml(cloudState.email)}</strong><span>La copia local se retirará de este dispositivo.</span></div>
+        <button class="btn danger" type="button" data-action="cloud-sign-out">Cerrar sesión</button>
+      </article>
+
+      <article class="sign-out-section">
+        <div><strong>Eliminar cuenta y datos</strong><span>Borra tu presupuesto, movimientos y ahorro guardados en la nube. No se puede deshacer.</span></div>
+        <button class="btn danger" type="button" data-action="open-delete-account">Eliminar cuenta</button>
       </article>
     </section>
+  `;
+}
+
+function periodStatusLabel(status) {
+  return status === "risk" ? "En riesgo" : status === "tight" ? "Ajustado" : "Saludable";
+}
+
+function progressStreak(closures) {
+  let streak = 0;
+  for (const closure of closures) {
+    if (closure.status !== "healthy") {
+      break;
+    }
+    streak += 1;
+  }
+  return streak;
+}
+
+function progressTopExceededCategories(closures, limit = 3) {
+  const tally = new Map();
+  closures.forEach((closure) => {
+    (closure.exceededCategories || []).forEach((category) => {
+      const entry = tally.get(category.name) || { name: category.name, count: 0, totalOver: 0 };
+      entry.count += 1;
+      entry.totalOver += Number(category.over || 0);
+      tally.set(category.name, entry);
+    });
+  });
+  return Array.from(tally.values()).sort((a, b) => b.count - a.count || b.totalOver - a.totalOver).slice(0, limit);
+}
+
+function renderProgressView() {
+  const closures = (state.periodClosures || []).slice().sort((a, b) => (a.windowStart < b.windowStart ? 1 : -1));
+
+  if (!closures.length) {
+    return `
+      <section class="screen-view progress-view" aria-label="Progreso">
+        <div class="screen-title-row">
+          <div><p class="eyebrow">Historial entre periodos</p><h1>Progreso</h1></div>
+        </div>
+        <div class="empty-state actionable-empty">
+          <p>Aun no has cerrado ningun periodo. Cuando guardes tu primer cierre, aquí verás como cambia tu resultado con el tiempo.</p>
+          <button class="btn primary" type="button" data-view="periodClose">Ver cierre de periodo</button>
+        </div>
+        ${renderBehaviorInsights()}
+      </section>
+    `;
+  }
+
+  const streak = progressStreak(closures);
+  const latest = closures[0];
+  const previous = closures[1];
+  const trendDelta = previous ? latest.freeFinal - previous.freeFinal : null;
+  const topExceeded = progressTopExceededCategories(closures);
+
+  return `
+    <section class="screen-view progress-view" aria-label="Progreso">
+      <div class="screen-title-row">
+        <div><p class="eyebrow">Historial entre periodos</p><h1>Progreso</h1></div>
+      </div>
+
+      <article class="progress-hero ${streak > 0 ? "healthy" : ""}">
+        <span class="progress-hero-icon" aria-hidden="true">${renderIcon("trend")}</span>
+        <div>
+          <span>${streak > 0 ? "Racha activa" : "Sin racha activa"}</span>
+          <strong>${streak > 0 ? `${streak} ${streak === 1 ? "periodo seguido saludable" : "periodos seguidos saludables"}` : "Cierra un periodo saludable para empezar una racha"}</strong>
+          ${trendDelta !== null ? `<p>Quedaron ${formatMoney(Math.abs(trendDelta))} ${trendDelta >= 0 ? "más" : "menos"} libres que el periodo anterior.</p>` : ""}
+        </div>
+      </article>
+
+      <div class="home-section-heading">
+        <div><p class="eyebrow">Últimos periodos</p><h2>Cómo te fue</h2></div>
+      </div>
+      <div class="progress-history">
+        ${closures
+          .map((closure) => {
+            const ratio = closure.income > 0 ? clamp((closure.spent / closure.income) * 100, 0, 130) : 0;
+            const band = closure.status === "risk" ? "danger" : closure.status === "tight" ? "warning" : "good";
+            const period = `${formatShortDate(closure.windowStart)} - ${formatShortDate(previousDay(closure.windowEnd))}`;
+            return `
+              <article class="progress-row ${closure.status}">
+                <div class="progress-row-top">
+                  <div><strong>${period}</strong><span class="progress-row-status">${periodStatusLabel(closure.status)}</span></div>
+                  <strong class="${closure.freeFinal < 0 ? "negative" : ""}">${formatMoney(closure.freeFinal)}</strong>
+                </div>
+                <div class="bar ${band}" aria-label="${Math.round(ratio)} por ciento del ingreso gastado">
+                  <span style="width:${ratio}%"></span>
+                </div>
+                <div class="progress-row-meta">
+                  <span>${formatMoney(closure.spent)} gastado de ${formatMoney(closure.income)}</span>
+                  ${(closure.exceededCategories || []).length ? `<span>${closure.exceededCategories.length} ${closure.exceededCategories.length === 1 ? "categoría excedida" : "categorías excedidas"}</span>` : ""}
+                </div>
+              </article>
+            `;
+          })
+          .join("")}
+      </div>
+
+      ${
+        topExceeded.length
+          ? `
+        <div class="home-section-heading">
+          <div><p class="eyebrow">Patrones repetidos</p><h2>Lo que más se excede</h2></div>
+        </div>
+        <div class="progress-history">
+          ${topExceeded
+            .map(
+              (category) => `
+                <article class="progress-row">
+                  <div class="progress-row-top">
+                    <div><strong>${escapeHtml(category.name)}</strong><span class="progress-row-status">${category.count} ${category.count === 1 ? "vez excedida" : "veces excedida"}</span></div>
+                    <strong>${formatMoney(category.totalOver)}</strong>
+                  </div>
+                </article>
+              `
+            )
+            .join("")}
+        </div>
+      `
+          : ""
+      }
+      ${renderBehaviorInsights()}
+    </section>
+  `;
+}
+
+const SMALL_EXPENSE_THRESHOLD = 15000;
+const WEEKDAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+
+function previousPeriodWindow(summary) {
+  const start = new Date(`${summary.window.start}T00:00:00`);
+  const end = new Date(`${summary.window.end}T00:00:00`);
+  const lengthMs = end.getTime() - start.getTime();
+  const prevStart = new Date(start.getTime() - lengthMs);
+  return { start: todayKey(prevStart), end: summary.window.start };
+}
+
+function weekdaySpendingInsight(summary) {
+  const transactions = transactionsForSummary(summary);
+  if (transactions.length < 6) {
+    return null;
+  }
+  const totals = new Array(7).fill(0);
+  transactions.forEach((transaction) => {
+    const day = new Date(`${transaction.date}T12:00:00`).getDay();
+    totals[day] += Number(transaction.amount || 0);
+  });
+  const totalSpent = totals.reduce((sum, value) => sum + value, 0);
+  if (totalSpent <= 0) {
+    return null;
+  }
+  const daysWithSpend = totals.map((total, day) => ({ day, total })).filter((entry) => entry.total > 0);
+  if (daysWithSpend.length < 3) {
+    return null;
+  }
+  const top = daysWithSpend.reduce((best, entry) => (entry.total > best.total ? entry : best));
+  const share = (top.total / totalSpent) * 100;
+  if (share < 25) {
+    return null;
+  }
+  return {
+    icon: "calendar",
+    title: `Los ${WEEKDAY_NAMES[top.day]}s concentran tus gastos`,
+    detail: `Gastaste ${formatMoney(top.total)} en ${WEEKDAY_NAMES[top.day]}s este periodo, ${Math.round(share)}% de lo que llevas gastado.`
+  };
+}
+
+function categoryTrendInsight(summary) {
+  const prevWindow = previousPeriodWindow(summary);
+  const currentByCategory = {};
+  transactionsForSummary(summary).forEach((transaction) => {
+    const category = transaction.category || FREE_CATEGORY_ID;
+    currentByCategory[category] = (currentByCategory[category] || 0) + Number(transaction.amount || 0);
+  });
+  const prevByCategory = {};
+  (state.transactions || []).forEach((transaction) => {
+    const date = String(transaction.date || "").slice(0, 10);
+    if (date >= prevWindow.start && date < prevWindow.end) {
+      const category = transaction.category || FREE_CATEGORY_ID;
+      prevByCategory[category] = (prevByCategory[category] || 0) + Number(transaction.amount || 0);
+    }
+  });
+  let best = null;
+  Object.keys(currentByCategory).forEach((category) => {
+    const current = currentByCategory[category];
+    const previous = prevByCategory[category] || 0;
+    if (previous < 5000) {
+      return;
+    }
+    const diff = current - previous;
+    const pct = (diff / previous) * 100;
+    if (pct >= 30 && diff >= 10000 && (!best || diff > best.diff)) {
+      best = { category, current, previous, diff, pct };
+    }
+  });
+  if (!best) {
+    return null;
+  }
+  return {
+    icon: "trend",
+    title: `${categoryName(best.category)} subio frente al periodo pasado`,
+    detail: `Gastaste ${formatMoney(best.current)}, ${Math.round(best.pct)}% más que los ${formatMoney(best.previous)} del periodo anterior.`
+  };
+}
+
+function smallExpensesInsight(summary) {
+  const transactions = transactionsForSummary(summary);
+  const small = transactions.filter((transaction) => {
+    const amount = Number(transaction.amount || 0);
+    return amount > 0 && amount < SMALL_EXPENSE_THRESHOLD;
+  });
+  if (small.length < 5) {
+    return null;
+  }
+  const total = small.reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  const totalSpent = Number(summary.totalSpent || 0);
+  const share = totalSpent > 0 ? (total / totalSpent) * 100 : 0;
+  if (share < 10) {
+    return null;
+  }
+  return {
+    icon: "cash",
+    title: "Gasto hormiga acumulado",
+    detail: `${small.length} gastos menores a ${formatMoney(SMALL_EXPENSE_THRESHOLD)} suman ${formatMoney(total)}, ${Math.round(share)}% de lo gastado este periodo.`
+  };
+}
+
+function behaviorInsights(summary = budgetSummary()) {
+  return [weekdaySpendingInsight(summary), categoryTrendInsight(summary), smallExpensesInsight(summary)].filter(Boolean);
+}
+
+function renderBehaviorInsights(summary = budgetSummary()) {
+  const insights = behaviorInsights(summary);
+  if (!insights.length) {
+    return "";
+  }
+  return `
+    <div class="home-section-heading">
+      <div><p class="eyebrow">Basado en tus movimientos</p><h2>Lo que dicen tus datos</h2></div>
+    </div>
+    <div class="insight-list">
+      ${insights
+        .map(
+          (insight) => `
+            <article class="insight-card">
+              <span class="insight-icon" aria-hidden="true">${renderIcon(insight.icon)}</span>
+              <div>
+                <strong>${escapeHtml(insight.title)}</strong>
+                <span>${escapeHtml(insight.detail)}</span>
+              </div>
+            </article>
+          `
+        )
+        .join("")}
+    </div>
   `;
 }
 
@@ -2773,10 +3692,18 @@ function renderOnboardingModal() {
         <form id="onboarding-form" class="onboarding-form" novalidate>
           <section class="onboarding-step is-active" data-step="1">
             <span class="step-badge">Paso 1 de 3</span>
-            <h2 id="onboarding-title">¿Cuando recibes dinero?</h2>
-            <p>Asi calculamos cuanto tienes disponible en cada periodo.</p>
+            <h2 id="onboarding-title">¿Ganas dinero periódicamente?</h2>
+            <p>Así calculamos cuanto tienes disponible en cada periodo.</p>
             <div class="sheet-field">
-              <span class="sheet-label">¿Cada cuanto recibes?</span>
+              <span class="sheet-label">¿Tu ingreso es fijo o variable?</span>
+              <div class="onboarding-segmented" data-onboarding-income-type-group>
+                <button type="button" data-onboarding-income-type="fixed" class="${profile.incomeType !== "variable" ? "is-active" : ""}">Fijo (salario)</button>
+                <button type="button" data-onboarding-income-type="variable" class="${profile.incomeType === "variable" ? "is-active" : ""}">Variable / freelance</button>
+              </div>
+              <input name="incomeType" type="hidden" value="${escapeAttr(profile.incomeType === "variable" ? "variable" : "fixed")}">
+            </div>
+            <div class="sheet-field">
+              <span class="sheet-label">¿Cada cuánto recibes?</span>
               <div class="onboarding-segmented" data-onboarding-cadence-group>
                 <button type="button" data-onboarding-cadence="weekly" class="${profile.incomeCadence === "weekly" ? "is-active" : ""}">Semanal</button>
                 <button type="button" data-onboarding-cadence="monthly" class="${profile.incomeCadence === "monthly" ? "is-active" : ""}">Mensual</button>
@@ -2785,18 +3712,22 @@ function renderOnboardingModal() {
               <input name="incomeCadence" type="hidden" value="${escapeAttr(profile.incomeCadence)}">
             </div>
             <label>
-              ¿Cuanto recibes por periodo?
+              ¿Cuánto recibes por periodo?
               <input name="incomeAmount" type="number" min="1" step="1000" inputmode="numeric" value="${getPeriodIncome(profile)}" required>
             </label>
             <div class="onboarding-preview"><span>Libre estimado</span><strong data-onboarding-income-preview>${formatMoney(income)}</strong></div>
-            <small class="onboarding-note">Despues separaras reservas para gastos habituales y este numero bajara.</small>
-            <input name="periodStart" type="hidden" value="${escapeAttr(profile.periodStart || monthStartKey())}">
+            <small class="onboarding-note">Después separarás reservas para gastos habituales y este número bajará.</small>
+            <label data-onboarding-payday-field ${profile.incomeType === "variable" ? "hidden" : ""}>
+              ¿Qué día te pagan?
+              <input name="periodStart" type="${profile.incomeType === "variable" ? "hidden" : "date"}" value="${escapeAttr(profile.periodStart || monthStartKey())}" ${profile.incomeType === "variable" ? "" : "required"}>
+            </label>
+            <small class="onboarding-note" data-onboarding-payday-note ${profile.incomeType === "variable" ? "hidden" : ""}>Ese día tu ingreso se suma automáticamente a tu dinero libre. Podrás corregirlo si aún no te ha llegado.</small>
           </section>
 
           <section class="onboarding-step" data-step="2">
             <span class="step-badge">Paso 2 de 3</span>
-            <h2>¿Donde tienes ese dinero?</h2>
-            <p>La app distingue entre cuenta y efectivo para que los saldos reflejen la realidad.</p>
+            <h2>¿Cuánto tienes hoy en cuenta y efectivo?</h2>
+            <p>Esto es tu saldo real ahora mismo, no tiene que coincidir con lo que recibes por periodo. Si vas a empezar desde cero, deja ambos en $0.</p>
             <div class="onboarding-balance-grid">
               <label class="balance-card">
                 <span>Cuenta</span>
@@ -2808,13 +3739,13 @@ function renderOnboardingModal() {
               </label>
             </div>
             <div class="onboarding-preview"><span>Total real</span><strong data-onboarding-total-preview>${formatMoney(liquidity.account + liquidity.cash)}</strong></div>
-            <small class="balance-hint" data-onboarding-balance></small>
+            <small class="balance-hint" data-onboarding-balance>Puedes ajustar esto despues, cuando quieras, desde Datos.</small>
           </section>
 
           <section class="onboarding-step" data-step="3">
             <span class="step-badge">Paso 3 de 3</span>
-            <h2>¿Para que separas dinero?</h2>
-            <p>Elige categorias habituales. Puedes ajustar sus montos despues.</p>
+            <h2>¿Para qué separas dinero?</h2>
+            <p>Elige categorías habituales. Puedes ajustar sus montos después.</p>
             <div class="onboarding-category-chips">
               ${suggestions.map(([name, rate, selected], index) => `
                 <button type="button" class="onboarding-category-chip ${selected ? "is-active" : ""}" data-onboarding-category-chip data-category-index="${index}" data-rate="${rate}">${name}</button>
@@ -2824,15 +3755,15 @@ function renderOnboardingModal() {
               `).join("")}
             </div>
             <div class="onboarding-preview category-preview">
-              <span>Libre estimado despues de reservas</span>
+              <span>Libre estimado después de reservas</span>
               <strong data-onboarding-free-preview>${formatMoney(income * 0.64)}</strong>
-              <small data-onboarding-category-count>de ${formatMoney(income)} · 3 categorias seleccionadas</small>
+              <small data-onboarding-category-count>de ${formatMoney(income)} · 3 categorías seleccionadas</small>
             </div>
           </section>
 
           <p class="form-error onboarding-error" role="alert" aria-live="assertive"></p>
           <div class="onboarding-actions">
-            <button class="btn ghost onboarding-back" type="button" data-onboarding-back hidden>← Atras</button>
+            <button class="btn ghost onboarding-back" type="button" data-onboarding-back hidden>← Atrás</button>
             <button class="btn primary onboarding-next" type="button" data-onboarding-next>Siguiente →</button>
             <button class="btn primary onboarding-finish" type="submit" hidden>Ver mi dinero libre</button>
             <button class="btn ghost onboarding-skip" type="button" data-onboarding-skip hidden>Saltarme esto por ahora</button>
@@ -2843,14 +3774,39 @@ function renderOnboardingModal() {
   `;
 }
 
+const DIAGNOSIS_SECTIONS = {
+  plan: {
+    icon: "plan",
+    title: "Plan básico",
+    subtitle: "Ingreso y frecuencia del periodo",
+    fields: ["name", "incomeCadence", "incomeType", "incomeAmount", "periodStart", "committedExpenses", "payday"]
+  },
+  balances: {
+    icon: "wallet",
+    title: "Saldos",
+    subtitle: "Dinero disponible hoy",
+    fields: ["account", "cash", "emergencySavings"]
+  },
+  behavior: {
+    icon: "user",
+    title: "Perfil conductual",
+    subtitle: "Opcional, ayuda a orientar el tono",
+    fields: ["volatility", "selfEfficacy", "financialAnxiety", "worship", "avoidance", "status", "vigilance"]
+  }
+};
+
 function renderDiagnosisModal() {
   if (!state.profile.completed) {
     return renderOnboardingModal();
   }
 
-  const profile = state.profile;
-  const liquidity = normalizeLiquidity(state.liquidity);
-  const available = liquidity.initialized ? liquidity : { account: 0, cash: 0 };
+  const sectionKey = DIAGNOSIS_SECTIONS[state.diagnosisSection] ? state.diagnosisSection : "plan";
+  const section = DIAGNOSIS_SECTIONS[sectionKey];
+  const bodyBySection = {
+    plan: renderDiagnosisPlanFields,
+    balances: renderDiagnosisBalancesFields,
+    behavior: renderDiagnosisBehaviorFields
+  };
 
   return `
     <div class="modal-backdrop" role="presentation">
@@ -2858,117 +3814,129 @@ function renderDiagnosisModal() {
         <div class="modal-heading">
           <div>
             <p class="eyebrow">Personalizar plan</p>
-            <h2 id="diagnosis-title">Mis datos</h2>
+            <h2 id="diagnosis-title">${escapeHtml(section.title)}</h2>
           </div>
           <button class="icon-btn" type="button" data-action="close-diagnosis" aria-label="Cerrar">x</button>
         </div>
         ${diagnosisValidation.message ? `<p class="form-error diagnosis-error" role="alert" aria-live="assertive">${escapeHtml(diagnosisValidation.message)}</p>` : ""}
-        <form id="diagnosis-form" class="diagnosis-form" novalidate>
+        <form id="diagnosis-form" class="diagnosis-form" data-diagnosis-section="${sectionKey}" novalidate>
           <fieldset>
-            <legend>Datos principales</legend>
-            <label>
-              Nombre del plan
-              <input name="name" type="text" maxlength="32" value="${escapeAttr(profile.name)}" required ${diagnosisInvalidAttr("name")}>
-              ${renderDiagnosisFieldError("name")}
-            </label>
-            <label>
-              Cada cuanto recibes presupuesto
-              <select name="incomeCadence" ${diagnosisInvalidAttr("incomeCadence")}>
-                ${renderIncomeCadenceOptions(profile.incomeCadence)}
-              </select>
-              ${renderDiagnosisFieldError("incomeCadence")}
-            </label>
-            <label>
-              Presupuesto por periodo
-              <input name="incomeAmount" type="number" min="0" step="1000" value="${getPeriodIncome(profile)}" required ${diagnosisInvalidAttr("incomeAmount")}>
-              ${renderDiagnosisFieldError("incomeAmount")}
-            </label>
-            <label>
-              Inicio del periodo actual
-              <input name="periodStart" type="date" value="${escapeAttr(profile.periodStart || profile.semesterStart || monthStartKey())}" required ${diagnosisInvalidAttr("periodStart")}>
-              ${renderDiagnosisFieldError("periodStart")}
-            </label>
-            <label>
-              Ingreso mensual equivalente
-              <input name="monthlyIncome" type="number" min="0" step="1000" value="${getMonthlyIncome(profile)}" readonly>
-            </label>
-            <label>
-              Gastos comprometidos
-              <input name="committedExpenses" type="number" min="0" step="1000" value="${profile.committedExpenses}" required ${diagnosisInvalidAttr("committedExpenses")}>
-              ${renderDiagnosisFieldError("committedExpenses")}
-            </label>
-            <label>
-              Ahorro actual para simular
-              <input name="emergencySavings" type="number" min="0" step="1000" value="${profile.emergencySavings}" required ${diagnosisInvalidAttr("emergencySavings")}>
-              ${renderDiagnosisFieldError("emergencySavings")}
-            </label>
-            <label>
-              Dia de pago principal
-              <input name="payday" type="number" min="0" max="28" inputmode="numeric" value="${profile.payday}" ${diagnosisInvalidAttr("payday")}>
-              <small>Usa 0 si no tienes un dia fijo.</small>
-              ${renderDiagnosisFieldError("payday")}
-            </label>
-            <label>
-              Dinero en cuenta
-              <input name="account" type="number" min="0" step="1000" value="${available.account}" required ${diagnosisInvalidAttr("account")}>
-              ${renderDiagnosisFieldError("account")}
-            </label>
-            <label>
-              Dinero en fisico
-              <input name="cash" type="number" min="0" step="1000" value="${available.cash}" required ${diagnosisInvalidAttr("cash")}>
-              ${renderDiagnosisFieldError("cash")}
-            </label>
-            <small class="balance-hint" data-liquidity-match-hint></small>
-          </fieldset>
-
-          <div class="modal-actions quick-save-actions">
-            <button class="btn primary" type="submit">Guardar plan</button>
-          </div>
-
-          <fieldset>
-            <legend>Tipo de ingreso</legend>
-            <label>
-              Frecuencia
-              <select name="incomeType" ${diagnosisInvalidAttr("incomeType")}>
-                <option value="fixed" ${profile.incomeType === "fixed" ? "selected" : ""}>Fijo</option>
-                <option value="variable" ${profile.incomeType === "variable" ? "selected" : ""}>Variable / freelance</option>
-              </select>
-              ${renderDiagnosisFieldError("incomeType")}
-            </label>
-            <label>
-              Volatilidad
-              <select name="volatility" ${diagnosisInvalidAttr("volatility")}>
-                <option value="low" ${profile.volatility === "low" ? "selected" : ""}>Baja</option>
-                <option value="medium" ${profile.volatility === "medium" ? "selected" : ""}>Media</option>
-                <option value="high" ${profile.volatility === "high" ? "selected" : ""}>Alta</option>
-              </select>
-              ${renderDiagnosisFieldError("volatility")}
-            </label>
-            <label>
-              Confianza financiera: ${profile.selfEfficacy}/10
-              <input name="selfEfficacy" type="range" min="1" max="10" value="${profile.selfEfficacy}">
-            </label>
-            <label>
-              Ansiedad financiera: ${profile.financialAnxiety}/10
-              <input name="financialAnxiety" type="range" min="1" max="10" value="${profile.financialAnxiety}">
-            </label>
-          </fieldset>
-
-          <fieldset>
-            <legend>Patrones de dinero</legend>
-            ${renderScriptQuestion("worship", "Siento que las cosas mejorarian mucho si tuviera mas dinero.")}
-            ${renderScriptQuestion("avoidance", "A veces siento que no merezco dinero cuando otras personas tienen menos.")}
-            ${renderScriptQuestion("status", "Mi valor personal se refleja en mis logros financieros.")}
-            ${renderScriptQuestion("vigilance", "Me cuesta disfrutar el dinero porque prefiero guardarlo por seguridad.")}
+            <legend>${escapeHtml(section.subtitle)}</legend>
+            ${bodyBySection[sectionKey]()}
           </fieldset>
 
           <div class="modal-actions">
             <button class="btn ghost" type="button" data-action="close-diagnosis">Cancelar</button>
-            <button class="btn primary" type="submit">Guardar y usar mi plan</button>
+            <button class="btn primary" type="submit">Guardar</button>
           </div>
         </form>
       </section>
     </div>
+  `;
+}
+
+function renderDiagnosisPlanFields() {
+  const profile = state.profile;
+  return `
+    <label>
+      Nombre del plan
+      <input name="name" type="text" maxlength="32" value="${escapeAttr(profile.name)}" required ${diagnosisInvalidAttr("name")}>
+      ${renderDiagnosisFieldError("name")}
+    </label>
+    <label>
+      Cada cuanto recibes presupuesto
+      <select name="incomeCadence" ${diagnosisInvalidAttr("incomeCadence")}>
+        ${renderIncomeCadenceOptions(profile.incomeCadence)}
+      </select>
+      ${renderDiagnosisFieldError("incomeCadence")}
+    </label>
+    <label>
+      Presupuesto por periodo
+      <input name="incomeAmount" type="number" min="0" step="1000" value="${getPeriodIncome(profile)}" required ${diagnosisInvalidAttr("incomeAmount")}>
+      ${renderDiagnosisFieldError("incomeAmount")}
+    </label>
+    <label>
+      ¿Tu ingreso es fijo o variable?
+      <select name="incomeType" ${diagnosisInvalidAttr("incomeType")}>
+        <option value="fixed" ${profile.incomeType !== "variable" ? "selected" : ""}>Fijo (salario, día de pago conocido)</option>
+        <option value="variable" ${profile.incomeType === "variable" ? "selected" : ""}>Variable / freelance</option>
+      </select>
+      <small>${profile.incomeType === "variable"
+        ? "Registra cada ingreso manualmente cuando te llegue."
+        : "El día de pago tu ingreso se suma automáticamente a tu dinero libre."}</small>
+      ${renderDiagnosisFieldError("incomeType")}
+    </label>
+    <label>
+      ${profile.incomeType === "variable" ? "Inicio del periodo actual" : "Día que te pagan (inicio del periodo)"}
+      <input name="periodStart" type="date" value="${escapeAttr(profile.periodStart || profile.semesterStart || monthStartKey())}" required ${diagnosisInvalidAttr("periodStart")}>
+      ${renderDiagnosisFieldError("periodStart")}
+    </label>
+    <label>
+      Ingreso mensual equivalente
+      <input name="monthlyIncome" type="number" min="0" step="1000" value="${getMonthlyIncome(profile)}" readonly>
+    </label>
+    <label>
+      Gastos comprometidos
+      <input name="committedExpenses" type="number" min="0" step="1000" value="${profile.committedExpenses}" required ${diagnosisInvalidAttr("committedExpenses")}>
+      ${renderDiagnosisFieldError("committedExpenses")}
+    </label>
+    <label>
+      Día de pago principal
+      <input name="payday" type="number" min="0" max="28" inputmode="numeric" value="${profile.payday}" ${diagnosisInvalidAttr("payday")}>
+      <small>Usa 0 si no tienes un día fijo.</small>
+      ${renderDiagnosisFieldError("payday")}
+    </label>
+  `;
+}
+
+function renderDiagnosisBalancesFields() {
+  const profile = state.profile;
+  const liquidity = normalizeLiquidity(state.liquidity);
+  const available = liquidity.initialized ? liquidity : { account: 0, cash: 0 };
+  return `
+    <label>
+      Dinero en cuenta
+      <input name="account" type="number" min="0" step="1000" value="${available.account}" required ${diagnosisInvalidAttr("account")}>
+      ${renderDiagnosisFieldError("account")}
+    </label>
+    <label>
+      Dinero en físico
+      <input name="cash" type="number" min="0" step="1000" value="${available.cash}" required ${diagnosisInvalidAttr("cash")}>
+      ${renderDiagnosisFieldError("cash")}
+    </label>
+    <small class="balance-hint" data-liquidity-match-hint></small>
+    <label>
+      Ahorro actual para simular
+      <input name="emergencySavings" type="number" min="0" step="1000" value="${profile.emergencySavings}" required ${diagnosisInvalidAttr("emergencySavings")}>
+      ${renderDiagnosisFieldError("emergencySavings")}
+    </label>
+  `;
+}
+
+function renderDiagnosisBehaviorFields() {
+  const profile = state.profile;
+  return `
+    <label>
+      Volatilidad
+      <select name="volatility" ${diagnosisInvalidAttr("volatility")}>
+        <option value="low" ${profile.volatility === "low" ? "selected" : ""}>Baja</option>
+        <option value="medium" ${profile.volatility === "medium" ? "selected" : ""}>Media</option>
+        <option value="high" ${profile.volatility === "high" ? "selected" : ""}>Alta</option>
+      </select>
+      ${renderDiagnosisFieldError("volatility")}
+    </label>
+    <label>
+      Confianza financiera: ${profile.selfEfficacy}/10
+      <input name="selfEfficacy" type="range" min="1" max="10" value="${profile.selfEfficacy}">
+    </label>
+    <label>
+      Ansiedad financiera: ${profile.financialAnxiety}/10
+      <input name="financialAnxiety" type="range" min="1" max="10" value="${profile.financialAnxiety}">
+    </label>
+    ${renderScriptQuestion("worship", "Siento que las cosas mejorarian mucho si tuviera más dinero.")}
+    ${renderScriptQuestion("avoidance", "A veces siento que no merezco dinero cuando otras personas tienen menos.")}
+    ${renderScriptQuestion("status", "Mi valor personal se refleja en mis logros financieros.")}
+    ${renderScriptQuestion("vigilance", "Me cuesta disfrutar el dinero porque prefiero guardarlo por seguridad.")}
   `;
 }
 
@@ -2999,6 +3967,10 @@ function renderDiagnosisFieldError(name) {
   return `<small class="field-error">${escapeHtml(diagnosisValidation.message)}</small>`;
 }
 
+function categoryStatusLabel(ratio) {
+  return ratio > 100 ? "Excedida" : ratio > 90 ? "Crítica" : ratio > 65 ? "Atención" : "Saludable";
+}
+
 function renderCategoryBars(plan, limit) {
   const categories = categoryStatus()
     .sort((a, b) => b.ratio - a.ratio)
@@ -3014,9 +3986,10 @@ function renderCategoryBars(plan, limit) {
                 <strong>${escapeHtml(category.name)}</strong>
                 <span class="category-numbers">${formatMoney(category.spent)} / ${formatMoney(category.budget)}</span>
               </div>
-              <div class="bar ${category.band}">
+              <div class="bar ${category.band}" aria-label="${Math.round(category.ratio)} por ciento usado">
                 <span style="width:${clamp(category.ratio, 0, 120)}%"></span>
               </div>
+              <span class="category-status">${categoryStatusLabel(category.ratio)} · ${Math.round(clamp(category.ratio, 0, 999))}%</span>
             </div>
           `
         )
@@ -3096,6 +4069,7 @@ function renderProgress(value, label) {
 
 function bindEvents() {
   bindMoneyInputs();
+  animateBudgetRingCharts();
 
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -3143,6 +4117,12 @@ function bindEvents() {
   if (budgetForm) {
     bindPlanCategoryPreview(budgetForm);
     budgetForm.addEventListener("submit", handleBudgetSubmit);
+  }
+
+  const setAsideForm = document.querySelector("#setaside-form");
+  if (setAsideForm) {
+    bindSetAsidePreview(setAsideForm);
+    setAsideForm.addEventListener("submit", handleSetAsideSubmit);
   }
 
   const extraBudgetForm = document.querySelector("#extra-budget-form");
@@ -3193,12 +4173,81 @@ function bindEvents() {
     form.addEventListener("submit", handleCloudLoginSubmit);
   });
 
+  document.querySelectorAll("[data-cloud-forgot-form]").forEach((form) => {
+    form.addEventListener("submit", handleForgotPasswordSubmit);
+  });
+
+  bindPasswordToggles();
+
   const historySort = document.querySelector("#transaction-history-sort");
   if (historySort) {
     historySort.addEventListener("change", () => {
       transactionHistorySort = historySort.value === "amount" ? "amount" : "recent";
       render();
     });
+  }
+
+  const historyFilter = document.querySelector("#transaction-history-filter");
+  if (historyFilter) {
+    historyFilter.addEventListener("change", () => {
+      transactionHistoryFilter = historyFilter.value || "all";
+      render();
+    });
+  }
+
+  const historySearch = document.querySelector("#transaction-history-search");
+  if (historySearch) {
+    historySearch.addEventListener("input", () => {
+      transactionHistorySearch = historySearch.value;
+      // Repaint only the results. A full render() on every keystroke rebuilds the
+      // whole screen, which visibly flickers and throws away the caret (we used to
+      // paper over that by restoring focus afterwards).
+      const results = document.querySelector("#transaction-history-results");
+      if (!results) {
+        render();
+        return;
+      }
+      results.innerHTML = renderTransactionHistory(
+        budgetSummary(),
+        transactionHistorySort,
+        transactionHistoryFilter,
+        transactionHistorySearch,
+        transactionHistoryDate
+      );
+      results.querySelectorAll("[data-action]").forEach((button) => {
+        button.addEventListener("click", handleAction);
+      });
+    });
+  }
+
+  document.querySelectorAll("[data-lock-digit]").forEach((button) => {
+    button.addEventListener("click", () => pushLockDigit(button.dataset.lockDigit));
+  });
+  const lockBackspace = document.querySelector("[data-lock-backspace]");
+  if (lockBackspace) {
+    lockBackspace.addEventListener("click", () => {
+      lockDigits = lockDigits.slice(0, -1);
+      lockError = "";
+      render();
+    });
+  }
+  const lockCancel = document.querySelector("[data-lock-cancel]");
+  if (lockCancel) {
+    lockCancel.addEventListener("click", () => {
+      lockMode = "";
+      lockDigits = "";
+      lockFirstEntry = "";
+      lockError = "";
+      render();
+    });
+  }
+  const lockBiometric = document.querySelector("[data-lock-biometric]");
+  if (lockBiometric) {
+    lockBiometric.addEventListener("click", () => tryBiometricUnlock());
+  }
+  if (lockMode === "unlock" && lockConfig.biometric && !biometricAutoTried && !lockIsCoolingDown()) {
+    biometricAutoTried = true;
+    tryBiometricUnlock();
   }
 
   bindDialogBehavior();
@@ -3330,16 +4379,13 @@ function bindOnboardingFlowV2(form) {
   const categoryCount = form.querySelector("[data-onboarding-category-count]");
   const progress = modal.querySelector(".onboarding-progress");
 
+  // El saldo real (cuenta + efectivo) es independiente del ingreso por periodo:
+  // alguien puede empezar en $0, o ya tener guardado mas o menos que un periodo
+  // de ingreso. Antes se exigia que sumaran exactamente igual, lo que bloqueaba
+  // el paso para cualquiera que no tuviera esa coincidencia exacta.
   const updateBalance = () => {
     const data = new FormData(form);
-    const budget = numberFrom(data.get("incomeAmount"));
     const total = numberFrom(data.get("account")) + numberFrom(data.get("cash"));
-    const matches = budget > 0 && total === budget;
-    balanceHint.textContent = matches
-      ? `Coincide con tu presupuesto de ${formatMoney(budget)}.`
-      : `Cuenta + efectivo suma ${formatMoney(total)} de ${formatMoney(budget)}.`;
-    balanceHint.classList.toggle("is-ok", matches);
-    balanceHint.classList.toggle("is-error", !matches);
     if (totalPreview) totalPreview.textContent = formatMoney(total);
   };
 
@@ -3364,7 +4410,7 @@ function bindOnboardingFlowV2(form) {
     });
     if (incomePreview) incomePreview.textContent = formatMoney(income);
     if (freePreview) freePreview.textContent = formatMoney(Math.max(0, income - reserved));
-    if (categoryCount) categoryCount.textContent = `de ${formatMoney(income)} · ${selected} categorias seleccionadas`;
+    if (categoryCount) categoryCount.textContent = `de ${formatMoney(income)} · ${selected} categorías seleccionadas`;
   };
 
   const showStep = (step) => {
@@ -3399,6 +4445,29 @@ function bindOnboardingFlowV2(form) {
       form.querySelectorAll("[data-onboarding-cadence]").forEach((item) => item.classList.toggle("is-active", item === button));
     });
   });
+  const paydayField = form.querySelector("[data-onboarding-payday-field]");
+  const paydayNote = form.querySelector("[data-onboarding-payday-note]");
+  const paydayInput = form.elements.namedItem("periodStart");
+  form.querySelectorAll("[data-onboarding-income-type]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const incomeType = button.dataset.onboardingIncomeType;
+      form.elements.namedItem("incomeType").value = incomeType;
+      form.querySelectorAll("[data-onboarding-income-type]").forEach((item) => item.classList.toggle("is-active", item === button));
+      const isFixed = incomeType !== "variable";
+      if (paydayField) paydayField.hidden = !isFixed;
+      if (paydayNote) paydayNote.hidden = !isFixed;
+      if (paydayInput) {
+        paydayInput.type = isFixed ? "date" : "hidden";
+        if (isFixed) {
+          paydayInput.required = true;
+          if (!paydayInput.value) paydayInput.value = todayKey();
+        } else {
+          paydayInput.required = false;
+          paydayInput.value = monthStartKey();
+        }
+      }
+    });
+  });
   form.querySelectorAll("[data-onboarding-category-chip]").forEach((chip) => {
     chip.addEventListener("click", () => {
       chip.classList.toggle("is-active");
@@ -3418,13 +4487,11 @@ function validateOnboardingStep(form, step) {
   if (step === 1 && numberFrom(data.get("incomeAmount")) <= 0) {
     return "Escribe un presupuesto mayor que cero.";
   }
-  if (step === 2) {
-    const budget = numberFrom(data.get("incomeAmount"));
-    const total = numberFrom(data.get("account")) + numberFrom(data.get("cash"));
-    if (total !== budget) {
-      return `Cuenta + efectivo debe sumar ${formatMoney(budget)}.`;
-    }
+  if (step === 1 && data.get("incomeType") !== "variable" && !cleanDate(data.get("periodStart"), "")) {
+    return "Elige el día en que te pagan.";
   }
+  // El paso 2 (saldo real) no se valida contra el presupuesto: son dos numeros
+  // independientes (ver nota en updateBalance). $0 en ambos es una respuesta valida.
   return "";
 }
 
@@ -3443,6 +4510,7 @@ function handleOnboardingSubmit(event) {
   const incomeCadence = ["weekly", "biweekly", "monthly", "semester", "yearly"].includes(data.get("incomeCadence"))
     ? data.get("incomeCadence")
     : "monthly";
+  const incomeType = data.get("incomeType") === "variable" ? "variable" : "fixed";
   const incomeAmount = numberFrom(data.get("incomeAmount"));
   const periodStart = cleanDate(data.get("periodStart"), monthStartKey());
   const now = new Date().toISOString();
@@ -3451,6 +4519,7 @@ function handleOnboardingSubmit(event) {
     completed: true,
     name: "Mi plan",
     incomeCadence,
+    incomeType,
     incomeAmount,
     periodStart,
     semesterStart: periodStart,
@@ -3461,7 +4530,7 @@ function handleOnboardingSubmit(event) {
   const jobs = onboardingCategories(data, profileDraft, now);
   const reserved = jobs.reduce((sum, job) => sum + getBudgetAmountForJob(job, profileDraft), 0);
   if (reserved > incomeAmount) {
-    error.textContent = `Los campos separan ${formatMoney(reserved)}, mas que tu presupuesto de ${formatMoney(incomeAmount)}.`;
+    error.textContent = `Los campos separan ${formatMoney(reserved)}, más que tu presupuesto de ${formatMoney(incomeAmount)}.`;
     return;
   }
 
@@ -3540,8 +4609,8 @@ function bindDiagnosisPreview(form) {
     }
     const matches = total === incomeAmount;
     hint.textContent = matches
-      ? `Cuenta + fisico coincide con ${formatMoney(incomeAmount)}.`
-      : `Cuenta + fisico suma ${formatMoney(total)}; debe sumar ${formatMoney(incomeAmount)}.`;
+      ? `Cuenta + físico coincide con ${formatMoney(incomeAmount)}.`
+      : `Cuenta + físico suma ${formatMoney(total)}; debe sumar ${formatMoney(incomeAmount)}.`;
     hint.classList.toggle("is-ok", matches);
     hint.classList.toggle("is-error", !matches);
   };
@@ -3602,7 +4671,7 @@ function bindExtraEditPreview(form) {
 }
 
 function bindPlanCategoryPreview(form) {
-  const conversion = form.querySelector("[data-category-conversion]");
+  const conversión = form.querySelector("[data-category-conversion]");
   const warning = form.querySelector("[data-category-limit-warning]");
   const submit = form.querySelector("[data-category-submit]");
   const update = () => {
@@ -3611,18 +4680,55 @@ function bindPlanCategoryPreview(form) {
     const cadence = data.get("cadence") || "monthly";
     const draft = { amount, cadence };
     const converted = getBudgetAmountForJob(draft, state.profile);
-    const available = budgetSummary().freeBudget;
+    // Mismo criterio que handleBudgetSubmit: comparar contra freeRemaining (lo que de
+    // verdad queda libre, ya descontado lo gastado sin clasificar), no freeBudget (el
+    // cupo bruto) — si no, este boton se habilita para montos que igual serian
+    // rechazados al guardar, o peor, que dejarian "Libre" clavado en $0.
+    const available = budgetSummary().freeRemaining;
     const exceeds = amount > 0 && converted > available;
-    if (conversion) {
-      conversion.innerHTML = amount > 0
-        ? `<span>Conversion automatica</span><strong>${formatMoney(amount)} ${cadenceLabel(cadence)} = ${formatMoney(converted)} en este periodo</strong><small>Disponible para reservar: ${formatMoney(available)}</small>`
-        : `<span>Conversion automatica</span><strong>Escribe un monto para ver su valor en este periodo.</strong><small>Disponible para reservar: ${formatMoney(available)}</small>`;
+    if (conversión) {
+      conversión.innerHTML = amount > 0
+        ? `<span>Conversión automática</span><strong>${formatMoney(amount)} ${cadenceLabel(cadence)} = ${formatMoney(converted)} en este periodo</strong><small>Disponible para reservar: ${formatMoney(available)}</small>`
+        : `<span>Conversión automática</span><strong>Escribe un monto para ver su valor en este periodo.</strong><small>Disponible para reservar: ${formatMoney(available)}</small>`;
     }
     if (warning) warning.hidden = !exceeds;
     if (submit) submit.disabled = exceeds;
   };
   form.querySelectorAll("input, [data-choice-value]").forEach((control) => control.addEventListener("input", update));
   form.querySelectorAll("[data-choice-value]").forEach((control) => control.addEventListener("click", () => window.setTimeout(update)));
+  update();
+}
+
+function bindSetAsidePreview(form) {
+  const preview = form.querySelector("[data-setaside-preview]");
+  const warning = form.querySelector("[data-setaside-warning]");
+  const submit = form.querySelector("[data-setaside-submit]");
+  const nameInput = form.elements.namedItem("name");
+  const update = () => {
+    const amount = numberFrom(new FormData(form).get("amount"));
+    const available = budgetSummary().freeRemaining;
+    const exceeds = amount > 0 && amount > available;
+    if (preview) {
+      preview.innerHTML =
+        amount > 0
+          ? `<span>Después de apartar</span><strong>Te quedarían ${formatMoney(Math.max(0, available - amount))} libres</strong><small>Ahora tienes ${formatMoney(available)} libres.</small>`
+          : `<span>Después de apartar</span><strong>Escribe un monto para ver cuánto te queda libre.</strong><small>Ahora tienes ${formatMoney(available)} libres.</small>`;
+    }
+    if (warning) warning.hidden = !exceeds;
+    if (submit) submit.disabled = exceeds;
+  };
+  form.querySelectorAll("input").forEach((control) => control.addEventListener("input", update));
+  // Deliberately a direct listener instead of data-action: handleAction re-renders the
+  // whole view, which would rebuild these uncontrolled inputs and wipe the amount the
+  // user already typed before they picked a name.
+  form.querySelectorAll("[data-setaside-name]").forEach((chip) =>
+    chip.addEventListener("click", () => {
+      if (nameInput) {
+        nameInput.value = chip.dataset.setasideName || "";
+      }
+      update();
+    })
+  );
   update();
 }
 
@@ -3707,18 +4813,26 @@ function handleAction(event) {
   event.preventDefault();
   const action = event.currentTarget.dataset.action;
   const id = event.currentTarget.dataset.id;
+  const section = event.currentTarget.dataset.section;
+  const category = event.currentTarget.dataset.category;
   const interfaceOnlyActions = new Set([
     "toggle-menu",
     "close-menu",
     "open-expense",
+    "toggle-quick-expense-advanced",
+    "filter-movements-by-date",
+    "clear-movements-date-filter",
     "close-expense",
     "show-auth-form",
     "back-auth-options",
     "open-category-sheet",
+    "open-setaside-sheet",
     "open-extra-sheet",
     "close-plan-sheet",
     "request-remove-job",
     "cancel-remove-job",
+    "open-delete-account",
+    "cancel-delete-account",
     "edit-transaction",
     "close-transaction-editor",
     "edit-extra",
@@ -3729,13 +4843,18 @@ function handleAction(event) {
     "close-period-report",
     "copy-period-report",
     "download-period-report",
+    "export-movements-csv",
     "recover-auth",
     "open-diagnosis",
     "close-diagnosis",
+    "start-quick-classify",
+    "close-quick-classify",
     "cancel-extra-allocation",
     "request-reminder-permission",
     "send-test-reminder",
     "register-calendar-event",
+    "open-lock-setup",
+    "open-lock-disable",
     "set-theme"
   ]);
 
@@ -3748,16 +4867,36 @@ function handleAction(event) {
       menuOpen = false;
     },
     "open-expense": openQuickExpense,
+    "toggle-quick-expense-advanced": () => {
+      quickExpenseAdvancedOpen = !quickExpenseAdvancedOpen;
+    },
     "close-expense": closeQuickExpense,
+    "filter-movements-by-date": () => {
+      const date = event.currentTarget.dataset.date || "";
+      // Tapping the same day again clears the filter, same as a toggle.
+      transactionHistoryDate = transactionHistoryDate === date ? "" : date;
+    },
+    "clear-movements-date-filter": () => {
+      transactionHistoryDate = "";
+    },
     "show-auth-form": () => {
-      authMode = ["signin", "signup"].includes(event.currentTarget.dataset.authMode) ? event.currentTarget.dataset.authMode : "";
+      authMode = ["signin", "signup", "forgot"].includes(event.currentTarget.dataset.authMode) ? event.currentTarget.dataset.authMode : "";
+      authNotice = null;
+      cloudState.error = "";
     },
     "back-auth-options": () => {
       authMode = "";
+      authNotice = null;
       cloudState.error = "";
     },
     "open-category-sheet": () => {
       planSheet = "category";
+      menuOpen = false;
+      predictionDetailsOpen = false;
+      periodReportOpen = false;
+    },
+    "open-setaside-sheet": () => {
+      planSheet = "setaside";
       menuOpen = false;
       predictionDetailsOpen = false;
       periodReportOpen = false;
@@ -3781,6 +4920,16 @@ function handleAction(event) {
       removeBudgetJob(pendingJobRemovalId);
       pendingJobRemovalId = "";
     },
+    "open-delete-account": () => {
+      cloudState.error = "";
+      deleteAccountOpen = true;
+      menuOpen = false;
+    },
+    "cancel-delete-account": () => {
+      cloudState.error = "";
+      deleteAccountOpen = false;
+    },
+    "confirm-delete-account": () => handleDeleteAccount(),
     "edit-transaction": () => {
       editingTransactionId = id;
       editingExtraId = "";
@@ -3819,10 +4968,12 @@ function handleAction(event) {
     },
     "copy-period-report": copyPeriodReport,
     "download-period-report": downloadPeriodReport,
+    "export-movements-csv": downloadMovementsCsv,
     "recover-auth": recoverAuthStartup,
     "open-diagnosis": () => {
       diagnosisValidation = { field: "", message: "" };
       state.showDiagnosis = true;
+      state.diagnosisSection = DIAGNOSIS_SECTIONS[section] ? section : "plan";
       menuOpen = false;
       predictionDetailsOpen = false;
       periodReportOpen = false;
@@ -3830,6 +4981,23 @@ function handleAction(event) {
     "close-diagnosis": () => {
       diagnosisValidation = { field: "", message: "" };
       state.showDiagnosis = false;
+    },
+    "start-quick-classify": () => {
+      quickClassifyQueue = unclassifiedTransactionsForSummary().map((transaction) => transaction.id);
+      menuOpen = false;
+    },
+    "quick-classify": () => {
+      const transaction = state.transactions.find((item) => item.id === id);
+      if (transaction) {
+        transaction.category = category || FREE_CATEGORY_ID;
+        transaction.labeled = transaction.category !== FREE_CATEGORY_ID;
+        transaction.updated_at = new Date().toISOString();
+        showNoticeSnackbar(`Clasificado como ${categoryName(transaction.category)}.`, { renderNow: false });
+      }
+      quickClassifyQueue = quickClassifyQueue.filter((queuedId) => queuedId !== id);
+    },
+    "close-quick-classify": () => {
+      quickClassifyQueue = [];
     },
     "remove-transaction": () => {
       removeTransaction(id);
@@ -3853,30 +5021,70 @@ function handleAction(event) {
     "request-reminder-permission": requestReminderPermission,
     "send-test-reminder": sendTestReminder,
     "register-calendar-event": () => startCalendarEventExpense(id),
+    "open-lock-setup": () => {
+      lockMode = "set";
+      lockDigits = "";
+      lockFirstEntry = "";
+      lockError = "";
+      menuOpen = false;
+    },
+    "open-lock-disable": () => {
+      lockMode = "disable";
+      lockDigits = "";
+      lockError = "";
+      menuOpen = false;
+    },
+    "enable-biometric": () => enableBiometric(),
+    "disable-biometric": () => disableBiometric(),
     "set-theme": () => {
       state.settings = {
         ...(state.settings || {}),
         theme: normalizeTheme(event.currentTarget.dataset.themeChoice),
         updated_at: new Date().toISOString()
       };
-      saveState({ sync: false, touch: false });
+      saveState();
       applyThemePreference();
     },
     "remove-calendar-event": () => removeCalendarEvent(id),
     "reopen-calendar-event": () => reopenCalendarEvent(id),
     "cancel-cooldown": () => cancelCooldown(id),
     "unlock-cooldown": () => unlockCooldown(id),
-    "cloud-sign-out": () => handleCloudSignOut()
+    "cloud-sign-out": () => handleCloudSignOut(),
+    "dismiss-income-banner": () => {
+      if (state.periodIncomeStatus) {
+        state.periodIncomeStatus.bannerDismissed = true;
+      }
+    },
+    "undo-income-application": () => {
+      const status = state.periodIncomeStatus;
+      if (status?.applied) {
+        adjustLiquidity(status.location || "account", -Number(status.amount || 0), "revertir-ingreso-periodico");
+        status.applied = false;
+        status.rejected = true;
+        status.bannerDismissed = true;
+      }
+    }
   };
 
   if (actions[action]) {
     actions[action]();
-    const asyncCloudAction = action === "cloud-sign-out";
-    if (!asyncCloudAction && !interfaceOnlyActions.has(action)) {
+    // These manage their own persistence + render (async, or device-local lock storage
+    // that must never touch saveState / cloud sync).
+    const selfManagedAction =
+      action === "cloud-sign-out" ||
+      action === "confirm-delete-account" ||
+      action === "enable-biometric" ||
+      action === "disable-biometric";
+    if (!selfManagedAction && !interfaceOnlyActions.has(action)) {
       saveState();
     }
-    if (!asyncCloudAction) {
+    if (!selfManagedAction) {
       render();
+    }
+    if (action === "filter-movements-by-date" && transactionHistoryDate) {
+      // The calendar sits above the results list, so jump the user straight to what
+      // they tapped for instead of leaving them to scroll down and find it themselves.
+      document.querySelector("#transaction-history-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }
 }
@@ -3888,10 +5096,10 @@ function recoverAuthStartup() {
   cloudState.sessionReady = true;
   if (cloudState.signedIn) {
     cloudState.status = "error";
-    cloudState.error = "La sincronizacion esta tardando. Puedes usar tus datos locales mientras vuelve la conexion.";
+    cloudState.error = "La sincronización está tardando. Puedes usar tus datos locales mientras vuelve la conexión.";
   } else {
     cloudState.status = "signed-out";
-    cloudState.error = "No pude comprobar una sesion guardada. Inicia sesion de nuevo.";
+    cloudState.error = "No pude comprobar una sesión guardada. Inicia sesión de nuevo.";
   }
   render();
 }
@@ -3915,145 +5123,161 @@ function submitDiagnosisForm(form) {
   diagnosisValidation = { field: "", message: "" };
   clearSnackbar({ renderNow: false });
   const data = new FormData(form);
+  const sectionKey = DIAGNOSIS_SECTIONS[form.dataset.diagnosisSection] ? form.dataset.diagnosisSection : "plan";
   const wasIncomplete = !state.profile.completed;
-  const shouldClearTemplateBudget = shouldClearTemplateBudgetOnPlanSave();
-  const incomeCadence = ["weekly", "biweekly", "monthly", "semester", "yearly"].includes(data.get("incomeCadence"))
-    ? data.get("incomeCadence")
-    : "monthly";
-  const incomeAmount = numberFrom(data.get("incomeAmount"));
-  const accountAmount = numberFrom(data.get("account"));
-  const cashAmount = numberFrom(data.get("cash"));
-  const periodStart = cleanDate(data.get("periodStart"), monthStartKey());
-  const semesterIncome = incomeCadence === "semester" ? incomeAmount : state.profile.semesterIncome || STUDENT_SEMESTER_INCOME;
-  const semesterMonths = incomeCadence === "semester" ? STUDENT_SEMESTER_MONTHS : state.profile.semesterMonths || STUDENT_SEMESTER_MONTHS;
-  const weeklyGas = data.has("weeklyGas") ? numberFrom(data.get("weeklyGas")) : Number(state.profile.weeklyGas || 0);
-  const monthlyIncome = getMonthlyIncome({ ...state.profile, incomeCadence, incomeAmount, semesterIncome, semesterMonths });
+  let successMessage = "Datos guardados.";
 
   saveLocalBackup("antes de guardar plan");
 
-  state.profile = {
-    ...state.profile,
-    completed: true,
-    name: cleanText(data.get("name"), "Mi plan"),
-    incomeCadence,
-    incomeAmount,
-    semesterIncome,
-    semesterMonths,
-    periodStart,
-    semesterStart: periodStart,
-    monthlyIncome,
-    committedExpenses: numberFrom(data.get("committedExpenses")),
-    weeklyGas,
-    relationshipMonthlyBudget: data.has("relationshipMonthlyBudget") ? numberFrom(data.get("relationshipMonthlyBudget")) : Number(state.profile.relationshipMonthlyBudget || 0),
-    giftMonthlyBudget: data.has("giftMonthlyBudget") ? numberFrom(data.get("giftMonthlyBudget")) : Number(state.profile.giftMonthlyBudget || 0),
-    emergencySavings: numberFrom(data.get("emergencySavings")),
-    payday: normalizePayday(data.get("payday")),
-    incomeType: data.get("incomeType") === "variable" ? "variable" : "fixed",
-    volatility: ["low", "medium", "high"].includes(data.get("volatility")) ? data.get("volatility") : "medium",
-    selfEfficacy: clamp(numberFrom(data.get("selfEfficacy")), 1, 10),
-    financialAnxiety: clamp(numberFrom(data.get("financialAnxiety")), 1, 10),
-    moneyScripts: {
-      worship: clamp(numberFrom(data.get("worship")), 1, 5),
-      avoidance: clamp(numberFrom(data.get("avoidance")), 1, 5),
-      status: clamp(numberFrom(data.get("status")), 1, 5),
-      vigilance: clamp(numberFrom(data.get("vigilance")), 1, 5)
-    },
-    updated_at: new Date().toISOString()
-  };
-  state.liquidity = {
-    account: accountAmount,
-    cash: cashAmount,
-    initialized: true,
-    updated_at: new Date().toISOString()
-  };
+  if (sectionKey === "plan") {
+    const shouldClearTemplateBudget = shouldClearTemplateBudgetOnPlanSave();
+    const incomeCadence = ["weekly", "biweekly", "monthly", "semester", "yearly"].includes(data.get("incomeCadence"))
+      ? data.get("incomeCadence")
+      : "monthly";
+    const incomeAmount = numberFrom(data.get("incomeAmount"));
+    const periodStart = cleanDate(data.get("periodStart"), monthStartKey());
+    const semesterIncome = incomeCadence === "semester" ? incomeAmount : state.profile.semesterIncome || STUDENT_SEMESTER_INCOME;
+    const semesterMonths = incomeCadence === "semester" ? STUDENT_SEMESTER_MONTHS : state.profile.semesterMonths || STUDENT_SEMESTER_MONTHS;
+    const monthlyIncome = getMonthlyIncome({ ...state.profile, incomeCadence, incomeAmount, semesterIncome, semesterMonths });
+
+    state.profile = {
+      ...state.profile,
+      completed: true,
+      name: cleanText(data.get("name"), "Mi plan"),
+      incomeCadence,
+      incomeType: data.get("incomeType") === "variable" ? "variable" : "fixed",
+      incomeAmount,
+      semesterIncome,
+      semesterMonths,
+      periodStart,
+      semesterStart: periodStart,
+      monthlyIncome,
+      committedExpenses: numberFrom(data.get("committedExpenses")),
+      payday: normalizePayday(data.get("payday")),
+      updated_at: new Date().toISOString()
+    };
+
+    if (shouldClearTemplateBudget) {
+      clearTemplateBudget();
+    }
+    successMessage = shouldClearTemplateBudget
+      ? "Datos guardados. Quite los campos de plantilla; ahora crea tus propios campos de gasto."
+      : "Plan básico guardado.";
+  }
+
+  if (sectionKey === "balances") {
+    state.profile = {
+      ...state.profile,
+      completed: true,
+      emergencySavings: numberFrom(data.get("emergencySavings")),
+      updated_at: new Date().toISOString()
+    };
+    state.liquidity = {
+      account: numberFrom(data.get("account")),
+      cash: numberFrom(data.get("cash")),
+      initialized: true,
+      updated_at: new Date().toISOString()
+    };
+    successMessage = "Saldos actualizados.";
+  }
+
+  if (sectionKey === "behavior") {
+    state.profile = {
+      ...state.profile,
+      completed: true,
+      volatility: ["low", "medium", "high"].includes(data.get("volatility")) ? data.get("volatility") : "medium",
+      selfEfficacy: clamp(numberFrom(data.get("selfEfficacy")), 1, 10),
+      financialAnxiety: clamp(numberFrom(data.get("financialAnxiety")), 1, 10),
+      moneyScripts: {
+        worship: clamp(numberFrom(data.get("worship")), 1, 5),
+        avoidance: clamp(numberFrom(data.get("avoidance")), 1, 5),
+        status: clamp(numberFrom(data.get("status")), 1, 5),
+        vigilance: clamp(numberFrom(data.get("vigilance")), 1, 5)
+      },
+      updated_at: new Date().toISOString()
+    };
+    successMessage = "Perfil conductual guardado.";
+  }
 
   if (wasIncomplete) {
     state.wins.push({
       id: uid("win"),
       date: todayKey(),
-      text: "Guardaste tus datos reales y convertiste numeros sueltos en un plan."
+      text: "Guardaste tus datos reales y convertiste números sueltos en un plan."
     });
-  }
-
-  if (shouldClearTemplateBudget) {
-    clearTemplateBudget();
   }
 
   state.showDiagnosis = false;
   activateView(DEFAULT_VIEW);
-  state.lastAlert = shouldClearTemplateBudget
-    ? "Datos guardados. Quite los campos de plantilla; ahora crea tus propios campos de gasto."
-    : "Datos guardados. Ahora registra tus gastos desde la pantalla principal.";
+  state.lastAlert = successMessage;
   saveState();
   render();
 }
 
 function validateDiagnosisForm(form) {
   const data = new FormData(form);
+  const sectionKey = DIAGNOSIS_SECTIONS[form.dataset.diagnosisSection] ? form.dataset.diagnosisSection : "plan";
+  const activeFields = new Set(DIAGNOSIS_SECTIONS[sectionKey].fields);
   const allowedCadences = ["weekly", "biweekly", "monthly", "semester", "yearly"];
   const requiredNumbers = [
     ["incomeAmount", "El presupuesto por periodo debe ser mayor que cero.", 1],
     ["committedExpenses", "Los gastos comprometidos no pueden estar vacios.", 0],
-    ["emergencySavings", "El ahorro actual para la simulacion no puede estar vacio.", 0],
+    ["emergencySavings", "El ahorro actual para la simulación no puede estar vacio.", 0],
     ["account", "El dinero en cuenta no puede estar vacio.", 0],
-    ["cash", "El dinero en fisico no puede estar vacio.", 0]
+    ["cash", "El dinero en físico no puede estar vacio.", 0]
   ];
 
-  if (!cleanText(data.get("name"), "")) {
+  if (activeFields.has("name") && !cleanText(data.get("name"), "")) {
     return { field: "name", message: "Escribe un nombre para tu plan." };
   }
 
-  if (!allowedCadences.includes(data.get("incomeCadence"))) {
+  if (activeFields.has("incomeCadence") && !allowedCadences.includes(data.get("incomeCadence"))) {
     return { field: "incomeCadence", message: "Elige cada cuanto recibes presupuesto." };
   }
 
   for (const [field, message, min] of requiredNumbers) {
+    if (!activeFields.has(field)) {
+      continue;
+    }
     const value = numberValue(data.get(field));
     if (value == null || value < min) {
       return { field, message };
     }
   }
 
-  const incomeAmount = numberValue(data.get("incomeAmount"));
-  const accountAmount = numberValue(data.get("account"));
-  const cashAmount = numberValue(data.get("cash"));
-  const liquidityTotal = Number(accountAmount || 0) + Number(cashAmount || 0);
-  if (shouldRequireOpeningBalanceMatch() && Math.abs(liquidityTotal - Number(incomeAmount || 0)) > 0) {
-    return {
-      field: "account",
-      fields: ["account", "cash"],
-      message: `Cuenta + fisico debe sumar el presupuesto del periodo: ${formatMoney(liquidityTotal)} de ${formatMoney(incomeAmount)}.`
-    };
-  }
-
-  if (!cleanDate(data.get("periodStart"), "")) {
+  if (activeFields.has("periodStart") && !cleanDate(data.get("periodStart"), "")) {
     return { field: "periodStart", message: "El inicio del periodo actual debe ser una fecha valida." };
   }
 
-  const paydayRaw = String(data.get("payday") ?? "").trim();
-  const payday = paydayRaw ? Number(paydayRaw) : 0;
-  if (!Number.isFinite(payday) || payday < 0 || payday > 28) {
-    return { field: "payday", message: "El dia de pago debe estar entre 0 y 28." };
+  if (activeFields.has("payday")) {
+    const paydayRaw = String(data.get("payday") ?? "").trim();
+    const payday = paydayRaw ? Number(paydayRaw) : 0;
+    if (!Number.isFinite(payday) || payday < 0 || payday > 28) {
+      return { field: "payday", message: "El día de pago debe estar entre 0 y 28." };
+    }
   }
 
-  if (!["fixed", "variable"].includes(data.get("incomeType"))) {
+  if (activeFields.has("incomeType") && !["fixed", "variable"].includes(data.get("incomeType"))) {
     return { field: "incomeType", message: "Elige si tu ingreso es fijo o variable." };
   }
 
-  if (!["low", "medium", "high"].includes(data.get("volatility"))) {
+  if (activeFields.has("volatility") && !["low", "medium", "high"].includes(data.get("volatility"))) {
     return { field: "volatility", message: "Elige la volatilidad de tus ingresos." };
   }
 
   const rangeFields = [
     ["selfEfficacy", "La confianza financiera debe estar entre 1 y 10.", 1, 10],
     ["financialAnxiety", "La ansiedad financiera debe estar entre 1 y 10.", 1, 10],
-    ["worship", "Revisa la pregunta de buscar mas dinero.", 1, 5],
+    ["worship", "Revisa la pregunta de buscar más dinero.", 1, 5],
     ["avoidance", "Revisa la pregunta de evitar mirar dinero.", 1, 5],
     ["status", "Revisa la pregunta de dinero como estatus.", 1, 5],
     ["vigilance", "Revisa la pregunta de control y seguridad.", 1, 5]
   ];
 
   for (const [field, message, min, max] of rangeFields) {
+    if (!activeFields.has(field)) {
+      continue;
+    }
     const value = numberValue(data.get(field));
     if (value == null || value < min || value > max) {
       return { field, message };
@@ -4102,7 +5326,7 @@ function handleBudgetSubmit(event) {
   event.preventDefault();
   const data = new FormData(event.currentTarget);
   if (state.budgetJobs.length >= 10) {
-    state.lastAlert = "Mantengamos maximo 10 categorias para que el plan siga claro.";
+    state.lastAlert = "Mantengamos máximo 10 categorías para que el plan siga claro.";
     saveState();
     render();
     return;
@@ -4128,8 +5352,15 @@ function handleBudgetSubmit(event) {
   };
   const semesterBudget = getBudgetAmountForJob(job, state.profile);
   const summary = budgetSummary();
-  if (semesterBudget > summary.freeBudget) {
-    state.lastAlert = `${name} reservaria ${formatMoney(semesterBudget)}, pero solo hay ${formatMoney(summary.freeBudget)} libre para reservar.`;
+  // Comparar contra freeBudget (el cupo bruto: ingreso menos OTRAS categorias) deja
+  // pasar categorias que si caben en el cupo pero no en lo que de verdad queda libre,
+  // porque freeBudget no descuenta lo que ya gastaste sin clasificar este periodo. El
+  // usuario ve "Libre" (freeRemaining) en pantalla, asi que hay que validar contra eso:
+  // es el mismo numero que compara mentalmente antes de crear la categoria, y evita que
+  // freeRemaining termine clavado en $0 (por el Math.max(0, ...) interno) en vez de
+  // bloquear la creacion con un aviso claro.
+  if (semesterBudget > summary.freeRemaining) {
+    state.lastAlert = `${name} reservaría ${formatMoney(semesterBudget)}, pero solo hay ${formatMoney(summary.freeRemaining)} libre para reservar.`;
     showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
     saveState();
     render();
@@ -4355,7 +5586,7 @@ function handleSmartSubmit(event) {
   state.settings.monthlyRaisePct = clamp(numberFrom(data.get("monthlyRaisePct")), 0, 100);
   state.settings.escalationPct = clamp(numberFrom(data.get("escalationPct")), 0, 100);
   state.settings.updated_at = new Date().toISOString();
-  state.lastAlert = "Simulacion de aumento actualizada.";
+  state.lastAlert = "Simulación de aumento actualizada.";
   saveState();
   render();
 }
@@ -4379,7 +5610,7 @@ async function handleDailyReminderSubmit(event) {
   };
 
   if (enabled && permission === "denied") {
-    state.lastAlert = "Recordatorio guardado, pero las notificaciones estan bloqueadas en el navegador.";
+    state.lastAlert = "Recordatorio guardado, pero las notificaciones están bloqueadas en el navegador.";
     showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
   } else if (enabled && permission === "unsupported") {
     state.lastAlert = "Este navegador no permite notificaciones desde la app.";
@@ -4434,7 +5665,7 @@ async function requestReminderPermission() {
       scheduleDailyReminder();
     }
   } else if (permission === "denied") {
-    state.lastAlert = "El navegador bloqueo las notificaciones. Cambialo desde los ajustes del sitio.";
+    state.lastAlert = "El navegador bloqueó las notificaciones. Cámbialo desde los ajustes del sitio.";
     showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
   } else {
     state.lastAlert = "Notificaciones no disponibles en este navegador.";
@@ -4446,12 +5677,35 @@ async function requestReminderPermission() {
 
 async function sendTestReminder() {
   const sent = await showDailyReminderNotification({ test: true });
-  state.lastAlert = sent ? "Notificacion de prueba enviada." : "No pude enviar la notificacion de prueba.";
+  state.lastAlert = sent ? "Notificación de prueba enviada." : "No pude enviar la notificación de prueba.";
   if (!sent) {
     showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
   }
   saveState({ touch: false });
   render();
+}
+
+async function handleForgotPasswordSubmit(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  const email = cleanText(data.get("email"), "");
+
+  authEmailDraft = email;
+  cloudState.status = "syncing";
+  cloudState.error = "";
+  render();
+
+  try {
+    await requestPasswordReset(email);
+    cloudState.status = "signed-out";
+    authMode = "";
+    authNotice = { kind: "reset-sent", email };
+    render();
+  } catch (error) {
+    cloudState.status = "signed-out";
+    cloudState.error = friendlyCloudError(error);
+    render();
+  }
 }
 
 async function handleCloudLoginSubmit(event) {
@@ -4461,24 +5715,52 @@ async function handleCloudLoginSubmit(event) {
   const password = String(data.get("password") || "");
   const mode = event.currentTarget.dataset.cloudMode || event.submitter?.dataset.cloudMode || "signin";
 
+  // Remember the address so a wrong password never costs the user their email again.
+  authEmailDraft = email;
+  authNotice = null;
   cloudState.status = "syncing";
   cloudState.sessionReady = false;
   cloudState.error = "";
   render();
 
+  const stopWithNotice = (notice) => {
+    cloudState.sessionReady = true;
+    cloudState.status = "signed-out";
+    authNotice = notice;
+    authMode = "";
+    render();
+  };
+
   try {
-    const session = mode === "signup" ? await signUpToCloud(email, password) : await signInToCloud(email, password);
-    if (!session) {
-      cloudState.sessionReady = true;
-      cloudState.status = "signed-out";
-      cloudState.error = "Cuenta creada. Revisa tu correo si Supabase pide confirmacion.";
-      render();
-      return;
+    let session = null;
+    if (mode === "signup") {
+      const result = await signUpToCloud(email, password);
+      if (result.alreadyRegistered) {
+        stopWithNotice({ kind: "exists", email });
+        return;
+      }
+      if (!result.session) {
+        stopWithNotice({ kind: "sent", email });
+        return;
+      }
+      session = result.session;
+    } else {
+      session = await signInToCloud(email, password);
+      if (!session) {
+        cloudState.sessionReady = true;
+        cloudState.status = "signed-out";
+        cloudState.error = "No pude iniciar sesión. Si acabas de registrarte, confirma primero el correo.";
+        render();
+        return;
+      }
     }
+
     applyCloudSession(session);
     cloudState.sessionReady = true;
+    authEmailDraft = "";
+    authNotice = null;
     resetQuickExpenseAfterLogin();
-    state.lastAlert = mode === "signup" ? "Cuenta creada." : "Sesion iniciada.";
+    state.lastAlert = mode === "signup" ? "Cuenta creada." : "Sesión iniciada.";
     await pullCloudAfterLogin();
   } catch (error) {
     cloudState.sessionReady = true;
@@ -4489,32 +5771,84 @@ async function handleCloudLoginSubmit(event) {
 }
 
 async function handleCloudSignOut() {
-  cloudState.status = "syncing";
-  cloudState.sessionReady = false;
+  // Sign out is instantaneous from the user's point of view: drop straight to the
+  // access screen, no "Comprobando tu sesión" detour. That screen (and its impatience
+  // escape hatch, "Continuar al acceso") exists for STARTUP session checks, where
+  // letting the user in while the check is still pending is the right fallback. During
+  // sign-out it was the wrong fallback: cloudState.signedIn was still true while the
+  // save+signOut network calls were in flight, so tapping that same button re-entered
+  // the still-authenticated app for a few seconds before the background work finished
+  // and yanked them back out — exactly the "entra un momento y despues sale" a friend
+  // reported. Clearing local session state up front removes the whole window where
+  // that could happen; the cloud save/sign-out below is best-effort cleanup after.
   clearTimeout(cloudSaveTimer);
-  render();
-  let signOutWarning = "";
-  try {
-    await saveCloudState(getCloudPayload());
-  } catch (error) {
-    signOutWarning = friendlyCloudError(error);
-  }
-
-  try {
-    await signOutFromCloud();
-  } catch (error) {
-    signOutWarning ||= friendlyCloudError(error);
-  }
-
+  const payload = getCloudPayload();
   clearStoredCloudSession();
   clearLocalUserState();
   cloudState.signedIn = false;
   cloudState.email = "";
   cloudState.sessionReady = true;
   cloudState.status = "signed-out";
-  cloudState.error = signOutWarning
-    ? `Cerraste sesion en este dispositivo. No pude completar la sincronizacion: ${signOutWarning}`
-    : "";
+  cloudState.error = "";
+  render();
+
+  try {
+    await saveCloudState(payload);
+  } catch {
+    // Best-effort: the user already left. Nothing to show them anymore.
+  }
+  try {
+    await signOutFromCloud();
+  } catch {
+    // Same as above — local sign-out already happened regardless.
+  }
+}
+
+async function handleDeleteAccount() {
+  cloudState.status = "syncing";
+  cloudState.error = "";
+  render();
+
+  // Intento primero el borrado COMPLETO (usuario de auth + datos) vía Edge Function.
+  // Si esa función confirma, ya está todo hecho — incluidos los datos, por el
+  // `on delete cascade`. Si aún no está desplegada (devuelve false), caigo al borrado
+  // parcial: elimino la fila de datos y cierro sesión, y aviso con honestidad que el
+  // correo/contraseña siguen existiendo hasta que la función esté disponible.
+  let fullyDeleted = false;
+  try {
+    fullyDeleted = await deleteCloudAccount();
+  } catch (error) {
+    cloudState.status = "error";
+    cloudState.error = `No pude eliminar tu cuenta: ${friendlyCloudError(error)}. Intenta de nuevo.`;
+    render();
+    return;
+  }
+
+  if (!fullyDeleted) {
+    try {
+      await deleteCloudAppState();
+    } catch (error) {
+      cloudState.status = "error";
+      cloudState.error = `No pude eliminar tus datos de la nube: ${friendlyCloudError(error)}. Intenta de nuevo.`;
+      render();
+      return;
+    }
+  }
+
+  try {
+    await signOutFromCloud();
+  } catch {}
+
+  clearStoredCloudSession();
+  clearLocalUserState();
+  deleteAccountOpen = false;
+  cloudState.signedIn = false;
+  cloudState.email = "";
+  cloudState.sessionReady = true;
+  cloudState.status = "signed-out";
+  cloudState.error = fullyDeleted
+    ? "Tu cuenta y todos tus datos se eliminaron por completo. Ya no podrás iniciar sesión con ese correo."
+    : `Se eliminaron tus datos y se cerró la sesión, pero tu correo y contraseña siguen activos por ahora. Para borrarlos por completo, escríbenos a ${SUPPORT_EMAIL}.`;
   render();
 }
 
@@ -4639,7 +5973,7 @@ function currentPeriodReportText() {
 function copyPeriodReport() {
   const reportText = currentPeriodReportText();
   const success = () => showNoticeSnackbar("Reporte copiado.", { duration: 3500 });
-  const failure = () => showNoticeSnackbar("No pude copiarlo automaticamente. Puedes seleccionar el texto del reporte.", { kind: "error" });
+  const failure = () => showNoticeSnackbar("No pude copiarlo automáticamente. Puedes seleccionar el texto del reporte.", { kind: "error" });
 
   if (navigator.clipboard?.writeText) {
     navigator.clipboard.writeText(reportText)
@@ -4670,19 +6004,404 @@ function copyPeriodReportFallback(success, failure) {
   }
 }
 
-function downloadPeriodReport() {
+function nativeFilesystem() {
+  return window.Capacitor?.Plugins?.Filesystem || null;
+}
+
+function nativeShare() {
+  return window.Capacitor?.Plugins?.Share || null;
+}
+
+function nativeApp() {
+  return window.Capacitor?.Plugins?.App || null;
+}
+
+function nativeBiometric() {
+  return window.Capacitor?.Plugins?.BiometricAuth || null;
+}
+
+async function tryBiometricUnlock() {
+  if (lockMode !== "unlock" || !lockConfig.biometric || lockIsCoolingDown() || biometricPromptActive) {
+    return;
+  }
+  const biometric = nativeBiometric();
+  if (!biometric) {
+    return;
+  }
+  biometricPromptActive = true;
+  try {
+    await biometric.authenticate({ reason: "Desbloquea tus finanzas" });
+    lockConfig = { ...lockConfig, failedAttempts: 0, lockUntil: 0 };
+    saveLockConfig(lockConfig);
+    lockMode = "";
+    lockDigits = "";
+    lockError = "";
+  } catch {
+    // Cancelled or failed: the PIN keypad stays available as the fallback.
+  } finally {
+    biometricPromptActive = false;
+    render();
+  }
+}
+
+async function enableBiometric() {
+  const biometric = nativeBiometric();
+  if (!biometric) {
+    showNoticeSnackbar("Este dispositivo no admite huella.", { kind: "error", renderNow: false });
+    render();
+    return;
+  }
+  try {
+    const status = await biometric.isAvailable();
+    if (!status?.available) {
+      showNoticeSnackbar("Configura una huella en los ajustes del teléfono primero.", { kind: "error", renderNow: false });
+      render();
+      return;
+    }
+    await biometric.authenticate({ reason: "Confirma tu huella para activarla" });
+    lockConfig = { ...lockConfig, biometric: true };
+    saveLockConfig(lockConfig);
+    showNoticeSnackbar("Huella activada. La usaremos para desbloquear.", { renderNow: false });
+    render();
+  } catch {
+    showNoticeSnackbar("No se pudo activar la huella.", { kind: "error", renderNow: false });
+    render();
+  }
+}
+
+function disableBiometric() {
+  lockConfig = { ...lockConfig, biometric: false };
+  saveLockConfig(lockConfig);
+  showNoticeSnackbar("Huella desactivada. Seguirás usando el PIN.", { renderNow: false });
+  render();
+}
+
+function nativeWidgetBridge() {
+  return window.Capacitor?.Plugins?.WidgetBridge || null;
+}
+
+function syncHomeWidget() {
+  const bridge = nativeWidgetBridge();
+  if (!bridge) {
+    return;
+  }
   const summary = budgetSummary();
-  const reportText = currentPeriodReportText();
-  const blob = new Blob([reportText], { type: "text/plain;charset=utf-8" });
+  const periodLabel = `${formatShortDate(summary.window.start)} - ${formatShortDate(previousDay(summary.window.end))}`;
+  bridge.update({ freeMoney: formatMoney(summary.freeRemaining), periodLabel }).catch(() => {});
+}
+
+const BACK_CLOSE_SELECTORS = [
+  '[data-action="close-transaction-editor"]',
+  '[data-action="close-extra-editor"]',
+  '[data-action="cancel-extra-allocation"]',
+  '[data-action="close-quick-classify"]',
+  '[data-action="cancel-delete-account"]',
+  '[data-action="cancel-remove-job"]',
+  '[data-action="close-diagnosis"]',
+  '[data-action="close-plan-sheet"]',
+  '[data-action="close-period-report"]',
+  '[data-action="close-prediction-details"]',
+  '[data-action="close-expense"]'
+];
+
+function handleHardwareBackButton() {
+  for (const selector of BACK_CLOSE_SELECTORS) {
+    const button = document.querySelector(selector);
+    if (button) {
+      button.click();
+      return;
+    }
+  }
+  // The sidebar drawer markup stays in the DOM even when closed (CSS-only visibility),
+  // so it can't use the same querySelector check as the sheets/modals above.
+  if (menuOpen) {
+    document.querySelector('[data-action="close-menu"]')?.click();
+    return;
+  }
+  nativeApp()?.exitApp();
+}
+
+function bindHardwareBackButton() {
+  const app = nativeApp();
+  if (!app) {
+    return;
+  }
+  app.addListener("backButton", handleHardwareBackButton);
+}
+
+// The PIN lock lives in its own device-local storage key and never syncs to the
+// cloud: it protects this phone, not the account. Restoring on a new device
+// should not carry a lock the user set somewhere else. (The LOCK_* constants are
+// declared near the top of the file so this runs safely during module init.)
+function loadLockConfig() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LOCK_STORAGE_KEY) || "null");
+    return {
+      enabled: Boolean(parsed?.enabled),
+      hash: parsed?.hash || "",
+      salt: parsed?.salt || "",
+      biometric: Boolean(parsed?.biometric),
+      failedAttempts: Number(parsed?.failedAttempts || 0),
+      lockUntil: Number(parsed?.lockUntil || 0)
+    };
+  } catch {
+    return { enabled: false, hash: "", salt: "", biometric: false, failedAttempts: 0, lockUntil: 0 };
+  }
+}
+
+function saveLockConfig(config) {
+  try {
+    localStorage.setItem(LOCK_STORAGE_KEY, JSON.stringify(config));
+  } catch {}
+}
+
+function randomSalt() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function hashPin(pin, salt) {
+  const data = new TextEncoder().encode(`${salt}:${pin}`);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function lockIsCoolingDown() {
+  return Boolean(lockConfig.lockUntil) && Date.now() < lockConfig.lockUntil;
+}
+
+function scheduleLockCooldownClear() {
+  clearTimeout(lockCooldownTimer);
+  if (!lockIsCoolingDown()) {
+    return;
+  }
+  lockCooldownTimer = window.setTimeout(() => {
+    lockError = "";
+    if (lockMode) {
+      render();
+    }
+  }, Math.max(50, lockConfig.lockUntil - Date.now() + 50));
+}
+
+function bindAppLock() {
+  const appPlugin = nativeApp();
+  if (!appPlugin) {
+    return;
+  }
+  appPlugin.addListener("appStateChange", ({ isActive }) => {
+    if (!isActive) {
+      lastBackgroundAt = Date.now();
+      return;
+    }
+    if (lockConfig.enabled && lockMode === "" && lastBackgroundAt) {
+      lockMode = "unlock";
+      lockDigits = "";
+      lockError = "";
+      biometricAutoTried = false;
+      render();
+    }
+  });
+  scheduleLockCooldownClear();
+}
+
+async function pushLockDigit(digit) {
+  if ((lockMode === "unlock" || lockMode === "disable") && lockIsCoolingDown()) {
+    return;
+  }
+  if (lockDigits.length >= LOCK_PIN_LENGTH) {
+    return;
+  }
+  lockDigits += digit;
+  lockError = "";
+  if (lockDigits.length < LOCK_PIN_LENGTH) {
+    render();
+    return;
+  }
+  await resolveLockEntry();
+}
+
+async function resolveLockEntry() {
+  const entry = lockDigits;
+  if (lockMode === "set") {
+    lockFirstEntry = entry;
+    lockDigits = "";
+    lockMode = "confirm";
+    render();
+    return;
+  }
+  if (lockMode === "confirm") {
+    if (entry !== lockFirstEntry) {
+      lockFirstEntry = "";
+      lockDigits = "";
+      lockMode = "set";
+      lockError = "Los PIN no coinciden. Vuelve a crearlo.";
+      render();
+      return;
+    }
+    const salt = randomSalt();
+    const hash = await hashPin(entry, salt);
+    lockConfig = { enabled: true, hash, salt, biometric: false, failedAttempts: 0, lockUntil: 0 };
+    saveLockConfig(lockConfig);
+    lockMode = "";
+    lockDigits = "";
+    lockFirstEntry = "";
+    lockError = "";
+    showNoticeSnackbar("Bloqueo activado. Pediremos tu PIN al abrir la app.", { renderNow: false });
+    render();
+    return;
+  }
+
+  const hash = await hashPin(entry, lockConfig.salt);
+  if (hash === lockConfig.hash) {
+    if (lockMode === "disable") {
+      lockConfig = { enabled: false, hash: "", salt: "", biometric: false, failedAttempts: 0, lockUntil: 0 };
+      saveLockConfig(lockConfig);
+      showNoticeSnackbar("Bloqueo desactivado.", { renderNow: false });
+    } else {
+      lockConfig = { ...lockConfig, failedAttempts: 0, lockUntil: 0 };
+      saveLockConfig(lockConfig);
+    }
+    lockMode = "";
+    lockDigits = "";
+    lockError = "";
+    render();
+    return;
+  }
+
+  const failedAttempts = (lockConfig.failedAttempts || 0) + 1;
+  const lockUntil = failedAttempts >= LOCK_MAX_ATTEMPTS ? Date.now() + LOCK_COOLDOWN_MS : 0;
+  lockConfig = { ...lockConfig, failedAttempts, lockUntil };
+  saveLockConfig(lockConfig);
+  lockDigits = "";
+  lockError = lockUntil ? "Demasiados intentos. Espera 30 segundos." : "PIN incorrecto. Intenta de nuevo.";
+  scheduleLockCooldownClear();
+  render();
+}
+
+function renderLockScreen() {
+  const titles = {
+    unlock: "Ingresa tu PIN",
+    set: "Crea un PIN de 4 digitos",
+    confirm: "Confirma tu PIN",
+    disable: "Ingresa tu PIN"
+  };
+  const subtitles = {
+    unlock: "Protege tus finanzas en este dispositivo.",
+    set: "Lo pediremos cada vez que abras la app.",
+    confirm: "Escribelo otra vez para confirmar.",
+    disable: "Confirma tu PIN para desactivar el bloqueo."
+  };
+  const cooling = (lockMode === "unlock" || lockMode === "disable") && lockIsCoolingDown();
+  const dots = Array.from({ length: LOCK_PIN_LENGTH }, (_, index) => `<span class="lock-dot ${index < lockDigits.length ? "filled" : ""}"></span>`).join("");
+  const canCancel = lockMode === "set" || lockMode === "confirm" || lockMode === "disable";
+  const digitKey = (value) => `<button class="lock-key" type="button" data-lock-digit="${value}" ${cooling ? "disabled" : ""}>${value}</button>`;
+  return `
+    <div class="lock-screen" role="dialog" aria-modal="true" aria-label="${escapeHtml(titles[lockMode] || titles.unlock)}">
+      <section class="lock-card">
+        <span class="lock-icon" aria-hidden="true">${renderIcon("lock")}</span>
+        <h2>${escapeHtml(titles[lockMode] || titles.unlock)}</h2>
+        <p>${escapeHtml(subtitles[lockMode] || "")}</p>
+        <div class="lock-dots ${lockError ? "shake" : ""}">${dots}</div>
+        ${lockError ? `<p class="lock-error" role="alert">${escapeHtml(lockError)}</p>` : ""}
+        <div class="lock-keypad">
+          ${["1", "2", "3", "4", "5", "6", "7", "8", "9"].map(digitKey).join("")}
+          ${
+            canCancel
+              ? `<button class="lock-key lock-key-text" type="button" data-lock-cancel>Cancelar</button>`
+              : `<span class="lock-key lock-key-empty" aria-hidden="true"></span>`
+          }
+          ${digitKey("0")}
+          <button class="lock-key lock-key-text" type="button" data-lock-backspace ${cooling ? "disabled" : ""} aria-label="Borrar">&#9003;</button>
+        </div>
+        ${
+          lockMode === "unlock" && lockConfig.biometric
+            ? `<button class="btn ghost lock-biometric-btn" type="button" data-lock-biometric ${cooling ? "disabled" : ""}>Usar huella</button>`
+            : ""
+        }
+      </section>
+    </div>
+  `;
+}
+
+async function exportFile(filename, content, mimeType, successMessage) {
+  const filesystem = nativeFilesystem();
+  const share = nativeShare();
+  if (filesystem && share) {
+    try {
+      const written = await filesystem.writeFile({
+        path: filename,
+        data: content,
+        directory: "CACHE",
+        encoding: "utf8"
+      });
+      try {
+        await share.share({ title: filename, url: written.uri });
+      } catch {}
+      showNoticeSnackbar(successMessage, { duration: 3500, renderNow: false });
+      return;
+    } catch {
+      // Native write failed (e.g. running outside Capacitor); fall back to a browser download below.
+    }
+  }
+  const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `reporte-periodo-${summary.window.start}.txt`;
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  showNoticeSnackbar("Reporte descargado.", { duration: 3500, renderNow: false });
+  showNoticeSnackbar(successMessage, { duration: 3500, renderNow: false });
+}
+
+function downloadPeriodReport() {
+  const summary = budgetSummary();
+  const reportText = currentPeriodReportText();
+  exportFile(`reporte-periodo-${summary.window.start}.txt`, reportText, "text/plain", "Reporte listo.");
+}
+
+function csvField(value) {
+  const text = String(value ?? "");
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function movementsCsvRows() {
+  const expenseRows = (state.transactions || []).map((transaction) => ({
+    date: transaction.date,
+    kind: "Gasto",
+    who: transaction.merchant,
+    category: categoryName(transaction.category || FREE_CATEGORY_ID),
+    amount: -Math.abs(Number(transaction.amount || 0)),
+    paidWith: transaction.source === "cash" ? "Efectivo" : "Cuenta",
+    note: transaction.description || ""
+  }));
+  const incomeRows = (state.budgetExtras || []).map((extra) => ({
+    date: extra.date,
+    kind: "Ingreso",
+    who: extra.source,
+    category: "",
+    amount: Math.abs(Number(extra.amount || 0)),
+    paidWith: extra.location === "cash" ? "Efectivo" : "Cuenta",
+    note: ""
+  }));
+  return [...expenseRows, ...incomeRows].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
+function buildMovementsCsv() {
+  const header = ["Fecha", "Tipo", "Comercio u origen", "Categoría", "Monto", "Pagado con", "Nota"];
+  const rows = movementsCsvRows().map((row) => [row.date, row.kind, row.who, row.category, row.amount, row.paidWith, row.note]);
+  return [header, ...rows].map((row) => row.map(csvField).join(",")).join("\r\n");
+}
+
+function downloadMovementsCsv() {
+  if (!(state.transactions || []).length && !(state.budgetExtras || []).length) {
+    showNoticeSnackbar("Aun no tienes movimientos para exportar.", { duration: 3500, renderNow: false });
+    return;
+  }
+  const csv = "﻿" + buildMovementsCsv();
+  exportFile(`movimientos-${todayKey()}.csv`, csv, "text/csv", "Movimientos listos.");
 }
 
 function periodClosureForWindow(window) {
@@ -4698,7 +6417,7 @@ function removeBudgetJob(id) {
       transaction.labeled = false;
     }
   });
-  state.lastAlert = "Categoria eliminada. Sus gastos vuelven a revision.";
+  state.lastAlert = "Categoría eliminada. Sus gastos vuelven a revisión.";
 }
 
 function removeMerchantRule(id) {
@@ -4717,7 +6436,7 @@ function removeTransaction(id) {
     reopenCalendarEvent(transaction.calendarEventId);
   }
   state.lastAlert = transaction
-    ? `${transaction.merchant} eliminado. La categoria se recalculo.`
+    ? `${transaction.merchant} eliminado. La categoría se recalculo.`
     : "Gasto eliminado.";
   if (snackbar?.transactionId === id) {
     clearSnackbar({ renderNow: false });
@@ -4816,7 +6535,7 @@ function cancelCooldown(id) {
   state.wins.push({
     id: uid("win"),
     date: todayKey(),
-    text: "Cancelaste una compra despues de pausarla."
+    text: "Cancelaste una compra después de pausarla."
   });
   state.lastAlert = "Compra cancelada. Ese ahorro ya cuenta.";
 }
@@ -4905,6 +6624,76 @@ function applySavingsAllocation(amount, updatedAt) {
   return job;
 }
 
+// Mirrors savingsAllocationTarget's rule, and for the same reason: a weekly/monthly
+// category multiplies its amount across the period (see budgetAmountForJob), so adding a
+// one-off set-aside straight onto job.amount would reserve several times what was asked
+// for. Only a "period" category can absorb it directly; anything else gets its own
+// exact-amount reserve beside it.
+function setAsideTarget(name) {
+  const wanted = String(name).trim().toLowerCase();
+  const match = state.budgetJobs.find((job) => String(job.name || "").trim().toLowerCase() === wanted);
+  if (!match) {
+    return { job: null, createName: name };
+  }
+  if (match.cadence === "period") {
+    return { job: match, createName: match.name };
+  }
+  return { job: null, createName: `${name} extra` };
+}
+
+function handleSetAsideSubmit(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  const name = cleanText(data.get("name"), "Apartado");
+  const amount = numberFrom(data.get("amount"));
+
+  const failWith = (message) => {
+    state.lastAlert = message;
+    showNoticeSnackbar(message, { kind: "error", renderNow: false });
+    saveState();
+    render();
+  };
+
+  if (amount <= 0) {
+    failWith("Escribe cuánto quieres apartar.");
+    return;
+  }
+
+  // Same guard as handleBudgetSubmit: freeRemaining is the number shown on screen as
+  // "Libre", so it's the one the user compares against before apartar.
+  const summary = budgetSummary();
+  if (amount > summary.freeRemaining) {
+    failWith(`Solo tienes ${formatMoney(summary.freeRemaining)} libres para apartar.`);
+    return;
+  }
+
+  const target = setAsideTarget(name);
+  if (!target.job && state.budgetJobs.length >= 10) {
+    failWith("Mantengamos máximo 10 categorías para que el plan siga claro.");
+    return;
+  }
+
+  const now = new Date().toISOString();
+  if (target.job) {
+    target.job.amount = Number(target.job.amount || 0) + amount;
+    target.job.updated_at = now;
+  } else {
+    state.budgetJobs.push({
+      id: uniqueCategoryId(target.createName),
+      name: target.createName,
+      amount,
+      cadence: "period",
+      updated_at: now
+    });
+  }
+
+  planSheet = "";
+  state.lastAlert = `Apartaste ${formatMoney(amount)} para ${target.createName}.`;
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
+  saveState();
+  render();
+}
+
 function reduceSavingsAllocation(jobId, amount) {
   const job = state.budgetJobs.find((item) => item.id === jobId);
   if (!job) {
@@ -4925,9 +6714,12 @@ function showUndoSnackbar(transactionId) {
     kind: "",
     transactionId
   };
+  // 8s (not the original 5s) so there's enough time to read the message and react,
+  // not just for users who need it — nobody benefits from a confirmation that vanishes
+  // before they've finished reading it.
   snackbarTimer = setTimeout(() => {
     clearSnackbar();
-  }, 5000);
+  }, 8000);
 }
 
 function showNoticeSnackbar(message, options = {}) {
@@ -5079,7 +6871,7 @@ async function showDailyReminderNotification(options = {}) {
     return false;
   }
 
-  const title = options.test ? "Prueba de recordatorio" : "Revision de gastos";
+  const title = options.test ? "Prueba de recordatorio" : "Revisión de gastos";
   const body = "Quieres registrar tus gastos de hoy?";
   const data = { url: `${selfLocationOrigin()}#${QUICK_EXPENSE_HASH}` };
   const localNotifications = nativeLocalNotifications();
@@ -5183,6 +6975,50 @@ function initializeNativeNotificationActions() {
   } catch {}
 }
 
+// Matches FreeMoneyWidgetProvider.QUICK_ADD_URI and the intent-filter data (scheme +
+// host) declared in AndroidManifest.xml for the home screen widget's "+" button.
+const WIDGET_QUICK_ADD_HOST = "registrar-gasto";
+
+function nativeCapacitorApp() {
+  return window.Capacitor?.Plugins?.App || null;
+}
+
+function routeIfWidgetQuickAddUrl(url) {
+  if (!url) {
+    return;
+  }
+  try {
+    if (new URL(url).host === WIDGET_QUICK_ADD_HOST) {
+      window.location.hash = QUICK_EXPENSE_HASH;
+    }
+  } catch {}
+}
+
+// The widget's "+" button opens the app via a finanzasconductuales://registrar-gasto
+// deep link (see AndroidManifest.xml + FreeMoneyWidgetProvider) instead of just the
+// normal launcher intent. @capacitor/app delivers that URL through appUrlOpen for a
+// warm start (app already running) and buffers it until this listener is registered
+// for a cold start — getLaunchUrl() is checked too as a belt-and-suspenders fallback
+// in case a Capacitor version ever fails to replay the buffered event.
+function initializeWidgetQuickAddDeepLink() {
+  const capacitorApp = nativeCapacitorApp();
+  if (!capacitorApp) {
+    return;
+  }
+  try {
+    const listener = capacitorApp.addListener("appUrlOpen", ({ url }) => routeIfWidgetQuickAddUrl(url));
+    if (listener?.catch) {
+      listener.catch(() => {});
+    }
+  } catch {}
+  try {
+    capacitorApp
+      .getLaunchUrl?.()
+      ?.then((result) => routeIfWidgetQuickAddUrl(result?.url))
+      ?.catch(() => {});
+  } catch {}
+}
+
 async function scheduleNativeDailyReminder(reminder = normalizeDailyReminder(state.dailyReminder)) {
   const localNotifications = nativeLocalNotifications();
   if (!localNotifications) {
@@ -5197,7 +7033,7 @@ async function scheduleNativeDailyReminder(reminder = normalizeDailyReminder(sta
       notifications: [
         {
           id: DAILY_REMINDER_NOTIFICATION_ID,
-          title: "Revision de gastos",
+          title: "Revisión de gastos",
           body: "Quieres registrar tus gastos de hoy?",
           schedule: {
             at: nextReminderDate(reminder.time),
@@ -5231,13 +7067,13 @@ function notificationStatusLabel(permission) {
 function reminderSupportNote(permission) {
   if (nativeLocalNotifications()) {
     if (permission === "granted") {
-      return "Android mostrara el recordatorio aunque la app no este abierta. Tocar la notificacion abre registrar gasto.";
+      return "Android mostrará el recordatorio aunque la app no este abierta. Tocar la notificación abre registrar gasto.";
     }
     if (permission === "denied") {
-      return "Android bloqueo las notificaciones para esta app. Cambialo en ajustes del sistema.";
+      return "Android bloqueó las notificaciones para esta app. Cámbialo en ajustes del sistema.";
     }
     if (permission === "unsupported") {
-      return "El plugin nativo de notificaciones no esta disponible en esta instalacion.";
+      return "El plugin nativo de notificaciones no está disponible en esta instalación.";
     }
     return "Permite notificaciones para activar el recordatorio diario en Android.";
   }
@@ -5245,7 +7081,7 @@ function reminderSupportNote(permission) {
     return "El recordatorio queda programado localmente en este dispositivo. Si el sistema cierra la app por completo, se reprograma al volver a abrirla.";
   }
   if (permission === "denied") {
-    return "El horario queda guardado, pero el navegador no mostrara avisos hasta que cambies el permiso del sitio.";
+    return "El horario queda guardado, pero el navegador no mostrará avisos hasta que cambies el permiso del sitio.";
   }
   if (permission === "unsupported") {
     return "Este navegador no expone notificaciones web para esta app.";
@@ -5267,6 +7103,51 @@ function liquiditySummary(summary = budgetSummary()) {
     ...liquidity,
     total: liquidity.account + liquidity.cash
   };
+}
+
+// Runs once per period, before anything else reads budgetSummary(). For users with a
+// fixed/scheduled income (periodStart doubles as their payday), it automatically
+// deposits this period's income into real liquidity the moment the period begins —
+// unless the user already said (via the "aun no me pagan" banner button) that it
+// hasn't landed yet, in which case it stays pending until they log it manually. Before
+// that deposit happens, "dinero libre" is just the real balance (finance-core.js),
+// never a promise — so there is nothing to freeze or reconcile here anymore.
+function ensurePeriodIncomeApplication() {
+  const window = getBudgetWindow(state.profile, todayKey());
+  const current = state.periodIncomeStatus;
+
+  if (!current || current.windowStart !== window.start) {
+    state.periodIncomeStatus = {
+      windowStart: window.start,
+      applied: false,
+      rejected: false,
+      bannerDismissed: false,
+      amount: 0,
+      location: null
+    };
+  }
+
+  const status = state.periodIncomeStatus;
+  // getBudgetWindow() treats periodStart as a recurring anchor and rolls it forward
+  // or BACKWARD until it finds the window containing today — so a payday entered as
+  // "in 7 days" (weekly cadence) rolls back exactly one cadence length and lands on
+  // window.start === today, making the app think payday already happened. That rollback
+  // is correct for finding "what period are we in" on an ongoing account, but wrong for
+  // reading intent on day one: if the RAW date the user typed is still in the future,
+  // their first payday hasn't arrived yet, no matter what window.start resolved to.
+  const rawPeriodStart = cleanDate(state.profile.periodStart, "");
+  const paydayAlreadyArrived = !rawPeriodStart || rawPeriodStart <= todayKey();
+  if (state.profile.incomeType === "fixed" && paydayAlreadyArrived && !status.applied && !status.rejected) {
+    const amount = getPeriodIncome(state.profile);
+    if (amount > 0) {
+      adjustLiquidity("account", amount, "ingreso-periodico");
+      status.applied = true;
+      status.bannerDismissed = false;
+      status.amount = amount;
+      status.location = "account";
+      status.appliedAt = new Date().toISOString();
+    }
+  }
 }
 
 function adjustLiquidity(location, delta, reason) {
@@ -5341,7 +7222,7 @@ function categoryName(categoryId) {
   if (categoryId === FREE_CATEGORY_ID) {
     return "Libre / sin clasificar";
   }
-  return state.budgetJobs.find((job) => job.id === categoryId)?.name || "Sin categoria";
+  return state.budgetJobs.find((job) => job.id === categoryId)?.name || "Sin categoría";
 }
 
 function activeMerchantRules() {
@@ -5415,7 +7296,7 @@ function monthlyLabeledSpend() {
 function dominantMoneyScript() {
   const labels = {
     worship: {
-      name: "Buscar mas dinero",
+      name: "Buscar más dinero",
       guidance: "Convierte deseos grandes en metas concretas antes de gastar."
     },
     avoidance: {
@@ -5439,14 +7320,15 @@ function futureFreedom(plan) {
   const monthlyReturn = plan.savings * 0.006;
   const hours = monthlyReturn / Math.max(1, getMonthlyIncome(state.profile) / 160);
   if (hours < 1) {
-    return `${Math.round(hours * 60)} minutos libres/mes`;
+    const minutes = Math.round(hours * 60);
+    return `${minutes} ${minutes === 1 ? "minuto" : "minutos"} libres/mes`;
   }
   return `${hours.toFixed(1)} horas libres/mes`;
 }
 
 function suggestedSavingsMoment() {
   const payday = Number(state.profile.payday || 0);
-  return payday > 0 ? `Dia ${clamp(payday + 1, 1, 28)} del periodo` : "Al recibir el presupuesto";
+  return payday > 0 ? `Día ${clamp(payday + 1, 1, 28)} del periodo` : "Al recibir el presupuesto";
 }
 
 function createSpendAlert(categoryId) {
@@ -5455,16 +7337,16 @@ function createSpendAlert(categoryId) {
     return "Gasto registrado.";
   }
   if (category.ratio >= 100) {
-    return `${category.name} supero su trabajo. Una decision no define tu capacidad; reasigna antes del proximo gasto.`;
+    return `${category.name} supero su trabajo. Una decisión no define tu capacidad; reasigna antes del próximo gasto.`;
   }
   if (category.ratio >= 75) {
-    return `${category.name} esta al ${Math.round(category.ratio)}%. Quedan ${formatMoney(Math.max(0, category.budget - category.spent))}.`;
+    return `${category.name} está al ${Math.round(category.ratio)}%. Quedan ${formatMoney(Math.max(0, category.budget - category.spent))}.`;
   }
-  return `${category.name} va al ${Math.round(category.ratio)}%. El limite sigue visible antes de comprar.`;
+  return `${category.name} va al ${Math.round(category.ratio)}%. El límite sigue visible antes de comprar.`;
 }
 
 function uniqueCategoryId(name) {
-  const base = cleanText(name, "categoria")
+  const base = cleanText(name, "categoría")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -5549,6 +7431,29 @@ function bindMoneyInputs(root = document) {
   });
 }
 
+// Toggle directo sobre el DOM, sin pasar por handleAction()/render(): un re-render
+// completo regenera el <input> desde HTML (que nunca lleva `value=`, es un campo no
+// controlado) y borraria lo que el usuario ya escribio en la contraseña.
+function bindPasswordToggles(root = document) {
+  root?.querySelectorAll("[data-password-toggle]").forEach((button) => {
+    if (button.dataset.passwordToggleBound === "true") {
+      return;
+    }
+    button.dataset.passwordToggleBound = "true";
+    button.addEventListener("click", () => {
+      const input = button.closest(".password-field")?.querySelector("[data-password-input]");
+      if (!input) {
+        return;
+      }
+      const showing = input.type === "text";
+      input.type = showing ? "password" : "text";
+      button.innerHTML = renderIcon(showing ? "eye" : "eye-off");
+      button.setAttribute("aria-pressed", showing ? "false" : "true");
+      button.setAttribute("aria-label", showing ? "Mostrar contraseña" : "Ocultar contraseña");
+    });
+  });
+}
+
 function formatMoneyInput(input) {
   const cursor = input.selectionStart ?? input.value.length;
   const digitCountBeforeCursor = input.value.slice(0, cursor).replace(/\D/g, "").length;
@@ -5563,8 +7468,15 @@ function formatMoneyInput(input) {
   }
 }
 
+// Tope de digitos para cualquier campo de dinero: sin este limite, escribir muchos
+// ceros produce un numero formateado tan largo (ej. "100.000.000.000.000.000.000")
+// que desborda su contenedor y empuja toda la pantalla horizontalmente, cortando el
+// resto del formulario. 12 digitos (hasta ~999.999.999.999) cubre cualquier cifra
+// real de finanzas personales con margen de sobra.
+const MONEY_INPUT_MAX_DIGITS = 12;
+
 function formatMoneyInputValue(value) {
-  const digits = String(value ?? "").replace(/\D/g, "");
+  const digits = String(value ?? "").replace(/\D/g, "").slice(0, MONEY_INPUT_MAX_DIGITS);
   if (!digits) {
     return "";
   }
@@ -5696,7 +7608,7 @@ function normalizePeriodClosures(closures) {
         ? closure.exceededCategories
             .map((category) => ({
               id: category.id || "",
-              name: cleanText(category.name, "Categoria"),
+              name: cleanText(category.name, "Categoría"),
               budget: Number(category.budget || 0),
               spent: Number(category.spent || 0),
               over: Number(category.over || 0)
@@ -5956,10 +7868,10 @@ function formatRelativeEventDate(dateValue) {
   const today = new Date(`${todayKey()}T12:00:00`);
   const days = Math.round((date.getTime() - today.getTime()) / 86_400_000);
   if (days === 0) return "Hoy";
-  if (days === 1) return "Manana";
+  if (days === 1) return "Mañana";
   if (days === -1) return "Ayer";
-  if (days > 1) return `En ${days} dias`;
-  return `Hace ${Math.abs(days)} dias`;
+  if (days > 1) return `En ${days} días`;
+  return `Hace ${Math.abs(days)} días`;
 }
 
 function movementDayLabel(dateValue) {

@@ -1,6 +1,6 @@
 {
   "name": "finanzas-conductuales",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Aplicacion personal de finanzas basada en principios de economia conductual.",
   "private": true,
   "type": "module",
@@ -25,8 +25,11 @@
   "license": "MIT",
   "dependencies": {
     "@capacitor/android": "^8.4.0",
+    "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.4.0",
-    "@capacitor/local-notifications": "^8.0.0"
+    "@capacitor/filesystem": "^8.1.2",
+    "@capacitor/local-notifications": "^8.0.0",
+    "@capacitor/share": "^8.0.1"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.4.0"

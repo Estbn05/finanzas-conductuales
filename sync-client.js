@@ -58,7 +58,7 @@ function clearSessionBackup() {
 }
 
 async function restoreCloudSession(cloud, backup) {
-  const { data, error } = await withCloudTimeout(cloud.auth.setSession(backup), "Restaurar la sesion");
+  const { data, error } = await withCloudTimeout(cloud.auth.setSession(backup), "Restaurar la sesión");
   if (error) {
     throw error;
   }
@@ -70,7 +70,7 @@ async function getStoredCloudSession(cloud, backup) {
   let lastError;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const { data, error } = await withCloudTimeout(cloud.auth.getSession(), "Comprobar la sesion");
+      const { data, error } = await withCloudTimeout(cloud.auth.getSession(), "Comprobar la sesión");
       if (error) {
         throw error;
       }
@@ -158,9 +158,9 @@ export function onCloudAuthChange(callback) {
 export async function signInToCloud(email, password) {
   const cloud = getCloudClient();
   if (!cloud) {
-    throw new Error("La libreria de nube no esta disponible.");
+    throw new Error("La librería de nube no está disponible.");
   }
-  const { data, error } = await withCloudTimeout(cloud.auth.signInWithPassword({ email, password }), "Iniciar sesion");
+  const { data, error } = await withCloudTimeout(cloud.auth.signInWithPassword({ email, password }), "Iniciar sesión");
   if (error) {
     throw error;
   }
@@ -168,17 +168,47 @@ export async function signInToCloud(email, password) {
   return data.session;
 }
 
+// Envia el correo de "restablecer contraseña". El link de ese correo lleva a una
+// pagina web propia (reset-password.html, fuera de la app) porque completar el
+// cambio requiere una sesion de recuperacion temporal que Supabase entrega via la URL
+// del correo — no algo que la app movil pueda interceptar sin deep linking.
+export async function requestPasswordReset(email) {
+  const cloud = getCloudClient();
+  if (!cloud) {
+    throw new Error("La librería de nube no está disponible.");
+  }
+  const { error } = await withCloudTimeout(
+    cloud.auth.resetPasswordForEmail(email, {
+      redirectTo: "https://estbn05.github.io/finanzas-conductuales/reset-password.html"
+    }),
+    "Enviar el enlace de restablecimiento"
+  );
+  if (error) {
+    throw error;
+  }
+}
+
 export async function signUpToCloud(email, password) {
   const cloud = getCloudClient();
   if (!cloud) {
-    throw new Error("La libreria de nube no esta disponible.");
+    throw new Error("La librería de nube no está disponible.");
   }
   const { data, error } = await withCloudTimeout(cloud.auth.signUp({ email, password }), "Crear la cuenta");
   if (error) {
     throw error;
   }
   persistSessionBackup(data.session);
-  return data.session;
+  // Supabase deliberately does NOT return an error when the email is already
+  // registered: that would let anyone enumerate which accounts exist. Instead it
+  // returns a placeholder user whose identities array is empty, which is the only
+  // reliable way to tell "cuenta nueva" apart from "ese correo ya existe".
+  const alreadyRegistered =
+    Boolean(data.user) && Array.isArray(data.user.identities) && data.user.identities.length === 0;
+  return {
+    session: data.session,
+    alreadyRegistered,
+    needsConfirmation: !data.session && !alreadyRegistered
+  };
 }
 
 export async function signOutFromCloud() {
@@ -186,7 +216,7 @@ export async function signOutFromCloud() {
   if (!cloud) {
     return;
   }
-  const { error } = await withCloudTimeout(cloud.auth.signOut(), "Cerrar la sesion");
+  const { error } = await withCloudTimeout(cloud.auth.signOut(), "Cerrar la sesión");
   if (error) {
     throw error;
   }
@@ -240,6 +270,78 @@ export async function saveCloudState(appState) {
     throw error;
   }
   return data;
+}
+
+export async function deleteCloudAppState() {
+  const cloud = getCloudClient();
+  const userId = await getCloudUserIdForRequest(cloud);
+  if (!cloud || !userId) {
+    return;
+  }
+
+  const { error } = await withCloudTimeout(
+    cloud.from("finance_app_state").delete().eq("user_id", userId),
+    "Eliminar tus datos"
+  );
+
+  if (error) {
+    throw error;
+  }
+}
+
+// Borra la cuenta de autenticación (correo + contraseña) además de los datos,
+// llamando a la Edge Function `delete-account`, que corre en el servidor con la clave
+// service_role. El cliente no puede borrar un usuario de auth por sí mismo: la anon
+// key no tiene permisos para eso (y tenerla sería un hueco de seguridad). Devuelve
+// true si la función confirmó el borrado; false si la función no está desplegada
+// todavía (para que el llamador pueda al menos borrar los datos y cerrar sesión).
+export async function deleteCloudAccount() {
+  const cloud = getCloudClient();
+  if (!cloud || !isCloudConfigured()) {
+    return false;
+  }
+
+  const session = await getCloudSessionForRequest(cloud);
+  const accessToken = session?.access_token;
+  if (!accessToken) {
+    throw new Error("No hay una sesión activa para eliminar la cuenta.");
+  }
+
+  const endpoint = `${config.supabaseUrl.replace(/\/+$/, "")}/functions/v1/delete-account`;
+  let response;
+  try {
+    response = await withCloudTimeout(
+      fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          apikey: config.supabaseAnonKey,
+          "Content-Type": "application/json"
+        }
+      }),
+      "Eliminar la cuenta"
+    );
+  } catch (error) {
+    throw new Error(`No pude contactar el servidor para eliminar la cuenta: ${error.message}`);
+  }
+
+  // 404 = la Edge Function aún no está desplegada. No es un error del usuario; se lo
+  // reporta al llamador para que haga el borrado parcial (datos) y avise.
+  if (response.status === 404) {
+    return false;
+  }
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {}
+
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || `El servidor respondió ${response.status} al eliminar la cuenta.`);
+  }
+
+  clearSessionBackup();
+  return true;
 }
 
 async function getCloudUserIdForRequest(cloud) {

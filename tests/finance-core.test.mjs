@@ -13,6 +13,227 @@ import {
   predictUntilNextPeriod
 } from "../finance-core.js";
 
+// El saldo real (cuenta + efectivo, seguido en app.js via adjustLiquidity) es un
+// ledger vivo. Para ingreso VARIABLE es independiente del cupo (freeBudget), que sigue
+// siendo la unica fuente de "dinero libre". Para ingreso FIJO con saldo ya registrado,
+// "dinero libre" es directamente el saldo real menos lo reservado — nunca una promesa
+// sumada encima — para evitar el bug que motivo este diseno: sumar cupo + saldo real
+// duplicaba el dinero cuando el saldo ya incluia el sueldo depositado (caso real:
+// $24.100 se volvio $48.200).
+test("freeRemaining stays income-only when liquidity was never initialized", () => {
+  const state = makeState({
+    budgetJobs: [{ id: "food", name: "Mercado", budget: 600_000 }]
+  });
+  const summary = budgetSummary(state, "2026-06-10");
+
+  assert.equal(summary.usesLiquidityBasedFree, false);
+  assert.equal(summary.unclaimedLiquidity, 0);
+  assert.equal(summary.freeRemaining, summary.freeBudget - summary.freeImpactSpent);
+});
+
+test("fixed income with a real balance on file: freeRemaining is the real balance minus what categories reserve", () => {
+  const state = makeState({
+    budgetJobs: [
+      { id: "food", name: "Mercado", budget: 600_000 },
+      { id: "transport", name: "Transporte", budget: 300_000 }
+    ],
+    liquidity: { account: 1_000_000, cash: 200_000, initialized: true }
+  });
+  const summary = budgetSummary(state, "2026-06-10");
+
+  assert.equal(summary.usesLiquidityBasedFree, true);
+  // reservedRemaining = 900_000 (nada gastado aun); saldo real = 1_200_000.
+  assert.equal(summary.unclaimedLiquidity, 300_000);
+  assert.equal(summary.freeRemaining, 300_000);
+});
+
+test("liquidity smaller than what categories still owe contributes zero, never a negative amount", () => {
+  const state = makeState({
+    budgetJobs: [
+      { id: "food", name: "Mercado", budget: 600_000 },
+      { id: "transport", name: "Transporte", budget: 300_000 }
+    ],
+    liquidity: { account: 500_000, cash: 0, initialized: true }
+  });
+  const summary = budgetSummary(state, "2026-06-10");
+
+  assert.equal(summary.unclaimedLiquidity, 0);
+  assert.equal(summary.freeRemaining, 0);
+});
+
+test("freeBudget (room left to reserve into new categories) never includes liquidity", () => {
+  const withLiquidity = budgetSummary(
+    makeState({ liquidity: { account: 5_000_000, cash: 0, initialized: true } }),
+    "2026-06-10"
+  );
+  const withoutLiquidity = budgetSummary(makeState(), "2026-06-10");
+
+  assert.equal(withLiquidity.freeBudget, withoutLiquidity.freeBudget);
+});
+
+test("period close performance (freeFinal) always measures the planning quota, independent of freeRemaining's formula", () => {
+  const summary = budgetSummary(
+    makeState({ liquidity: { account: 5_000_000, cash: 0, initialized: true } }),
+    "2026-06-10"
+  );
+  const freeFinal = Math.round(summary.freeBudget - summary.freeImpactSpent);
+
+  // freeFinal reports on the PERIOD's planning performance; for fixed income,
+  // freeRemaining is liquidity-based, so the two are expected to differ here.
+  assert.notEqual(freeFinal, summary.freeRemaining);
+});
+
+test("prediction's freeToday always agrees with freeRemaining, whichever formula produced it", () => {
+  const state = makeState({
+    budgetJobs: [
+      { id: "food", name: "Mercado", budget: 600_000 },
+      { id: "transport", name: "Transporte", budget: 300_000 }
+    ],
+    liquidity: { account: 1_000_000, cash: 200_000, initialized: true }
+  });
+  const summary = budgetSummary(state, "2026-06-10");
+  const prediction = predictUntilNextPeriod(state, "2026-06-10");
+
+  assert.equal(prediction.unclaimedLiquidity, 300_000);
+  assert.equal(prediction.freeToday, summary.freeRemaining);
+});
+
+// Regression for the exact bug reported: a $2,000 free/unclassified expense removed
+// $4,000 from "dinero libre" once a real balance existed, because the expense was
+// subtracted once via freeImpactSpent (planning tracker) AND again via the live
+// liquidity drop. Fix: once freeRemaining is liquidity-based, it NEVER also reads
+// freeImpactSpent, so every expense is counted exactly once (via the liquidity drop).
+test("spending an unclassified expense never double-counts against dinero libre for fixed income", () => {
+  const jobs = [];
+  const today = "2026-06-10";
+
+  const before = budgetSummary(
+    makeState({ budgetJobs: jobs, liquidity: { account: 700_000, cash: 0, initialized: true } }),
+    today
+  );
+  assert.equal(before.freeRemaining, 700_000);
+
+  const after = budgetSummary(
+    makeState({
+      budgetJobs: jobs,
+      liquidity: { account: 698_000, cash: 0, initialized: true },
+      transactions: [{ date: today, amount: 2_000, category: "", labeled: false }]
+    }),
+    today
+  );
+
+  assert.equal(
+    after.freeRemaining,
+    before.freeRemaining - 2_000,
+    "a $2,000 expense must remove exactly $2,000 from dinero libre, not $4,000"
+  );
+});
+
+test("freeRemaining never adds freeBudget on top of liquidity, no matter how large the real balance is", () => {
+  const state = makeState({
+    budgetJobs: [{ id: "food", name: "Mercado", budget: 600_000 }],
+    liquidity: { account: 50_000_000, cash: 0, initialized: true }
+  });
+  const summary = budgetSummary(state, "2026-06-10");
+
+  assert.equal(summary.freeRemaining, 50_000_000 - 600_000);
+});
+
+// Before payday is confirmed, fixed-income users with a real balance on file see ONLY
+// that real balance as "libre" — the period's cupo is informational only (shown
+// separately in the UI as "por recibir"), never merged in. This is the design the
+// user explicitly chose: no promise counts as spendable until it's real money.
+test("fixed income before payday shows only the real balance, never the cupo added on top", () => {
+  const state = makeState({
+    budgetJobs: [{ id: "food", name: "Mercado", budget: 600_000 }],
+    liquidity: { account: 700_000, cash: 0, initialized: true },
+    periodIncomeStatus: { windowStart: "2026-06-01", applied: false, rejected: false }
+  });
+  const summary = budgetSummary(state, "2026-06-10");
+
+  assert.equal(summary.incomeApplied, false);
+  assert.equal(summary.freeRemaining, 700_000 - 600_000);
+});
+
+test("fixed income after payday is applied: freeRemaining reflects the deposited income through the real balance", () => {
+  const state = makeState({
+    budgetJobs: [{ id: "food", name: "Mercado", budget: 600_000 }],
+    liquidity: { account: 2_450_000, cash: 0, initialized: true },
+    periodIncomeStatus: {
+      windowStart: "2026-06-01",
+      applied: true,
+      rejected: false,
+      amount: 1_750_000,
+      location: "account"
+    }
+  });
+  const summary = budgetSummary(state, "2026-06-10");
+
+  assert.equal(summary.incomeApplied, true);
+  // liquidityTotal (2_450_000) - reservedRemaining (600_000, nothing spent yet)
+  assert.equal(summary.freeRemaining, 1_850_000);
+});
+
+test("spending after payday is applied never double-counts", () => {
+  const jobs = [{ id: "food", name: "Mercado", budget: 600_000 }];
+  const periodIncomeStatus = {
+    windowStart: "2026-06-01",
+    applied: true,
+    rejected: false,
+    amount: 1_750_000,
+    location: "account"
+  };
+
+  const before = budgetSummary(
+    makeState({ budgetJobs: jobs, liquidity: { account: 1_750_000, cash: 0, initialized: true }, periodIncomeStatus }),
+    "2026-06-10"
+  );
+  const after = budgetSummary(
+    makeState({
+      budgetJobs: jobs,
+      liquidity: { account: 1_748_000, cash: 0, initialized: true },
+      transactions: [{ date: "2026-06-10", amount: 2_000, category: "", labeled: false }],
+      periodIncomeStatus
+    }),
+    "2026-06-10"
+  );
+
+  assert.equal(
+    after.freeRemaining,
+    before.freeRemaining - 2_000,
+    "a $2,000 expense must remove exactly $2,000, not double, once income has been applied"
+  );
+});
+
+test("variable income never uses the liquidity-based formula, even with a real balance on file", () => {
+  const state = makeState({
+    profile: { incomeType: "variable" },
+    budgetJobs: [{ id: "food", name: "Mercado", budget: 600_000 }],
+    liquidity: { account: 700_000, cash: 0, initialized: true },
+    periodIncomeStatus: { windowStart: "2026-06-01", applied: false, rejected: false }
+  });
+  const summary = budgetSummary(state, "2026-06-10");
+
+  assert.equal(summary.hasFixedIncomeSchedule, false);
+  assert.equal(summary.usesLiquidityBasedFree, false);
+  assert.equal(summary.freeRemaining, summary.freeBudget - summary.freeImpactSpent);
+});
+
+// A stale periodIncomeStatus record from a PREVIOUS period (windowStart mismatch)
+// must never be read as "already applied" for the current period.
+test("a periodIncomeStatus record from a previous period never counts as applied for the current one", () => {
+  const state = makeState({
+    budgetJobs: [{ id: "food", name: "Mercado", budget: 600_000 }],
+    liquidity: { account: 700_000, cash: 0, initialized: true },
+    periodIncomeStatus: { windowStart: "2026-05-01", applied: true, rejected: false, amount: 1_750_000 }
+  });
+  const summary = budgetSummary(state, "2026-06-10");
+
+  assert.equal(summary.incomeApplied, false);
+  // Still liquidity-based (fixed income + real balance on file), just not "applied".
+  assert.equal(summary.freeRemaining, 700_000 - 600_000);
+});
+
 test("budget ring allocation is an exact non-overlapping partition of income", () => {
   const ring = budgetRingAllocation({
     income: 1_690_000,
@@ -60,7 +281,9 @@ function makeState(overrides = {}) {
       { id: "transport", name: "Transporte", budget: 300_000 }
     ],
     budgetExtras: overrides.budgetExtras || [],
-    transactions: overrides.transactions || []
+    transactions: overrides.transactions || [],
+    liquidity: overrides.liquidity,
+    periodIncomeStatus: overrides.periodIncomeStatus
   };
 }
 
@@ -175,6 +398,45 @@ test("category status only counts labeled transactions in the current budget per
   assert.equal(transport.spent, 0);
   assert.equal(transport.band, "good");
   assert.equal(summary.freeSpent, 120_000);
+});
+
+// Regression: a category creation form must validate the new job's converted cost
+// against freeRemaining (what the user actually sees as "Libre"), not freeBudget (the
+// gross quota before subtracting money already spent unclassified this period).
+// Real-world case: monthly income $1,000,000, $350,000 already spent unclassified
+// (Libre showed $650,000), then a weekly "gasolina" category of $200,000 was created.
+// $200,000 * (52/12 weeks) = $866,667, comfortably under freeBudget ($1,000,000) but
+// far above the true $650,000 available — creating it silently clamped Libre to $0
+// instead of being rejected with a clear "not enough libre" error.
+test("a category whose converted cost fits freeBudget but exceeds freeRemaining must be rejected, not silently clamp Libre to zero", () => {
+  const state = makeState({
+    profile: { incomeType: "variable", incomeCadence: "monthly", monthlyIncome: 1_000_000, incomeAmount: 1_000_000 },
+    budgetJobs: [],
+    transactions: [{ date: "2026-06-05", amount: 350_000, category: "", labeled: false }]
+  });
+  const before = budgetSummary(state, "2026-06-10");
+  assert.equal(before.freeBudget, 1_000_000);
+  assert.equal(before.freeRemaining, 650_000, "Libre shown to the user before creating the category");
+
+  const gasolina = { amount: 200_000, cadence: "weekly" };
+  const converted = budgetAmountForJob(gasolina, state.profile);
+  assert.equal(converted, 866_667, "200,000/week * 52/12 weeks in a monthly period");
+
+  // The bug: this fits under freeBudget...
+  assert.ok(converted < before.freeBudget, "fits the gross quota - this is exactly what let it slip through");
+  // ...but it does NOT fit what's truly left to reserve (freeRemaining).
+  assert.ok(converted > before.freeRemaining, "the category must be rejected against this number instead");
+
+  // If it were wrongly created anyway, Libre would clamp to 0 instead of going negative.
+  const after = budgetSummary(
+    makeState({
+      profile: state.profile,
+      budgetJobs: [{ id: "gas", name: "Gasolina", ...gasolina }],
+      transactions: state.transactions
+    }),
+    "2026-06-10"
+  );
+  assert.equal(after.freeRemaining, 0, "demonstrates the silent clamp the fixed validation must prevent from ever being reached");
 });
 
 test("weekly fields reserve the whole semester from the scholarship budget", () => {

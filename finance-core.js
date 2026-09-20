@@ -58,7 +58,7 @@ export function calculatePlan(state, today) {
     incomeNote:
       state.profile.incomeType === "variable"
         ? `Ingreso variable con volatilidad ${state.profile.volatility || "medium"}: se recomienda un margen precautorio mayor.`
-        : `Ingreso fijo: la recomendacion protege primero los gastos comprometidos del periodo.`
+        : `Ingreso fijo: la recomendación protege primero los gastos comprometidos del periodo.`
   };
 }
 
@@ -146,6 +146,39 @@ export function budgetSummary(state, today) {
   const freeSpent = spent[FREE_CATEGORY_ID] || 0;
   const totalSpent = Object.values(spent).reduce((sum, amount) => sum + Number(amount || 0), 0);
   const freeImpactSpent = freeSpent + categoryOverspent;
+  const window = budgetWindow(state.profile, today);
+  const liquidityTotal = state.liquidity?.initialized
+    ? Number(state.liquidity.account || 0) + Number(state.liquidity.cash || 0)
+    : 0;
+  // Real money in account/cash that no category currently claims. Purely
+  // informational (never summed into freeRemaining below): it's what "Saldo extra
+  // sin usar" shows for variable-income users, since for them there is no reliable
+  // signal telling us whether this figure already contains this period's income.
+  const unclaimedLiquidity = Math.max(0, liquidityTotal - reservedRemaining);
+
+  // For users with a fixed, scheduled income (state.profile.incomeType === "fixed"),
+  // "dinero libre" is ALWAYS the real money in account/cash minus what's reserved in
+  // categories — never a planning promise. Before payday, that's just whatever real
+  // money already exists (the period's income genuinely isn't there yet, so nothing
+  // to add). On payday, app.js's ensurePeriodIncomeApplication() deposits the period's
+  // income into real liquidity once (with an undoable confirmation banner) — and
+  // because the formula never changes, that single deposit is reflected automatically,
+  // with no risk of ever counting it twice. The period's cupo (freeBudget) still
+  // exists for sizing new categories, but is reported separately, informational only,
+  // never merged into freeRemaining for fixed income.
+  const periodIncomeStatus = state.periodIncomeStatus;
+  const scheduleMatchesWindow = periodIncomeStatus && periodIncomeStatus.windowStart === window.start;
+  const hasFixedIncomeSchedule = state.profile.incomeType === "fixed";
+  const incomeApplied = hasFixedIncomeSchedule && scheduleMatchesWindow && Boolean(periodIncomeStatus.applied);
+  // Only switch to the real-money formula once the user actually entered a real
+  // balance (onboarding always sets this). Without it there is no "real balance" to
+  // speak of, so the original planning quota is the only sensible number to show.
+  const usesLiquidityBasedFree = hasFixedIncomeSchedule && Boolean(state.liquidity?.initialized);
+
+  const freeRemaining = usesLiquidityBasedFree
+    ? Math.max(0, liquidityTotal - reservedRemaining)
+    : Math.max(0, freeBudget - freeImpactSpent);
+
   return {
     baseIncome,
     extraIncome,
@@ -161,13 +194,18 @@ export function budgetSummary(state, today) {
     freeSpent,
     totalSpent,
     freeImpactSpent,
-    freeRemaining: Math.max(0, freeBudget - freeImpactSpent),
+    unclaimedLiquidity,
+    liquidityTotal,
+    hasFixedIncomeSchedule,
+    usesLiquidityBasedFree,
+    incomeApplied,
+    freeRemaining,
     overReserved: Math.max(0, reserved - income),
     months: getPeriodMonths(state.profile),
     weeks: getPeriodWeeks(state.profile),
     cadence: getIncomeCadence(state.profile),
     cadenceLabel: cadenceLabel(getIncomeCadence(state.profile)),
-    window: budgetWindow(state.profile, today)
+    window
   };
 }
 
@@ -179,7 +217,7 @@ export function predictUntilNextPeriod(state, today) {
   const remainingDays = Math.max(0, totalDays - observedDays);
   const minimumObservedDays = predictionMinimumObservedDays(totalDays);
   const pace = freeImpactForPrediction(state, summary, today);
-  const freeToday = Math.round(summary.freeBudget - summary.freeImpactSpent);
+  const freeToday = Math.round(summary.freeRemaining);
   const hasObservedPace = pace.observedFreeSpent > 0;
   const hasReliablePace = hasObservedPace && observedDays >= minimumObservedDays;
   const observedDailyRate = hasObservedPace ? pace.observedFreeSpent / observedDays : 0;
@@ -222,6 +260,12 @@ export function predictUntilNextPeriod(state, today) {
     freeSpent: summary.freeSpent,
     categoryOverspent: summary.categoryOverspent,
     actualFreeImpactSpent: summary.freeImpactSpent,
+    unclaimedLiquidity: summary.unclaimedLiquidity,
+    liquidityTotal: summary.liquidityTotal,
+    reservedRemaining: summary.reservedRemaining,
+    hasFixedIncomeSchedule: summary.hasFixedIncomeSchedule,
+    usesLiquidityBasedFree: summary.usesLiquidityBasedFree,
+    incomeApplied: summary.incomeApplied,
     freeToday,
     observedFreeSpent: pace.observedFreeSpent,
     ignoredOneOffSpent: pace.ignoredOneOffSpent,

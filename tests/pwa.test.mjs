@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "20260622-session-timeout-v33";
+const ASSET_VERSION = "1.0.9";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -57,6 +57,9 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(app.includes('data-action="open-expense"'));
   assert.ok(app.includes('data-action="close-expense"'));
   assert.ok(app.includes('data-action="set-theme"'));
+  const setThemeAction = app.slice(app.indexOf('"set-theme": () => {'), app.indexOf('"remove-calendar-event":'));
+  assert.ok(setThemeAction.includes("saveState();"));
+  assert.equal(setThemeAction.includes("sync: false"), false);
   assert.ok(app.includes("function renderBrandMark()"));
   assert.ok(app.includes(`finance-core.js?v=${ASSET_VERSION}`));
   assert.ok(app.includes(`sync-client.js?v=${ASSET_VERSION}`));
@@ -78,7 +81,27 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(app.includes('const APP_VIEWS = new Set'));
   assert.ok(app.includes('APP_VIEWS.has(view)'));
   assert.ok(app.includes('name="budgeted" type="checkbox" checked'));
-  assert.ok(app.includes("money-location-chips"));
+
+  // The two behavioral checkboxes (24h cooldown opt-out, exclude from daily-pace
+  // prediction) are load-bearing logic, not just labels — see handleTransactionSubmit's
+  // `!budgeted && amount >= threshold` cooldown branch and ignoredOneOffSpent in
+  // finance-core.js. Simplifying them for readability means clearer copy tucked behind a
+  // "Más opciones" disclosure (closed by default), not removing the inputs — they must
+  // stay in the DOM (via the HTML `hidden` attribute, not conditional rendering) so
+  // FormData still submits their default values when the user never opens the section.
+  assert.ok(app.includes('let quickExpenseAdvancedOpen = false;'));
+  assert.ok(app.includes('data-action="toggle-quick-expense-advanced"'));
+  assert.ok(app.includes('class="quick-expense-advanced" ${quickExpenseAdvancedOpen ? "" : "hidden"}'));
+  assert.ok(app.includes("Ya lo tenía planeado"));
+  assert.ok(app.includes("No fue un gasto de todos los días"));
+  assert.equal(app.includes("Ya estaba previsto en el plan"), false);
+  assert.equal(app.includes("Gasto único: no usar para ritmo diario"), false);
+
+  // The undo snackbar must give enough time to read the message and react before it
+  // disappears on its own.
+  assert.match(app, /function showUndoSnackbar[\s\S]*?\}, 8000\);/);
+
+  assert.ok(app.includes("money-location-list"));
   assert.ok(app.includes("Cuenta"));
   assert.ok(app.includes("Efectivo"));
   assert.ok(app.includes("Total real"));
@@ -88,20 +111,20 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(app.includes('class="expense-impact-preview" aria-live="polite"'));
 
   const todayView = app.slice(app.indexOf("function renderToday"), app.indexOf("function renderPeriodPredictionCard"));
-  assert.ok(todayView.includes("Categorias del periodo"));
+  assert.ok(todayView.includes("Categorías del periodo"));
   assert.equal(todayView.includes("Movimientos del periodo"), false);
   assert.equal(todayView.includes("Fondo inicial"), false);
   assert.equal(todayView.includes("Pago recomendado"), false);
 
   const fullTodayView = app.slice(app.indexOf("function renderToday"), app.indexOf("function renderPeriodPredictionCard"));
   assert.equal(fullTodayView.includes("Ahora"), false);
-  assert.equal(fullTodayView.includes("Revision rapida"), false);
+  assert.equal(fullTodayView.includes("Revisión rápida"), false);
   assert.equal(fullTodayView.includes("complete-checkin"), false);
   assert.equal(fullTodayView.includes("Clasifica"), false);
   assert.equal(fullTodayView.includes("Gasto del mes"), false);
   assert.equal(fullTodayView.includes("Fondo inicial"), false);
   assert.equal(fullTodayView.includes("Ahorro recomendado"), false);
-  assert.equal(fullTodayView.includes("Gastos por categoria"), false);
+  assert.equal(fullTodayView.includes("Gastos por categoría"), false);
   assert.ok(fullTodayView.includes("renderCooldownPanel"));
   assert.equal(fullTodayView.includes("Ajuste sin culpa"), false);
   assert.equal(fullTodayView.includes("Patron dominante"), false);
@@ -146,7 +169,7 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(app.includes("DAILY_REMINDER_NOTIFICATION_ID"));
   assert.ok(app.includes("TEST_REMINDER_NOTIFICATION_ID"));
   assert.ok(app.includes("localNotificationActionPerformed"));
-  assert.ok(app.includes("Android mostrara el recordatorio aunque la app no este abierta."));
+  assert.ok(app.includes("Android mostrará el recordatorio aunque la app no este abierta."));
   assert.ok(styles.includes("Sidebar ghost button dark contrast v14"));
   assert.ok(styles.includes("html[data-theme=\"dark\"] .sidebar .menu-tools .btn.ghost"));
   assert.ok(styles.includes("Distribution brand mark v18"));
@@ -209,6 +232,19 @@ test("movements combines expenses and extra income and can sort the full history
   assert.ok(app.includes("function compareTransactionsByRecent(a, b)"));
   assert.ok(app.includes('String(b.date || "").localeCompare(String(a.date || ""))'));
   assert.ok(app.includes('movements: "movimientos"'));
+  assert.ok(app.includes('id="transaction-history-filter"'));
+  assert.ok(app.includes("transactionHistoryFilter"));
+  assert.ok(app.includes("function movementMatchesFilter(movement, filter)"));
+  assert.ok(app.includes('value="expense"'));
+  assert.ok(app.includes('value="income"'));
+  assert.ok(app.includes('value="uncategorized"'));
+  assert.ok(app.includes('filter.startsWith("cat:")'));
+  assert.ok(app.includes('id="transaction-history-search"'));
+  assert.ok(app.includes("transactionHistorySearch"));
+  assert.ok(app.includes("function movementMatchesSearch(movement, query)"));
+  assert.ok(app.includes("search: '<circle cx=\"10.5\" cy=\"10.5\" r=\"6.5\"/>"));
+  assert.ok(styles.includes(".movements-controls"));
+  assert.ok(styles.includes(".history-search"));
   assert.ok(styles.includes(".history-row.is-income"));
   assert.ok(styles.includes(".expense-calendar-card"));
   assert.ok(styles.includes(".expense-calendar-grid"));
@@ -227,6 +263,49 @@ test("movements combines expenses and extra income and can sort the full history
   assert.equal(profile.includes("Movimientos del periodo"), false);
 });
 
+// Tapping a day in "Calendario de gastos" (Movimientos) filters the history list to
+// just that day, with a chip to clear it. Each day is a real <button> (was a <div>) so
+// it's keyboard/screen-reader accessible, and the date filter is threaded through both
+// the full render() path (sort/filter dropdowns) and the partial-render search path
+// (which repaints only #transaction-history-results to avoid losing input focus).
+test("tapping a day on the expense calendar filters movements to that day", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  assert.ok(app.includes('let transactionHistoryDate = "";'));
+
+  const dayFn = app.slice(app.indexOf("function renderExpenseCalendarDay"), app.indexOf("function expenseCalendarForSummary"));
+  assert.ok(dayFn.includes("<button"));
+  assert.ok(dayFn.includes('data-action="filter-movements-by-date"'));
+  assert.ok(dayFn.includes("data-date=\"${escapeAttr(day.date)}\""));
+  assert.ok(dayFn.includes("aria-pressed="));
+
+  assert.ok(app.includes('"filter-movements-by-date": () => {'));
+  assert.ok(app.includes('"clear-movements-date-filter": () => {'));
+  assert.ok(app.includes('"filter-movements-by-date",'));
+  assert.ok(app.includes('"clear-movements-date-filter",'));
+
+  const historyFn = app.slice(
+    app.indexOf("function renderTransactionHistory(summary"),
+    app.indexOf("function dailyExpenseTotal(dayMovements")
+  );
+  assert.ok(historyFn.includes('String(movement.date || "").slice(0, 10) === date'));
+  assert.ok(historyFn.includes("Sin movimientos ese día"));
+
+  // The live-search partial repaint must forward the date filter too, or selecting a
+  // day and then typing a search term would silently drop the date filter.
+  const searchHandler = app.slice(app.indexOf('historySearch.addEventListener("input"'), app.indexOf('document.querySelectorAll("[data-lock-digit]")'));
+  assert.ok(searchHandler.includes("transactionHistoryDate"));
+
+  assert.ok(app.includes('${renderTransactionHistory(summary, transactionHistorySort, transactionHistoryFilter, transactionHistorySearch, transactionHistoryDate)}'));
+  assert.ok(app.includes("history-date-chip"));
+  assert.ok(app.includes('data-action="clear-movements-date-filter"'));
+  assert.ok(app.includes('#transaction-history-card")?.scrollIntoView'));
+
+  assert.ok(styles.includes(".expense-calendar-day.is-selected"));
+  assert.ok(styles.includes(".history-date-chip"));
+});
+
 test("period prediction, period close and merchant rules are exposed in the app shell", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
   const core = await readFile(new URL("../finance-core.js", import.meta.url), "utf8");
@@ -240,8 +319,8 @@ test("period prediction, period close and merchant rules are exposed in the app 
   assert.ok(app.includes("predictUntilNextPeriod as getPeriodPrediction"));
   assert.ok(app.includes("function renderPeriodPredictionCard"));
   assert.ok(app.includes("function renderPredictionDetailsModal"));
-  assert.ok(app.includes("Prediccion hasta el proximo periodo"));
-  assert.ok(app.includes("Como se calculo"));
+  assert.ok(app.includes("Predicción hasta el próximo periodo"));
+  assert.ok(app.includes("Cómo se calculó"));
   assert.ok(app.includes("data-action=\"open-prediction-details\""));
   assert.ok(app.includes("data-action=\"close-prediction-details\""));
   assert.ok(app.includes("dinero_libre_inicial"));
@@ -250,10 +329,10 @@ test("period prediction, period close and merchant rules are exposed in the app 
   assert.ok(app.includes("gasto_estimado_restante"));
   assert.ok(app.includes("resultado_final"));
   assert.ok(app.includes("Aprendiendo ritmo"));
-  assert.ok(app.includes("Gasto unico: no usar para ritmo diario"));
+  assert.ok(app.includes("No fue un gasto de todos los días"));
   assert.ok(app.includes("Cierre de periodo"));
   assert.ok(app.includes("Ahorro sugerido vs posible"));
-  assert.ok(app.includes("Que ajustar para el proximo"));
+  assert.ok(app.includes("Qué ajustar para el próximo"));
   assert.ok(app.includes('data-view="periodClose"'));
   assert.ok(app.includes("function renderPeriodCloseScreen"));
   assert.ok(app.includes("function periodCloseReport"));
@@ -319,10 +398,20 @@ test("authenticated new users get a three-step financial onboarding", async () =
   assert.ok(app.includes("Paso 1 de 3"));
   assert.ok(app.includes("Paso 2 de 3"));
   assert.ok(app.includes("Paso 3 de 3"));
-  assert.ok(app.includes("¿Cuando recibes dinero?"));
-  assert.ok(app.includes("¿Donde tienes ese dinero?"));
-  assert.ok(app.includes("¿Para que separas dinero?"));
-  assert.ok(app.includes("Cuenta + efectivo debe sumar"));
+  assert.ok(app.includes("¿Ganas dinero periódicamente?"));
+  assert.ok(app.includes("¿Cuánto tienes hoy en cuenta y efectivo?"));
+  assert.ok(app.includes("¿Para qué separas dinero?"));
+  // El saldo real (paso 2) ya NO se valida contra el presupuesto del periodo: son
+  // dos numeros independientes. Antes se exigia que cuenta+efectivo sumaran
+  // exactamente el ingreso, lo que bloqueaba el paso para cualquiera que
+  // empezara en $0 o ya tuviera guardado un monto distinto.
+  assert.equal(app.includes("Cuenta + efectivo debe sumar"), false);
+  assert.equal(app.includes("Cuenta + efectivo suma"), false);
+  const step2Copy = app.slice(app.indexOf('data-step="2"'), app.indexOf('data-step="3"'));
+  assert.ok(step2Copy.includes("no tiene que coincidir con lo que recibes por periodo"));
+  assert.ok(step2Copy.includes("deja ambos en $0"));
+  const validateFn = app.slice(app.indexOf("function validateOnboardingStep"), app.indexOf("function handleOnboardingSubmit"));
+  assert.equal(validateFn.includes('step === 2'), false);
   assert.ok(app.includes("handleOnboardingSubmit"));
   assert.ok(app.includes("onboardingCategories"));
   assert.ok(app.includes("data-onboarding-category-chip"));
@@ -337,16 +426,485 @@ test("authenticated new users get a three-step financial onboarding", async () =
   assert.ok(styles.includes("-webkit-text-fill-color: #e8f5ee !important"));
 });
 
-test("saving Mis datos uses one native form submission", async () => {
+test("saving Mis datos uses one native form submission per section", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
   const diagnosisModal = app.slice(app.indexOf("function renderDiagnosisModal()"), app.indexOf("function renderScriptQuestion"));
   const bindEvents = app.slice(app.indexOf("function bindEvents()"), app.indexOf("function bindOnboardingFlowV2"));
 
-  assert.ok(diagnosisModal.includes('<button class="btn primary" type="submit">Guardar plan</button>'));
-  assert.ok(diagnosisModal.includes('<button class="btn primary" type="submit">Guardar y usar mi plan</button>'));
+  assert.ok(app.includes("const DIAGNOSIS_SECTIONS = {"));
+  assert.ok(app.includes('plan: {') && app.includes('balances: {') && app.includes('behavior: {'));
+  assert.ok(diagnosisModal.includes('data-diagnosis-section="${sectionKey}"'));
+  assert.ok(diagnosisModal.includes('<button class="btn primary" type="submit">Guardar</button>'));
   assert.equal(diagnosisModal.includes("data-diagnosis-save"), false);
   assert.ok(bindEvents.includes('diagnosisForm.addEventListener("submit", handleDiagnosisSubmit)'));
   assert.equal(bindEvents.includes("[data-diagnosis-save]"), false);
+  assert.ok(app.includes('data-action="open-diagnosis" data-section="plan"'));
+  assert.ok(app.includes('data-action="open-diagnosis" data-section="balances"'));
+  assert.ok(app.includes('data-action="open-diagnosis" data-section="behavior"'));
+});
+
+test("movements can be exported as a CSV with expenses negative and income positive", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+
+  assert.ok(app.includes('data-action="export-movements-csv">Exportar CSV</button>'));
+  assert.ok(app.includes('"export-movements-csv": downloadMovementsCsv'));
+  assert.ok(app.includes('"export-movements-csv",'));
+  assert.ok(app.includes("function csvField(value)"));
+  assert.ok(app.includes("function movementsCsvRows()"));
+  assert.ok(app.includes("function buildMovementsCsv()"));
+  assert.ok(app.includes("function downloadMovementsCsv()"));
+  const csvRows = app.slice(app.indexOf("function movementsCsvRows()"), app.indexOf("function buildMovementsCsv()"));
+  assert.ok(csvRows.includes('kind: "Gasto"'));
+  assert.ok(csvRows.includes('kind: "Ingreso"'));
+  assert.ok(csvRows.includes("amount: -Math.abs(Number(transaction.amount || 0))"));
+  assert.ok(csvRows.includes("amount: Math.abs(Number(extra.amount || 0))"));
+  const csvBuilder = app.slice(app.indexOf("function buildMovementsCsv()"), app.indexOf("function downloadMovementsCsv()"));
+  assert.ok(csvBuilder.includes("Fecha"));
+  const csvDownload = app.slice(app.indexOf("function downloadMovementsCsv()"), app.indexOf("function downloadMovementsCsv()") + 500);
+  assert.ok(csvDownload.includes('exportFile(`movimientos-${todayKey()}.csv`, csv, "text/csv"'));
+});
+
+test("period report and CSV exports use the native share sheet with a browser download fallback", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+
+  assert.ok(pkg.dependencies["@capacitor/filesystem"]);
+  assert.ok(pkg.dependencies["@capacitor/share"]);
+  assert.ok(app.includes("function nativeFilesystem()"));
+  assert.ok(app.includes("window.Capacitor?.Plugins?.Filesystem"));
+  assert.ok(app.includes("function nativeShare()"));
+  assert.ok(app.includes("window.Capacitor?.Plugins?.Share"));
+  const exportFn = app.slice(app.indexOf("async function exportFile("), app.indexOf("function downloadPeriodReport()"));
+  assert.ok(exportFn.includes("filesystem.writeFile("));
+  assert.ok(exportFn.includes("share.share("));
+  assert.ok(exportFn.includes("new Blob("));
+  assert.ok(exportFn.includes('link.download = filename'));
+  assert.ok(app.includes('exportFile(`reporte-periodo-${summary.window.start}.txt`, reportText, "text/plain"'));
+});
+
+test("hardware back button closes the topmost open sheet/menu instead of exiting the app", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+
+  assert.ok(pkg.dependencies["@capacitor/app"]);
+  assert.ok(app.includes("function nativeApp()"));
+  assert.ok(app.includes("window.Capacitor?.Plugins?.App"));
+  assert.ok(app.includes("function handleHardwareBackButton()"));
+  assert.ok(app.includes("function bindHardwareBackButton()"));
+  assert.ok(app.includes('app.addListener("backButton", handleHardwareBackButton)'));
+  assert.ok(app.includes("bindHardwareBackButton();"));
+  const closeOrder = app.slice(app.indexOf("const BACK_CLOSE_SELECTORS"), app.indexOf("function handleHardwareBackButton()"));
+  assert.ok(closeOrder.indexOf('"close-transaction-editor"') < closeOrder.indexOf('"close-expense"'));
+  assert.equal(closeOrder.includes('"close-menu"'), false);
+  const backHandler = app.slice(app.indexOf("function handleHardwareBackButton()"), app.indexOf("function bindHardwareBackButton()"));
+  assert.ok(backHandler.includes("button.click()"));
+  assert.ok(backHandler.includes("if (menuOpen)"));
+  assert.ok(backHandler.includes('document.querySelector(\'[data-action="close-menu"]\')?.click()'));
+  assert.ok(backHandler.includes("nativeApp()?.exitApp()"));
+});
+
+test("home screen widget shows free money and stays in sync with app state", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const manifest = await readFile(new URL("../android/app/src/main/AndroidManifest.xml", import.meta.url), "utf8");
+  const mainActivity = await readFile(
+    new URL("../android/app/src/main/java/com/estbn05/finanzasconductuales/MainActivity.java", import.meta.url),
+    "utf8"
+  );
+  const provider = await readFile(
+    new URL("../android/app/src/main/java/com/estbn05/finanzasconductuales/FreeMoneyWidgetProvider.java", import.meta.url),
+    "utf8"
+  );
+  const plugin = await readFile(
+    new URL("../android/app/src/main/java/com/estbn05/finanzasconductuales/WidgetBridgePlugin.java", import.meta.url),
+    "utf8"
+  );
+  const widgetInfo = await readFile(
+    new URL("../android/app/src/main/res/xml/free_money_widget_info.xml", import.meta.url),
+    "utf8"
+  );
+  const widgetLayout = await readFile(
+    new URL("../android/app/src/main/res/layout/widget_free_money.xml", import.meta.url),
+    "utf8"
+  );
+
+  assert.ok(app.includes("function nativeWidgetBridge()"));
+  assert.ok(app.includes("window.Capacitor?.Plugins?.WidgetBridge"));
+  assert.ok(app.includes("function syncHomeWidget()"));
+  assert.ok(app.includes("bridge.update({ freeMoney: formatMoney(summary.freeRemaining), periodLabel })"));
+  const saveStateFn = app.slice(app.indexOf("function saveState(options = {})"), app.indexOf("async function initializeCloudSync()"));
+  assert.ok(saveStateFn.includes("syncHomeWidget();"));
+  assert.ok(app.includes("render();\ninitializeNativeNotificationActions();"));
+  assert.ok(app.includes("syncHomeWidget();"));
+
+  assert.ok(manifest.includes('android:name=".FreeMoneyWidgetProvider"'));
+  assert.ok(manifest.includes("android.appwidget.action.APPWIDGET_UPDATE"));
+  assert.ok(manifest.includes('android:resource="@xml/free_money_widget_info"'));
+  assert.ok(mainActivity.includes("registerPlugin(WidgetBridgePlugin.class);"));
+  assert.ok(provider.includes("class FreeMoneyWidgetProvider extends AppWidgetProvider"));
+  assert.ok(provider.includes("PREFS_NAME"));
+  assert.ok(plugin.includes('@CapacitorPlugin(name = "WidgetBridge")'));
+  assert.ok(plugin.includes("public void update(PluginCall call)"));
+  assert.ok(widgetInfo.includes("android:initialLayout=\"@layout/widget_free_money\""));
+  assert.ok(widgetLayout.includes('android:id="@+id/widget_amount"'));
+});
+
+test("progress screen shows behavior insights computed from existing transaction data", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  assert.ok(app.includes("function weekdaySpendingInsight(summary)"));
+  assert.ok(app.includes("function categoryTrendInsight(summary)"));
+  assert.ok(app.includes("function smallExpensesInsight(summary)"));
+  assert.ok(app.includes("function behaviorInsights(summary = budgetSummary())"));
+  assert.ok(app.includes("function renderBehaviorInsights(summary = budgetSummary())"));
+  assert.ok(app.includes("function previousPeriodWindow(summary)"));
+  assert.ok(app.includes('class="insight-list"'));
+  assert.ok(app.includes('class="insight-card"'));
+  const progressView = app.slice(app.indexOf("function renderProgressView()"), app.indexOf("function renderIncomeCadenceOptions"));
+  assert.ok(progressView.includes("renderBehaviorInsights()"));
+  const smallExpenses = app.slice(app.indexOf("function smallExpensesInsight"), app.indexOf("function behaviorInsights"));
+  assert.ok(smallExpenses.includes("SMALL_EXPENSE_THRESHOLD"));
+  assert.ok(styles.includes(".insight-card"));
+  assert.ok(styles.includes('html[data-theme="dark"] .insight-card'));
+});
+
+// Regression guard: a prior fix tried merging real liquidity into "dinero libre"
+// (first via a live sum, then via a period-start anchor snapshot) and both attempts
+// caused the same money to be counted twice, once exactly doubling a real user's
+// libre ($24,100 -> $48,200). The anchor mechanism must stay removed, and the Home
+// screen must show the leftover real balance as its own separate figure instead of
+// silently folding it into "dinero libre".
+test("dinero libre never merges real liquidity into it via a blind live sum; unclaimed balance is shown as a separate figure for variable income", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+
+  // The old, removed mechanism: a single global anchor keyed only on period start,
+  // reused for every income type. It was replaced by the per-period, fixed-income-only
+  // periodIncomeStatus record asserted below.
+  assert.equal(app.includes("ensureLiquidityPeriodAnchor"), false);
+  assert.equal(app.includes("liquidityPeriodAnchor"), false);
+
+  assert.ok(app.includes("Saldo extra sin usar"));
+  assert.ok(app.includes("summary.unclaimedLiquidity"));
+});
+
+// Redesign: onboarding now asks up front whether income is fixed or variable. Fixed
+// income asks for the exact payday (which doubles as periodStart, the period anchor),
+// and app.js auto-deposits that income into real liquidity once the period starts,
+// with a banner + undo so the user can correct it if it hasn't actually landed yet.
+// This is what makes it safe to add real, leftover money into "dinero libre" for
+// fixed-income users without repeating the doubling bug: the app always knows,
+// explicitly, whether this period's income is already inside the real balance.
+test("fixed income is auto-applied to real liquidity once the period starts, with an undoable banner", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+
+  assert.ok(app.includes("¿Tu ingreso es fijo o variable?"));
+  assert.ok(app.includes("data-onboarding-income-type=\"fixed\""));
+  assert.ok(app.includes("data-onboarding-income-type=\"variable\""));
+  assert.ok(app.includes("¿Qué día te pagan?"));
+
+  assert.ok(app.includes("function ensurePeriodIncomeApplication()"));
+  assert.ok(app.includes("state.periodIncomeStatus = {"));
+  const renderFn = app.slice(app.indexOf("function render() {"), app.indexOf("function renderHeader"));
+  assert.ok(renderFn.includes("ensurePeriodIncomeApplication();"));
+  const saveStateFn = app.slice(app.indexOf("function saveState(options = {})"), app.indexOf("async function initializeCloudSync()"));
+  assert.ok(saveStateFn.includes("ensurePeriodIncomeApplication();"));
+
+  assert.ok(app.includes("function renderIncomeAppliedBanner()"));
+  assert.ok(app.includes('"undo-income-application"'));
+  assert.ok(app.includes('"dismiss-income-banner"'));
+
+  // Persisted across reload/sync, and reset to null for brand-new accounts.
+  assert.ok(app.includes("periodIncomeStatus: null"));
+  assert.ok(app.includes("savedState.periodIncomeStatus"));
+});
+
+// Regression: getBudgetWindow() treats periodStart as a recurring anchor and rolls it
+// BACKWARD to find the window containing today. A brand-new user who enters a payday
+// "in 7 days" (weekly cadence) gets window.start rolled back exactly one cadence
+// length, landing on today — making the app think payday already happened on day one,
+// auto-depositing money that hasn't actually arrived. The fix checks the RAW
+// profile.periodStart the user typed against today, not just the rolled-back window.
+test("a payday entered in the future is not auto-applied until that date actually arrives", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+
+  const fn = app.slice(app.indexOf("function ensurePeriodIncomeApplication()"), app.indexOf("function adjustLiquidity"));
+  assert.ok(fn.includes("rawPeriodStart"));
+  assert.ok(fn.includes("paydayAlreadyArrived"));
+  assert.ok(/paydayAlreadyArrived\s*&&\s*!status\.applied/.test(fn) || /!status\.applied\s*&&\s*!status\.rejected/.test(fn));
+  assert.ok(fn.includes("state.profile.incomeType === \"fixed\" && paydayAlreadyArrived"));
+});
+
+test("PIN lock protects the app with device-local hashed storage separate from synced state", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  // Device-local storage, never the synced state key.
+  assert.ok(app.includes('const LOCK_STORAGE_KEY = "finanzas-conductuales-lock:v1"'));
+  assert.ok(app.includes("function loadLockConfig()"));
+
+  // LOCK_STORAGE_KEY must be declared BEFORE the top-level loadLockConfig() call at
+  // boot, or the const's temporal dead zone throws a ReferenceError that the helper's
+  // try/catch silently swallows, making the lock always read as disabled on cold start.
+  assert.ok(
+    app.indexOf('const LOCK_STORAGE_KEY = "finanzas-conductuales-lock:v1"') < app.indexOf("let lockConfig = loadLockConfig();")
+  );
+  assert.ok(app.includes("function saveLockConfig(config)"));
+  const saveLock = app.slice(app.indexOf("function saveLockConfig(config)"), app.indexOf("function randomSalt()"));
+  assert.ok(saveLock.includes("localStorage.setItem(LOCK_STORAGE_KEY"));
+  assert.equal(saveLock.includes("setItem(STORAGE_KEY"), false);
+
+  // Hashing, never storing the raw PIN.
+  assert.ok(app.includes("async function hashPin(pin, salt)"));
+  assert.ok(app.includes('crypto.subtle.digest("SHA-256"'));
+  assert.ok(app.includes("function randomSalt()"));
+
+  // Gate is the first thing render() checks.
+  const renderFn = app.slice(app.indexOf("function render() {"), app.indexOf("function render() {") + 400);
+  assert.ok(renderFn.includes("if (lockMode) {"));
+  assert.ok(renderFn.includes("renderLockScreen()"));
+
+  // Auto-lock on resume from background via the already-installed App plugin.
+  assert.ok(app.includes("function bindAppLock()"));
+  assert.ok(app.includes('appPlugin.addListener("appStateChange"'));
+  assert.ok(app.includes("bindAppLock();"));
+
+  // Brute-force cooldown.
+  assert.ok(app.includes("LOCK_MAX_ATTEMPTS"));
+  assert.ok(app.includes("LOCK_COOLDOWN_MS"));
+  assert.ok(app.includes("function lockIsCoolingDown()"));
+
+  // Flow + entry.
+  assert.ok(app.includes("async function pushLockDigit(digit)"));
+  assert.ok(app.includes("async function resolveLockEntry()"));
+  assert.ok(app.includes("function renderLockScreen()"));
+  assert.ok(app.includes('data-action="open-lock-setup"'));
+  assert.ok(app.includes('data-action="open-lock-disable"'));
+  assert.ok(app.includes("[data-lock-digit]"));
+
+  assert.ok(styles.includes(".lock-keypad"));
+  assert.ok(styles.includes(".lock-dot"));
+  assert.ok(styles.includes('html[data-theme="dark"] .lock-key'));
+});
+
+test("biometric unlock layers on top of the PIN with a native BiometricPrompt plugin", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const mainActivity = await readFile(
+    new URL("../android/app/src/main/java/com/estbn05/finanzasconductuales/MainActivity.java", import.meta.url),
+    "utf8"
+  );
+  const plugin = await readFile(
+    new URL("../android/app/src/main/java/com/estbn05/finanzasconductuales/BiometricAuthPlugin.java", import.meta.url),
+    "utf8"
+  );
+  const manifest = await readFile(new URL("../android/app/src/main/AndroidManifest.xml", import.meta.url), "utf8");
+  const buildGradle = await readFile(new URL("../android/app/build.gradle", import.meta.url), "utf8");
+
+  // Native plugin using AndroidX BiometricPrompt.
+  assert.ok(plugin.includes('@CapacitorPlugin(name = "BiometricAuth")'));
+  assert.ok(plugin.includes("import androidx.biometric.BiometricPrompt"));
+  assert.ok(plugin.includes("public void isAvailable(PluginCall call)"));
+  assert.ok(plugin.includes("public void authenticate(final PluginCall call)"));
+  assert.ok(plugin.includes('setNegativeButtonText("Usar PIN")'));
+  assert.ok(mainActivity.includes("registerPlugin(BiometricAuthPlugin.class);"));
+  assert.ok(manifest.includes("android.permission.USE_BIOMETRIC"));
+  assert.ok(buildGradle.includes("androidx.biometric:biometric"));
+
+  // JS: biometric is an optional layer, PIN remains the fallback.
+  assert.ok(app.includes("function nativeBiometric()"));
+  assert.ok(app.includes("window.Capacitor?.Plugins?.BiometricAuth"));
+  assert.ok(app.includes("async function tryBiometricUnlock()"));
+  assert.ok(app.includes("async function enableBiometric()"));
+  assert.ok(app.includes("function disableBiometric()"));
+  assert.ok(app.includes('data-action="enable-biometric"'));
+  assert.ok(app.includes('data-action="disable-biometric"'));
+  assert.ok(app.includes("data-lock-biometric"));
+  // biometric flag persists in the same device-local lock config.
+  assert.ok(app.includes("biometric: Boolean(parsed?.biometric)"));
+  // A successful biometric prompt clears lockMode just like a correct PIN.
+  const tryBio = app.slice(app.indexOf("async function tryBiometricUnlock()"), app.indexOf("async function enableBiometric()"));
+  assert.ok(tryBio.includes("biometric.authenticate("));
+  assert.ok(tryBio.includes('lockMode = "";'));
+});
+
+test("failed login keeps the email and signup distinguishes new accounts from existing ones", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const syncClient = await readFile(new URL("../sync-client.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  // The email survives the re-render after a wrong password.
+  assert.ok(app.includes("let authEmailDraft"));
+  assert.ok(app.includes("authEmailDraft = email;"));
+  const authGate = app.slice(app.indexOf("function renderAuthGate()"), app.indexOf("function renderHeader"));
+  assert.ok(authGate.includes("const emailValue = escapeAttr(authEmailDraft)"));
+  // One shared form template serves both modes, so a single prefilled email input
+  // covers sign in and sign up alike. The dedicated "forgot password" screen adds a
+  // second occurrence with its own email field.
+  assert.equal((authGate.match(/value="\$\{emailValue\}"/g) || []).length, 2);
+  // Password is never echoed back.
+  assert.equal(authGate.includes('type="password"') && authGate.includes('name="password" type="password" autocomplete="current-password" minlength="6" placeholder="Tu contraseña" value='), false);
+
+  // Supabase returns no error for an already-registered email, so the empty
+  // identities array is what distinguishes the two cases.
+  assert.ok(syncClient.includes("data.user.identities.length === 0"));
+  assert.ok(syncClient.includes("alreadyRegistered"));
+  assert.ok(syncClient.includes("needsConfirmation"));
+  assert.ok(app.includes("result.alreadyRegistered"));
+  assert.ok(app.includes('stopWithNotice({ kind: "exists", email })'));
+  assert.ok(app.includes('stopWithNotice({ kind: "sent", email })'));
+  // The old ambiguous single message is gone.
+  assert.equal(app.includes("Cuenta creada. Revisa tu correo si Supabase pide confirmación."), false);
+
+  // Dedicated screens instead of a bare error dangling under the form.
+  assert.ok(app.includes("function renderAuthNoticeCard(notice)"));
+  assert.ok(app.includes("Ese correo ya tiene cuenta"));
+  assert.ok(app.includes("Revisa tu correo"));
+  assert.ok(app.includes("auth-inline-error"));
+  assert.equal(authGate.includes('class="form-error auth-error"'), false);
+  assert.ok(styles.includes(".auth-notice-card"));
+  assert.ok(styles.includes(".auth-inline-error"));
+});
+
+// A friend testing the app reported forgetting their password with no way to recover
+// it, plus no way to check what they'd typed while signing up. Two independent fixes:
+// a password visibility toggle (bound directly to the DOM, never through
+// handleAction()/render(), since a full re-render regenerates the uncontrolled
+// <input> and would wipe whatever the user had typed), and a real "forgot password"
+// screen wired to Supabase's resetPasswordForEmail + a standalone completion page.
+test("forgotten passwords can be recovered, and typed passwords can be revealed", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const syncClient = await readFile(new URL("../sync-client.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  // Password visibility toggle: bound directly to the DOM (not via handleAction),
+  // so it never triggers a re-render that would erase what the user typed.
+  assert.ok(app.includes("function bindPasswordToggles(root = document)"));
+  assert.ok(app.includes("bindPasswordToggles();"));
+  assert.ok(app.includes('data-password-toggle'));
+  assert.ok(app.includes('data-password-input'));
+  assert.ok(app.includes('input.type = showing ? "password" : "text";'));
+  assert.ok(styles.includes(".password-toggle"));
+
+  // Forgot-password request screen, wired to Supabase's resetPasswordForEmail.
+  assert.ok(syncClient.includes("export async function requestPasswordReset(email)"));
+  assert.ok(syncClient.includes("resetPasswordForEmail(email"));
+  assert.ok(syncClient.includes("reset-password.html"));
+  assert.ok(app.includes("requestPasswordReset"));
+  assert.ok(app.includes("¿Olvidaste tu contraseña?"));
+  assert.ok(app.includes("function handleForgotPasswordSubmit(event)"));
+  assert.ok(app.includes('data-cloud-forgot-form'));
+  assert.ok(app.includes('authNotice = { kind: "reset-sent", email };'));
+
+  // The confirmation card explains next steps instead of leaving the user stuck.
+  const noticeCard = app.slice(app.indexOf("function renderAuthNoticeCard(notice)"), app.indexOf("function renderAuthGate()"));
+  assert.ok(noticeCard.includes('notice.kind === "reset-sent"'));
+});
+
+test("onboarding controls stay legible in dark mode instead of keeping their light cream background", async () => {
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  // These were excluded from the earlier ".modal:not(.onboarding-modal)" dark-mode
+  // pass and kept a hardcoded light background (#efe6d8 / var(--soft)) with
+  // var(--muted) text, which in dark mode is a color meant for dark surfaces:
+  // "Semanal"/"Mensual"/"Paso 1 de 3" rendered nearly invisible.
+  assert.ok(styles.includes('html[data-theme="dark"] .onboarding-segmented'));
+  assert.ok(styles.includes('html[data-theme="dark"] .onboarding-segmented button.is-active'));
+  assert.ok(styles.includes('html[data-theme="dark"] .onboarding-category-chip'));
+  assert.ok(styles.includes('html[data-theme="dark"] .onboarding-category-chip.is-active'));
+  assert.ok(styles.includes('html[data-theme="dark"] .step-badge'));
+});
+
+test("theme follows the OS when the user never picked one, so data-theme cannot contradict prefers-color-scheme", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  // The stylesheet themes itself through BOTH mechanisms, so they must always agree.
+  assert.ok(styles.includes("@media (prefers-color-scheme: dark)"));
+  assert.ok(styles.includes('html[data-theme="dark"]'));
+
+  // A fresh/signed-out state means "follow the system", not a hardcoded light.
+  const defaultState = app.slice(app.indexOf("function createDefaultState"), app.indexOf("function migrateState"));
+  assert.ok(defaultState.includes('theme: ""'));
+  assert.equal(defaultState.includes('theme: "light"'), false);
+
+  assert.ok(app.includes("function systemPrefersDark()"));
+  assert.ok(app.includes("function storedThemeChoice()"));
+  const themePref = app.slice(app.indexOf("function themePreference()"), app.indexOf("function applyThemePreference()"));
+  assert.ok(themePref.includes('storedThemeChoice() || (systemPrefersDark() ? "dark" : "light")'));
+
+  // An explicit choice still wins and still round-trips through migration.
+  const migrate = app.slice(app.indexOf("function migrateState"), app.indexOf("function saveState"));
+  assert.ok(migrate.includes('savedState.settings?.theme === "dark" || savedState.settings?.theme === "light"'));
+
+  // index.html paints before app.js loads, so it needs the same fallback.
+  assert.ok(html.includes("prefers-color-scheme: dark"));
+  assert.ok(html.includes('stored === "dark" || stored === "light" ? stored : systemTheme()'));
+
+  // Live OS changes apply only while the user has no explicit preference.
+  assert.ok(app.includes("if (!storedThemeChoice()) {"));
+});
+
+test("sign in and sign up are each their own full screen, not a form unfolding in the landing", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+  const authGate = app.slice(app.indexOf("function renderAuthGate()"), app.indexOf("function renderHeader"));
+
+  // Picking a mode returns early with a dedicated screen instead of swapping a card
+  // inside the landing markup.
+  assert.ok(authGate.includes("if (selectedAuthMode) {"));
+  assert.ok(authGate.includes('class="auth-gate auth-gate-focused"'));
+  assert.ok(authGate.includes('class="auth-screen"'));
+  assert.ok(authGate.includes("auth-screen-back"));
+  // The landing no longer branches into the forms.
+  const landing = authGate.slice(authGate.indexOf('class="auth-landing"'));
+  assert.equal(landing.includes("signInForm"), false);
+  assert.equal(landing.includes("signUpForm"), false);
+  assert.ok(landing.includes("auth-choice-card"));
+  // Cross-link so the user can switch mode without going back to the landing.
+  assert.ok(authGate.includes("auth-switch-link"));
+  // One shared form template drives both modes.
+  assert.ok(authGate.includes("const isSignIn = selectedAuthMode"));
+  assert.ok(styles.includes(".auth-screen"));
+  assert.ok(styles.includes(".auth-switch-link"));
+});
+
+test("brand typeface is actually self-hosted, not just named in the font stack", async () => {
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+  const worker = await readFile(new URL("../service-worker.js", import.meta.url), "utf8");
+  const { stat } = await import("node:fs/promises");
+
+  // The font file must really ship: naming a family the device does not have
+  // silently falls back to the Android system font (this was the bug before).
+  const font = await stat(new URL("../assets/fonts/manrope-latin-var.woff2", import.meta.url));
+  assert.ok(font.size > 5000);
+
+  assert.ok(styles.includes("@font-face"));
+  assert.ok(styles.includes('font-family: "Manrope"'));
+  assert.ok(styles.includes('url("assets/fonts/manrope-latin-var.woff2") format("woff2")'));
+  // Variable font covering the weights the UI uses.
+  assert.ok(styles.includes("font-weight: 400 800"));
+  // Manrope must come first in every stack, otherwise the fallback wins.
+  const stacks = styles.match(/font-family:[^;]*Inter[^;]*;/g) || [];
+  assert.ok(stacks.length > 0);
+  stacks.forEach((stack) => assert.ok(stack.includes('"Manrope"')));
+  // Cached for offline use, at the exact unversioned URL the stylesheet requests.
+  assert.ok(worker.includes('"assets/fonts/manrope-latin-var.woff2"'));
+  // Money figures use tabular numerals so columns align and digits stop jittering.
+  assert.ok(styles.includes("font-variant-numeric: tabular-nums"));
+});
+
+test("quick classify shows every pending transaction as a list instead of one at a time", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const panel = app.slice(app.indexOf("function renderQuickClassifyPanel()"), app.indexOf("function renderExtraEditor"));
+
+  assert.ok(panel.includes("const pending = quickClassifyQueue.map"));
+  assert.ok(panel.includes('class="quick-classify-list"'));
+  assert.ok(panel.includes('class="quick-classify-row"'));
+  assert.ok(panel.includes("${pending"));
+  assert.equal(panel.includes("skip-quick-classify"), false);
+  assert.equal(panel.includes(" de ${"), false);
+  assert.equal(app.includes("quickClassifyTotal"), false);
+  assert.equal(app.includes("skip-quick-classify"), false);
 });
 
 test("authentication gates onboarding and signed-in users can close their session", async () => {
@@ -356,6 +914,15 @@ test("authentication gates onboarding and signed-in users can close their sessio
 
   assert.ok(app.includes("function shouldShowAuthGate()"));
   assert.ok(app.includes("function shouldShowSessionCheck()"));
+  assert.ok(app.includes("function profileNeedsOnboarding()"));
+  assert.ok(app.includes("function cloudStillResolving()"));
+  assert.ok(app.includes('cloudState.status === "checking" || cloudState.status === "syncing"'));
+  assert.ok(app.includes("return !state.profile.completed && cloudStillResolving();"));
+  assert.ok(app.includes("return !state.profile.completed && !cloudStillResolving();"));
+  assert.ok(app.includes("const LOCAL_STATE_POLL_DURATION_MS = 1_500;"));
+  assert.ok(app.includes("function pollLocalStateUntilStable(deadline)"));
+  assert.ok(app.includes("window.requestAnimationFrame(() => pollLocalStateUntilStable(deadline));"));
+  assert.ok(app.includes("${profileNeedsOnboarding() || state.showDiagnosis ? renderDiagnosisModal() : \"\"}"));
   assert.ok(app.includes("function renderSessionCheck()"));
   assert.ok(app.includes("function renderAuthGate()"));
   assert.ok(app.includes("AUTH_STARTUP_TIMEOUT_MS = 8_000"));
@@ -363,41 +930,60 @@ test("authentication gates onboarding and signed-in users can close their sessio
   assert.ok(app.includes('data-action="recover-auth"'));
   assert.ok(app.includes('"recover-auth": recoverAuthStartup'));
   assert.equal(app.includes('data-action="reload-app"'), false);
-  assert.ok(app.includes("return !cloudState.sessionReady;"));
+  assert.ok(app.includes("if (!cloudState.sessionReady) {"));
   assert.ok(app.includes("return cloudState.sessionReady && !cloudState.signedIn;"));
-  assert.ok(app.includes("Estamos verificando automaticamente si ya tienes una sesion iniciada."));
+  assert.ok(app.includes("Estamos verificando automáticamente si ya tienes una sesión iniciada."));
   assert.ok(app.includes("Continuar al acceso"));
   assert.equal(app.includes("Estamos cargando tu cuenta y tus datos antes de mostrar el formulario inicial."), false);
   const renderFunction = app.slice(app.indexOf("function render()"), app.indexOf("function renderNavItem"));
   assert.ok(renderFunction.indexOf("if (shouldShowSessionCheck())") < renderFunction.indexOf("if (shouldShowAuthGate())"));
   assert.ok(renderFunction.includes("bindEvents();"));
   assert.ok(renderFunction.indexOf("if (shouldShowAuthGate())") < renderFunction.indexOf("const plan = calculatePlan();"));
+  // The theme must be applied BEFORE the early returns. The session-check, auth and
+  // lock screens never reach the main branch, so applying it later left them on
+  // whatever data-theme index.html guessed, which contradicted the
+  // prefers-color-scheme rules and rendered both themes at once.
+  assert.ok(renderFunction.indexOf("applyThemePreference()") < renderFunction.indexOf("if (shouldShowSessionCheck())"));
   const sessionCheck = app.slice(app.indexOf("function renderSessionCheck()"), app.indexOf("function renderAuthGate()"));
   assert.equal(sessionCheck.includes("cloud-login-form"), false);
   assert.ok(app.includes("Entiende tu dinero antes de gastarlo"));
   assert.ok(app.includes("Dinero libre visible"));
-  assert.ok(app.includes("Plan por categorias"));
-  assert.ok(app.includes("Sincronizacion segura"));
+  assert.ok(app.includes("Plan por categorías"));
+  assert.ok(app.includes("Sincronización segura"));
   assert.ok(app.includes('let authMode = ""'));
   assert.ok(app.includes('data-action="show-auth-form"'));
   assert.ok(app.includes('data-action="back-auth-options"'));
   assert.ok(app.includes('data-auth-mode="signin"'));
   assert.ok(app.includes('data-auth-mode="signup"'));
-  assert.ok(app.includes('const selectedAuthMode = ["signin", "signup"].includes(authMode) ? authMode : ""'));
-  assert.ok(app.includes('selectedAuthMode === "signin"'));
-  assert.ok(app.includes('selectedAuthMode === "signup"'));
-  assert.ok(app.includes('id="cloud-signin-form"'));
-  assert.ok(app.includes('id="cloud-signup-form"'));
+  assert.ok(app.includes('const selectedAuthMode = ["signin", "signup", "forgot"].includes(authMode) ? authMode : ""'));
+  // Both modes now come from one shared full-screen template driven by isSignIn.
+  assert.ok(app.includes('const isSignIn = selectedAuthMode === "signin"'));
+  assert.ok(app.includes('id="cloud-${isSignIn ? "signin" : "signup"}-form"'));
+  assert.ok(app.includes('data-cloud-mode="${isSignIn ? "signin" : "signup"}"'));
   assert.ok(app.includes("document.querySelectorAll(\"[data-cloud-auth-form]\")"));
   assert.ok(app.includes("event.currentTarget.dataset.cloudMode"));
-  assert.ok(app.includes('data-cloud-mode="signup"'));
+  // The landing still offers both entry points.
   assert.ok(app.includes(">Registrarse</button>"));
-  assert.ok(app.includes('data-cloud-mode="signin"'));
-  assert.ok(app.includes(">Iniciar sesion</button>"));
+  assert.ok(app.includes(">Iniciar sesión</button>"));
   assert.equal(app.includes('id="cloud-login-form"'), false);
-  assert.equal(app.includes(">Ya tengo cuenta: iniciar sesion</button>"), false);
-  assert.ok(app.includes('data-action="cloud-sign-out">Cerrar sesion'));
+  assert.equal(app.includes(">Ya tengo cuenta: iniciar sesión</button>"), false);
+  assert.ok(app.includes('data-action="cloud-sign-out">Cerrar sesión'));
   assert.ok(app.includes("function clearLocalUserState()"));
+  assert.ok(app.includes('data-action="open-delete-account">Eliminar cuenta'));
+  assert.ok(app.includes("function renderDeleteAccountConfirmation()"));
+  assert.ok(app.includes('data-action="confirm-delete-account">Eliminar cuenta y datos</button>'));
+  assert.ok(app.includes('data-action="cancel-delete-account">Cancelar</button>'));
+  assert.ok(syncClient.includes("export async function deleteCloudAppState()"));
+  assert.ok(syncClient.includes('cloud.from("finance_app_state").delete().eq("user_id", userId)'));
+  // Full account deletion (auth user + data) goes through the server-side Edge
+  // Function, since the anon key cannot delete an auth user. The client calls it and
+  // only falls back to data-only deletion if the function isn't deployed yet.
+  assert.ok(syncClient.includes("export async function deleteCloudAccount()"));
+  assert.ok(syncClient.includes("/functions/v1/delete-account"));
+  const deleteAccountHandler = app.slice(app.indexOf("async function handleDeleteAccount()"), app.indexOf("async function handleDeleteAccount()") + 1800);
+  assert.ok(deleteAccountHandler.indexOf("deleteCloudAccount()") < deleteAccountHandler.indexOf("clearLocalUserState()"));
+  assert.ok(deleteAccountHandler.includes("deleteCloudAppState()"));
+  assert.ok(deleteAccountHandler.includes("cloudState.status = \"error\""));
   assert.ok(app.includes("clearStoredCloudSession()"));
   assert.ok(app.includes("previousEmail !== nextEmail"));
   assert.ok(app.includes("cloudState.sessionReady = true"));
@@ -417,8 +1003,10 @@ test("authentication gates onboarding and signed-in users can close their sessio
   assert.ok(syncClient.includes("setTimeout(() => callback(session, event), 0)"));
   const authChange = app.slice(app.indexOf("authUnsubscribe = onCloudAuthChange"), app.indexOf("if (session) {", app.indexOf("authUnsubscribe = onCloudAuthChange")));
   assert.ok(authChange.includes("clearLocalUserState()"));
+  assert.ok(authChange.includes("onCloudAuthChange((nextSession, event) =>"));
+  assert.ok(authChange.includes('else if (event === "SIGNED_OUT")'));
   assert.ok(syncClient.includes("withCloudTimeout"));
-  assert.ok(syncClient.includes("Comprobar la sesion"));
+  assert.ok(syncClient.includes("Comprobar la sesión"));
   assert.ok(styles.includes(".auth-gate"));
   assert.ok(styles.includes(".auth-landing"));
   assert.ok(styles.includes(".auth-benefits"));
@@ -428,6 +1016,29 @@ test("authentication gates onboarding and signed-in users can close their sessio
   assert.ok(styles.includes(".auth-card"));
   assert.ok(styles.includes(".session-check"));
   assert.equal(styles.includes(".auth-recovery-actions"), false);
+});
+
+// Regression: signing out set cloudState.sessionReady = false and awaited the cloud
+// save + Supabase sign-out BEFORE clearing local session state, so the app showed the
+// "Comprobando tu sesión" startup screen (with its "Continuar al acceso" impatience
+// button) during sign-out too. Tapping that button while signedIn was still true
+// dropped the user back into the still-authenticated app for a few seconds, until the
+// background sign-out finally finished and yanked them back out — the "entra un
+// momento y despues sale" a friend reported on video. Fix: clear local session state
+// (and render the access screen) synchronously, before any awaited network call.
+test("signing out drops to the access screen instantly, with cloud cleanup only as best-effort afterward", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+
+  const fn = app.slice(app.indexOf("async function handleCloudSignOut()"), app.indexOf("async function handleDeleteAccount()"));
+  const firstAwaitIndex = fn.indexOf("await ");
+  const clearedBeforeAnyAwait =
+    fn.indexOf("cloudState.signedIn = false;") < firstAwaitIndex &&
+    fn.indexOf("cloudState.sessionReady = true;") < firstAwaitIndex &&
+    fn.indexOf("clearLocalUserState();") < firstAwaitIndex &&
+    fn.indexOf("render();") < firstAwaitIndex;
+  assert.ok(clearedBeforeAnyAwait, "local session state must be cleared and rendered before the first awaited cloud call");
+  // The old blocking flag is gone from this function entirely.
+  assert.equal(fn.includes('cloudState.sessionReady = false;'), false);
 });
 
 test("static startup fallback retries automatically without manual controls", async () => {
@@ -447,16 +1058,16 @@ test("static startup fallback retries automatically without manual controls", as
   assert.ok(html.includes("registration.update().catch(() => {})"));
   assert.equal(html.includes("registration.unregister()"), false);
   assert.ok(html.includes("caches.delete(key)"));
-  assert.ok(html.includes("Comprobando tu sesion"));
-  assert.ok(html.includes("Estamos verificando automaticamente si ya tienes una sesion iniciada."));
+  assert.ok(html.includes("Comprobando tu sesión"));
+  assert.ok(html.includes("Estamos verificando automáticamente si ya tienes una sesión iniciada."));
   assert.ok(html.includes("loadScript(`vendor/supabase-2.108.1.min.js?v=${APP_VERSION}`)"));
   assert.ok(html.includes("window.setTimeout(finish, timeoutMs)"));
   assert.equal(html.includes("cdn.jsdelivr.net/npm/@supabase/supabase-js"), false);
   assert.ok(html.includes("await import(`./app.js?v=${APP_VERSION}`)"));
   assert.ok(html.includes("No pude iniciar la app"));
-  assert.ok(html.includes("instala la ultima version del APK"));
+  assert.ok(html.includes("instala la última versión del APK"));
   assert.equal(html.includes("Continuar al acceso"), false);
-  assert.equal(html.includes("Recargar aplicacion"), false);
+  assert.equal(html.includes("Recargar aplicación"), false);
   assert.equal(html.includes('onclick="window.location.reload()"'), false);
   assert.ok(styles.includes(".startup-fallback-card"));
 });
@@ -472,6 +1083,29 @@ test("money inputs format thousands while preserving numeric calculations", asyn
   assert.ok(app.includes("parseNumberText"));
   assert.ok(app.includes('new Intl.NumberFormat("es-CO"'));
   assert.ok(styles.includes('.quick-amount input[data-money-input="true"]'));
+});
+
+// Regression: typing many zeros into a money field (no digit cap) produced a
+// formatted number long enough to overflow its container and push the whole screen
+// horizontally, cutting off the rest of the form. Fixed with a digit cap on the input
+// itself plus overflow-wrap as a defensive backstop on the two dynamic-number displays
+// that showed the symptom (onboarding preview, category budget conversion box).
+test("money input has a digit cap and long numbers cannot overflow the screen", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  assert.ok(app.includes("MONEY_INPUT_MAX_DIGITS"));
+  assert.match(app, /replace\(\/\\D\/g, ""\)\.slice\(0, MONEY_INPUT_MAX_DIGITS\)/);
+
+  const onboardingStart = styles.indexOf(".onboarding-preview strong {");
+  const onboardingPreview = styles.slice(onboardingStart, styles.indexOf("}", onboardingStart));
+  assert.ok(onboardingPreview.includes("overflow-wrap: anywhere"));
+  assert.ok(onboardingPreview.includes("min-width: 0"));
+
+  const conversionStart = styles.indexOf(".conversion-box strong {");
+  const conversionBox = styles.slice(conversionStart, styles.indexOf("}", conversionStart));
+  assert.ok(conversionBox.includes("overflow-wrap: anywhere"));
+  assert.ok(conversionBox.includes("min-width: 0"));
 });
 
 test("opening an expense form does not trigger cloud sync or replace active forms", async () => {
@@ -505,8 +1139,141 @@ test("Android back navigation closes the quick expense form before leaving the a
   assert.equal(app.includes("required autofocus"), false);
 });
 
+// The home screen widget's "+" button jumps straight to "Registrar gasto" instead of
+// just opening the app. It works via a finanzasconductuales://registrar-gasto deep
+// link (AndroidManifest intent-filter + FreeMoneyWidgetProvider's second
+// PendingIntent), consumed on the JS side through @capacitor/app's appUrlOpen +
+// getLaunchUrl(), matching the exact scheme/host declared natively.
+test("the widget's quick-add button deep links straight into the expense form", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const manifest = await readFile(
+    new URL("../android/app/src/main/AndroidManifest.xml", import.meta.url),
+    "utf8"
+  );
+  const widgetProvider = await readFile(
+    new URL("../android/app/src/main/java/com/estbn05/finanzasconductuales/FreeMoneyWidgetProvider.java", import.meta.url),
+    "utf8"
+  );
+  const widgetLayout = await readFile(
+    new URL("../android/app/src/main/res/layout/widget_free_money.xml", import.meta.url),
+    "utf8"
+  );
+
+  // Native side: manifest intent-filter and the widget's own PendingIntent must agree
+  // on the exact scheme/host.
+  assert.ok(manifest.includes('android:scheme="finanzasconductuales"'));
+  assert.ok(manifest.includes('android:host="registrar-gasto"'));
+  assert.ok(manifest.includes('android.intent.action.VIEW'));
+  assert.ok(widgetProvider.includes('QUICK_ADD_URI = "finanzasconductuales://registrar-gasto"'));
+  assert.ok(widgetProvider.includes("Intent.ACTION_VIEW"));
+  // Two distinct PendingIntents (different request codes) so the info area and the
+  // "+" button don't collapse into a single tap target that only does one of the two.
+  assert.ok(widgetProvider.includes("PendingIntent.getActivity(\n            context,\n            0,"));
+  assert.ok(widgetProvider.includes("PendingIntent.getActivity(\n            context,\n            1,"));
+  assert.ok(widgetProvider.includes("setOnClickPendingIntent(R.id.widget_info, openIntent)"));
+  assert.ok(widgetProvider.includes("setOnClickPendingIntent(R.id.widget_quick_add, quickAddPendingIntent)"));
+  assert.ok(widgetLayout.includes('android:id="@+id/widget_quick_add"'));
+  assert.ok(widgetLayout.includes('android:id="@+id/widget_info"'));
+
+  // JS side: matching host constant, listener registration on startup, and both the
+  // warm-start (appUrlOpen) and cold-start (getLaunchUrl) paths are covered.
+  assert.ok(app.includes('const WIDGET_QUICK_ADD_HOST = "registrar-gasto";'));
+  assert.ok(app.includes("function routeIfWidgetQuickAddUrl(url)"));
+  assert.ok(app.includes("new URL(url).host === WIDGET_QUICK_ADD_HOST"));
+  assert.ok(app.includes("window.location.hash = QUICK_EXPENSE_HASH;"));
+  assert.ok(app.includes("function initializeWidgetQuickAddDeepLink()"));
+  assert.ok(app.includes('capacitorApp.addListener("appUrlOpen"'));
+  assert.ok(app.includes(".getLaunchUrl?.()"));
+  assert.ok(app.includes("initializeWidgetQuickAddDeepLink();"));
+  assert.ok(app.includes("function nativeCapacitorApp()"));
+  assert.ok(app.includes('window.Capacitor?.Plugins?.App'));
+
+  // normalizeStartupRoute must only clear a stale #registrar-gasto hash on its very
+  // first check. Without a run-once guard, the pollLocalStateUntilStable loop (which
+  // re-checks for up to LOCAL_STATE_POLL_DURATION_MS while cloud sync settles) calls
+  // normalizeStartupRoute again and wipes out the hash this deep link sets asynchronously
+  // moments after startup, silently sending the widget's "+" button back to the home view.
+  assert.ok(app.includes("let startupRouteNormalized = false;"));
+  assert.match(
+    app,
+    /function normalizeStartupRoute\(\) \{\s*if \(startupRouteNormalized\) \{\s*return;\s*\}\s*startupRouteNormalized = true;/
+  );
+
+  // applyRemoteState runs on essentially every logged-in cold start (via
+  // pullCloudAfterLogin) and used to unconditionally call activateView(DEFAULT_VIEW),
+  // which resets window.location.hash back to "#inicio" — clobbering the "#registrar-gasto"
+  // hash the widget's deep link sets moments earlier via the async getLaunchUrl() call.
+  assert.match(
+    app,
+    /function applyRemoteState\([\s\S]*?if \(!isQuickExpenseLocation\(\)\) \{\s*activateView\(DEFAULT_VIEW\);\s*\}/
+  );
+});
+
+test("apartar dinero reserves money in plain language without moving real balances", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  // Two doors, one sheet: Inicio and Plan both open the same plain-language flow.
+  assert.ok(app.includes("function renderSetAsideSheet()"));
+  assert.ok(app.includes('planSheet = "setaside";'));
+  assert.ok(app.includes('if (planSheet === "setaside")'));
+  const homeView = app.slice(app.indexOf("function renderToday"), app.indexOf("function renderPeriodPredictionCard"));
+  assert.ok(homeView.includes('data-action="open-setaside-sheet"'));
+  const planView = app.slice(app.indexOf("function renderBudget(plan)"), app.indexOf("function renderPeriodCloseCard"));
+  assert.ok(planView.includes('data-action="open-setaside-sheet"'));
+  // The recurring path (with its frequency question) must stay reachable alongside it.
+  assert.ok(planView.includes('data-action="open-category-sheet"'));
+
+  // Asks only how much and what for — deliberately no frequency question, unlike
+  // renderBudgetJobForm, because "aparté esto ahora" means once, this period.
+  const sheet = app.slice(app.indexOf("function renderSetAsideSheet"), app.indexOf("function renderPlanSheet"));
+  assert.ok(sheet.includes("¿Cuánto quieres apartar?"));
+  assert.ok(sheet.includes("¿Para qué es?"));
+  assert.equal(sheet.includes('renderChoicePills("cadence"'), false);
+  // The app never moves real money, so the sheet has to say so where the user can see it.
+  assert.ok(sheet.includes("aquí no se mueve dinero de verdad"));
+  assert.ok(sheet.includes('type="button" data-setaside-name='));
+
+  // A weekly/monthly category multiplies its amount across the period (budgetAmountForJob),
+  // so a one-off set-aside must never be summed straight onto one — that would reserve
+  // several times what was asked for. Only a "period" category can absorb it directly.
+  const target = app.slice(app.indexOf("function setAsideTarget"), app.indexOf("function handleSetAsideSubmit"));
+  assert.ok(target.includes('if (match.cadence === "period")'));
+  assert.ok(target.includes("`${name} extra`"));
+
+  const submit = app.slice(app.indexOf("function handleSetAsideSubmit"), app.indexOf("function reduceSavingsAllocation"));
+  assert.ok(submit.includes("amount > summary.freeRemaining"));
+  assert.ok(submit.includes('cadence: "period"'));
+  assert.ok(submit.includes("state.budgetJobs.length >= 10"));
+
+  // Picking a suggestion chip runs through a direct listener rather than data-action:
+  // handleAction re-renders the view, which would rebuild the uncontrolled inputs and
+  // wipe an amount the user already typed before choosing a name.
+  const preview = app.slice(app.indexOf("function bindSetAsidePreview"), app.indexOf("function bindSavingsSimulatorPreview"));
+  assert.ok(preview.includes('chip.addEventListener("click"'));
+  assert.ok(preview.includes("[data-setaside-name]"));
+
+  assert.ok(styles.includes(".setaside-action"));
+
+  // A primary button that is disabled must not still look like a live one. `.btn.primary`
+  // declares its green gradient after `.btn:disabled`, so without an explicit override a
+  // blocked "Apartar dinero" / "Agregar categoría" renders identically to an enabled one
+  // and the tap just silently does nothing.
+  assert.match(styles, /\.btn\.primary:disabled[\s\S]{0,200}background: #d7dad6 !important/);
+
+  // The set-aside subtitle is intentionally darker than var(--muted), which only reaches
+  // 4.35:1 on this panel — below the 4.5:1 AA floor.
+  assert.match(styles, /\.setaside-action small \{[\s\S]{0,80}color: #4d574f/);
+});
+
 test("every form keeps readable controls in Android PWA themes", async () => {
   const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  // The first .plan-action ("Registrar dinero extra") gets a light green gradient from a
+  // later block, but an earlier rule had left its title near-white (#fff9ee) for the dark
+  // background that block replaced — leaving white-on-light-green. `strong` has to be
+  // repainted alongside `small`/`b` or the button's own title is the hardest part to read.
+  assert.match(styles, /\.plan-action:first-child strong \{\s*color: #083f35 !important;/);
 
   assert.ok(styles.includes("--field-bg: #ffffff"));
   assert.ok(styles.includes("--field-bg: #1d2421"));
@@ -534,8 +1301,12 @@ test("behavioral finance, silent sync, undo and automatic backups remain availab
   assert.ok(app.includes("Compras en pausa"));
   assert.ok(app.includes('"cancel-cooldown"'));
   assert.ok(app.includes('"unlock-cooldown"'));
-  assert.ok(app.includes("stateUpdatedTime"));
-  assert.ok(app.includes("cloudRecordUpdatedTime"));
+  // La decisión de subir/bajar se hace comparando marcas del SERVIDOR entre sí
+  // (remote.updated_at vs meta.cloudUpdatedAt), no la marca del dispositivo contra la
+  // del servidor — así un cambio local no se pierde cuando el reloj del teléfono va
+  // atrasado respecto al servidor.
+  assert.ok(app.includes("function remoteChangedSinceLastSync"));
+  assert.ok(app.includes("remoteChangedSinceLastSync(remote)"));
   assert.ok(app.includes("hasMeaningfulLocalData"));
   assert.ok(app.includes("BACKUP_KEY"));
   assert.ok(app.includes("saveLocalBackup"));
@@ -572,16 +1343,16 @@ test("plan distribution uses one matching segment per non-overlapping amount", a
   const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
 
   assert.ok(app.includes("getBudgetRingAllocation(summary)"));
-  assert.ok(app.includes('class="distribution-bar"'));
-  assert.ok(app.includes('class="dist-reserved"'));
-  assert.ok(app.includes('class="dist-spent"'));
-  assert.ok(app.includes('class="dist-free"'));
+  assert.ok(app.includes("function renderBudgetRingChart("));
+  assert.ok(app.includes("function donutSegmentPath("));
+  assert.ok(app.includes('label: "Reservado"'));
+  assert.ok(app.includes('label: "Gastado"'));
+  assert.ok(app.includes('label: "Libre"'));
   assert.equal(app.includes('renderAllocation("Apartado sin gastar"'), false);
   assert.equal(app.includes('renderAllocation("Libre antes de gastos"'), false);
-  assert.ok(styles.includes(".distribution-bar"));
-  assert.ok(styles.includes(".dist-reserved"));
-  assert.ok(styles.includes(".dist-spent"));
-  assert.ok(styles.includes(".dist-free"));
+  assert.ok(styles.includes(".budget-ring-svg"));
+  assert.ok(styles.includes(".budget-ring-arc"));
+  assert.ok(styles.includes(".budget-ring-line"));
 });
 
 test("savings remains advisory and debt features are removed", async () => {
@@ -606,13 +1377,13 @@ test("mockup system covers progressive plan, correction and special states", asy
   assert.ok(app.includes("data-category-conversion"));
   assert.ok(app.includes("data-category-limit-warning"));
   assert.ok(app.includes("function renderJobRemovalConfirmation()"));
-  assert.ok(app.includes("gastos quedaran"));
+  assert.ok(app.includes("gastos quedarán"));
   assert.ok(app.includes("function renderTransactionEditor()"));
   assert.ok(app.includes('id="transaction-edit-form"'));
   assert.ok(app.includes("function renderConnectionBanner()"));
   assert.ok(app.includes("Tus datos locales siguen disponibles."));
   assert.ok(app.includes('type="range" min="0" max="100"'));
-  assert.ok(app.includes("Plan basico"));
+  assert.ok(app.includes("Plan básico"));
   assert.ok(app.includes("Perfil conductual"));
   assert.ok(app.includes("data-onboarding-skip"));
   assert.ok(styles.includes(".sheet-backdrop"));
@@ -621,6 +1392,24 @@ test("mockup system covers progressive plan, correction and special states", asy
   assert.ok(styles.includes(".connection-banner"));
   assert.ok(styles.includes("Visual redesign 2026"));
   assert.ok(styles.includes("--card-shadow"));
+});
+
+// Regression: creating a new spending category validated its converted cost against
+// freeBudget (the gross quota) instead of freeRemaining (what's truly left after money
+// already spent unclassified this period). A category that fit the gross quota but
+// exceeded the real remaining Libre was allowed through, silently clamping Libre to $0
+// rather than being rejected with a clear error. Both the submit handler and the live
+// preview that enables/disables the "Guardar" button must check the same number.
+test("category creation validates against freeRemaining, not the gross freeBudget quota", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+
+  const submitFn = app.slice(app.indexOf("function handleBudgetSubmit"), app.indexOf("function handleExtraBudgetSubmit"));
+  assert.ok(submitFn.includes("semesterBudget > summary.freeRemaining"));
+  assert.ok(!submitFn.includes("semesterBudget > summary.freeBudget"));
+
+  const previewFn = app.slice(app.indexOf("function bindPlanCategoryPreview"), app.indexOf("function bindSavingsSimulatorPreview"));
+  assert.ok(previewFn.includes("budgetSummary().freeRemaining"));
+  assert.ok(!previewFn.includes("budgetSummary().freeBudget"));
 });
 
 test("drawer visual system keeps menu contrast in mobile themes", async () => {

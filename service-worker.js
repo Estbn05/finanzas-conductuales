@@ -1,19 +1,21 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CACHE_NAME = `${CACHE_PREFIX}20260622-session-timeout-v33`;
+const CACHE_NAME = `${CACHE_PREFIX}1.0.9`;
 const APP_SHELL = [
   "./",
   "index.html",
-  "styles.css?v=20260622-session-timeout-v33",
-  "app.js?v=20260622-session-timeout-v33",
-  "finance-core.js?v=20260622-session-timeout-v33",
-  "sync-client.js?v=20260622-session-timeout-v33",
-  "sync-config.js?v=20260622-session-timeout-v33",
-  "vendor/supabase-2.108.1.min.js?v=20260622-session-timeout-v33",
-  "manifest.webmanifest?v=20260622-session-timeout-v33",
-  "assets/icon.svg?v=20260622-session-timeout-v33",
-  "assets/icon-192.png?v=20260622-session-timeout-v33",
-  "assets/icon-512.png?v=20260622-session-timeout-v33",
-  "assets/apple-touch-icon.png?v=20260622-session-timeout-v33"
+  "styles.css?v=1.0.9",
+  "app.js?v=1.0.9",
+  "finance-core.js?v=1.0.9",
+  "sync-client.js?v=1.0.9",
+  "sync-config.js?v=1.0.9",
+  "vendor/supabase-2.108.1.min.js?v=1.0.9",
+  "manifest.webmanifest?v=1.0.9",
+  "assets/icon.svg?v=1.0.9",
+  "assets/icon-192.png?v=1.0.9",
+  "assets/icon-512.png?v=1.0.9",
+  "assets/apple-touch-icon.png?v=1.0.9",
+  // Requested by styles.css without a version query, so cache that exact URL.
+  "assets/fonts/manrope-latin-var.woff2"
 ];
 
 self.addEventListener("install", (event) => {
