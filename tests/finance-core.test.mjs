@@ -369,6 +369,49 @@ test("advisor reports when the ideal amount does not fit the current budget", ()
   assert.equal(getEmergencyTarget(makeState().profile), 6_000_000);
 });
 
+test("weekly cadence: plan.savings and plan.expenses stay in monthly units, matching plan.income", () => {
+  const plan = calculatePlan(
+    makeState({
+      profile: {
+        incomeCadence: "weekly",
+        incomeAmount: 700_000,
+        committedExpenses: 0,
+        emergencySavings: 10_000_000
+      },
+      budgetJobs: []
+    }),
+    "2026-06-10"
+  );
+
+  // Before the fix, plan.savings was left in per-period units (weekly) while
+  // plan.income is always monthly, so expenses = income - savings barely dented
+  // the monthly income and "Ahorro proyectado" showed a number ~4.33x too small.
+  assert.equal(plan.income, 3_033_333);
+  assert.equal(plan.savings, 455_000);
+  assert.equal(plan.expenses, 2_578_333);
+  assert.equal(plan.savings + plan.expenses, plan.income);
+});
+
+test("biweekly cadence: plan.savings and plan.expenses stay in monthly units, matching plan.income", () => {
+  const plan = calculatePlan(
+    makeState({
+      profile: {
+        incomeCadence: "biweekly",
+        incomeAmount: 1_400_000,
+        committedExpenses: 0,
+        emergencySavings: 10_000_000
+      },
+      budgetJobs: []
+    }),
+    "2026-06-10"
+  );
+
+  assert.equal(plan.income, 3_033_333);
+  assert.equal(plan.savings, 455_000);
+  assert.equal(plan.expenses, 2_578_333);
+  assert.equal(plan.savings + plan.expenses, plan.income);
+});
+
 test("category status only counts labeled transactions in the current budget period", () => {
   const state = makeState({
     profile: {

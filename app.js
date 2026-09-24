@@ -1,5 +1,7 @@
 import {
   FREE_CATEGORY_ID,
+  INCOME_CADENCES,
+  JOB_CADENCES,
   LARGE_PURCHASE_RATIO,
   budgetAmountForJob as getBudgetAmountForJob,
   budgetRingAllocation as getBudgetRingAllocation,
@@ -12,7 +14,7 @@ import {
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictUntilNextPeriod as getPeriodPrediction,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.0.9";
+} from "./finance-core.js?v=1.1.10";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -27,7 +29,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.0.9";
+} from "./sync-client.js?v=1.1.10";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -47,18 +49,43 @@ const AUTH_STARTUP_TIMEOUT_MS = 8_000;
 const SESSION_CHECK_MANUAL_DELAY_MS = 3_000;
 const LOCAL_STATE_POLL_DURATION_MS = 1_500;
 const DEFAULT_REMINDER_TIME = "20:00";
+// Declared here, before the synchronous render() call further down (which runs
+// immediately at module init and can reach formatMoney/formatDate on the very first
+// paint), not next to the functions that use them — same TDZ trap documented above for
+// LOCK_STORAGE_KEY: a const declared "closer to its usage" but after the code path that
+// calls it first throws ReferenceError instead of ever getting assigned.
+const SHORT_DATE_FORMATTER = new Intl.DateTimeFormat("es-CO", { month: "short", day: "numeric" });
+const EVENT_MONTH_FORMATTER = new Intl.DateTimeFormat("es-CO", { month: "short" });
+const EVENT_DAY_FORMATTER = new Intl.DateTimeFormat("es-CO", { day: "2-digit" });
+const MOVEMENT_DAY_FORMATTER = new Intl.DateTimeFormat("es-CO", { weekday: "long", month: "short", day: "numeric" });
+const COMPACT_MONEY_FORMATTER = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 1 });
+const PLAIN_NUMBER_FORMATTER = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 });
+const moneyFormatterCache = new Map();
 const DAILY_REMINDER_NOTIFICATION_ID = 7301;
 const TEST_REMINDER_NOTIFICATION_ID = 7302;
-const STUDENT_SEMESTER_INCOME = 1_750_000;
-const STUDENT_SEMESTER_MONTHS = 6;
-const STUDENT_WEEKLY_GAS = 30_000;
-const STUDENT_BUDGET_JOBS = [
-  { id: "gas", name: "Gasolina moto", amount: STUDENT_WEEKLY_GAS, cadence: "weekly" },
+// Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
+// usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
+// para limpiarla de instalaciones antiguas que todavia la arrastren (ver migrateState
+// y clearTemplateBudget). No usar ninguno de estos valores como default de nada.
+const LEGACY_TEMPLATE_BUDGET_JOBS = [
+  { id: "gas", name: "Gasolina moto", amount: 30_000, cadence: "weekly" },
   { id: "dates", name: "Salidas con novia", amount: 45_000, cadence: "monthly" },
   { id: "gifts", name: "Regalos para novia", amount: 20_000, cadence: "monthly" },
   { id: "university", name: "Universidad y comida", amount: 25_000, cadence: "monthly" },
   { id: "flex", name: "Imprevistos", amount: 9_000, cadence: "monthly" }
 ];
+const INCOME_TYPES = ["fixed", "variable"];
+const VOLATILITY_VALUES = ["low", "medium", "high"];
+
+// Derivado de finance-core para que la interfaz nunca pueda ofrecer (ni aceptar) una
+// frecuencia que el motor de periodos no sepa calcular, ni al reves. Antes esta lista
+// estaba copiada literal en cuatro sitios de este archivo y el onboarding ofrecia solo
+// tres opciones, sin "quincenal": quien cobra cada 15 dias terminaba en "Otro", que
+// guardaba "semester" en silencio y le partia todo el calculo de periodos.
+const INCOME_CADENCE_VALUES = Object.keys(INCOME_CADENCES);
+const JOB_CADENCE_VALUES = Object.keys(JOB_CADENCES);
+// Las que el onboarding no muestra como boton directo y quedan detras de "Otro".
+const SECONDARY_INCOME_CADENCES = ["semester", "yearly"];
 
 const NAV_ITEMS = [
   { id: "today", label: "Inicio", icon: "01" },
@@ -95,12 +122,19 @@ let nativeNotificationPermission = "";
 let pendingExtraAllocation = null;
 let planSheet = "";
 let pendingJobRemovalId = "";
+let pendingBackupRestoreId = "";
 let editingTransactionId = "";
 let editingExtraId = "";
 let predictionDetailsOpen = false;
 let periodReportOpen = false;
 let quickClassifyQueue = [];
 let deleteAccountOpen = false;
+// See budgetSummary() far below for why this is cached and invalidated. Declared here
+// (before the synchronous render() call further down) rather than next to
+// budgetSummary(), because render() calls it immediately at module init, before script
+// execution ever reaches a `let` declared later in the file — same TDZ trap as
+// SHORT_DATE_FORMATTER above.
+let cachedBudgetSummary = null;
 let expenseDraft = null;
 let diagnosisValidation = { field: "", message: "" };
 let cloudState = {
@@ -110,7 +144,11 @@ let cloudState = {
   libraryLoaded: isCloudLibraryLoaded(),
   sessionReady: false,
   signedIn: false,
-  status: isCloudConfigured() ? "checking" : "local"
+  status: isCloudConfigured() ? "checking" : "local",
+  // Set when saveState() runs while a push is already in flight. pushCloudState's
+  // round trip (download + upload) can take up to ~20s; without this, an edit made
+  // during that window is never scheduled again once the in-flight push finishes.
+  dirty: false
 };
 let dailyReminderTimer;
 let sessionCheckManualReady = false;
@@ -144,7 +182,10 @@ window.setTimeout(() => {
     state = reloaded;
     state.activeView = viewFromHash(DEFAULT_VIEW);
     normalizeStartupRoute();
-    render();
+    // El estado se adopta igual; lo que se aplaza es solo repintar. Importa porque el
+    // acceso directo del widget abre la hoja de registrar gasto durante el arranque,
+    // justo mientras este sondeo sigue corriendo.
+    renderBackground();
     return;
   }
   if (performance.now() < deadline) {
@@ -170,14 +211,17 @@ window.addEventListener("hashchange", () => {
   }
 });
 window.addEventListener("popstate", syncQuickExpenseWithLocation);
-window.addEventListener("online", render);
+// Estos tres no los pide el usuario y pueden dispararse en cualquier momento — en un
+// movil, perder y recuperar señal mientras se registra un gasto en una tienda es lo
+// normal. Van por renderBackground() para no borrarle el formulario.
+window.addEventListener("online", renderBackground);
 // Follow the OS live, but only while the user has not picked a theme themselves.
 window.matchMedia?.("(prefers-color-scheme: dark)")?.addEventListener?.("change", () => {
   if (!storedThemeChoice()) {
-    render();
+    renderBackground();
   }
 });
-window.addEventListener("offline", render);
+window.addEventListener("offline", renderBackground);
 
 function createDefaultState() {
   const today = todayKey();
@@ -200,29 +244,22 @@ function createDefaultState() {
       completed: false,
       name: "Tu plan",
       currency: "COP",
-      incomeAmount: STUDENT_SEMESTER_INCOME,
-      monthlyIncome: monthlyFromSemester(STUDENT_SEMESTER_INCOME, STUDENT_SEMESTER_MONTHS),
-      semesterIncome: STUDENT_SEMESTER_INCOME,
-      semesterMonths: STUDENT_SEMESTER_MONTHS,
+      // Un perfil nuevo no sabe nada del usuario todavia. Cadencia y tipo de ingreso
+      // van vacios a proposito: el onboarding no debe preseleccionar una respuesta por
+      // el, y su validacion exige elegir. Antes este bloque describia a una persona
+      // concreta (un estudiante con ingreso semestral de $1.750.000) y esos numeros
+      // aparecian ya escritos en el formulario del primer usuario que abriera la app.
+      incomeAmount: 0,
+      monthlyIncome: 0,
+      semesterIncome: 0,
       periodStart: monthStartKey(today),
       semesterStart: monthStartKey(today),
-      incomeCadence: "semester",
-      incomeType: "variable",
+      incomeCadence: "",
+      incomeType: "",
       volatility: "medium",
-      committedExpenses: monthlyFromWeekly(STUDENT_WEEKLY_GAS),
-      weeklyGas: STUDENT_WEEKLY_GAS,
-      relationshipMonthlyBudget: 45_000,
-      giftMonthlyBudget: 20_000,
+      committedExpenses: 0,
       emergencySavings: 0,
-      payday: 1,
-      financialAnxiety: 6,
-      selfEfficacy: 5,
-      moneyScripts: {
-        worship: 4,
-        avoidance: 3,
-        status: 2,
-        vigilance: 4
-      },
+      payday: 0,
       updated_at: now
     },
     settings: {
@@ -248,6 +285,7 @@ function createDefaultState() {
       updated_at: now
     },
     periodIncomeStatus: null,
+    periodIncomeApplied: [],
     budgetJobs: [],
     transactions: [],
     cooldowns: [],
@@ -258,6 +296,39 @@ function createDefaultState() {
   };
 }
 
+function isQuotaExceededError(error) {
+  return error instanceof DOMException && (error.name === "QuotaExceededError" || error.code === 22);
+}
+
+// Wraps every write to localStorage. On QuotaExceededError, frees space by trimming
+// the backup history down to the single most recent snapshot and retries once; if that
+// still fails, the write is lost but the user is told so instead of it vanishing silently.
+function persist(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (error) {
+    if (!isQuotaExceededError(error)) {
+      return false;
+    }
+    try {
+      if (key !== BACKUP_KEY) {
+        localStorage.setItem(BACKUP_KEY, JSON.stringify(readLocalBackups().slice(0, 1)));
+      }
+      localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch {
+      if (key !== BACKUP_KEY) {
+        showNoticeSnackbar(
+          "No se pudo guardar: sin espacio de almacenamiento. Borra copias locales o movimientos viejos en Datos.",
+          { kind: "error" }
+        );
+      }
+      return false;
+    }
+  }
+}
+
 function loadState() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -266,6 +337,12 @@ function loadState() {
     }
     return migrateState(JSON.parse(saved));
   } catch {
+    const backups = readLocalBackups();
+    if (backups[0]?.state) {
+      const restored = migrateState(backups[0].state);
+      restored.lastAlert = "Tu guardado local estaba dañado; lo recuperamos desde tu última copia automática.";
+      return restored;
+    }
     return createDefaultState();
   }
 }
@@ -296,6 +373,7 @@ function migrateState(savedState) {
     dailyReminder: normalizeDailyReminder(savedState.dailyReminder || defaults.dailyReminder),
     liquidity: normalizeLiquidity(savedState.liquidity || defaults.liquidity),
     periodIncomeStatus: savedState.periodIncomeStatus || null,
+    periodIncomeApplied: Array.isArray(savedState.periodIncomeApplied) ? savedState.periodIncomeApplied : [],
     cooldowns: savedState.cooldowns || defaults.cooldowns,
     periodClosures: normalizePeriodClosures(savedState.periodClosures || defaults.periodClosures),
     merchantRules: normalizeMerchantRules(savedState.merchantRules || defaults.merchantRules, savedState.transactions || defaults.transactions),
@@ -310,12 +388,13 @@ function migrateState(savedState) {
   migrated.merchantRules = filterMerchantRulesForJobs(migrated.merchantRules, migrated.budgetJobs);
   if (migrated.profile.completed && migrated.meta.budgetPreset !== "student" && isTemplateBudgetJobs(migrated.budgetJobs)) {
     clearTemplateBudget(migrated);
-    migrated.lastAlert = "Quite los campos de plantilla. Crea solo los campos que si usas.";
+    migrated.lastAlert = "Quité las categorías de ejemplo que traía una versión vieja. Crea solo las que de verdad usas.";
   }
   return migrated;
 }
 
 function saveState(options = {}) {
+  cachedBudgetSummary = null;
   const { sync = true, touch = true } = options;
   state.meta = { ...(state.meta || {}) };
   if (touch) {
@@ -326,7 +405,7 @@ function saveState(options = {}) {
   }
   state.meta.cloudUserEmail = cloudState.email || state.meta?.cloudUserEmail || "";
   ensurePeriodIncomeApplication();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  persist(STORAGE_KEY, state);
   scheduleDailyReminder();
   syncHomeWidget();
   if (sync && !applyingCloudState) {
@@ -427,7 +506,7 @@ async function pullCloudAfterLogin() {
       if (localHasData && !remoteHasData) {
         const saved = await saveCloudState(getCloudPayload());
         markCloudSynced(saved?.updated_at || new Date().toISOString());
-        state.lastAlert = "La nube estaba vacia; conserve tus datos locales y los subi.";
+        state.lastAlert = "La nube estaba vacía; conservé tus datos locales y los subí.";
         cloudState.status = "synced";
         renderCloudStatusChange();
         return;
@@ -473,7 +552,7 @@ async function pullCloudAfterLogin() {
       cloudUpdatedAt: saved?.updated_at || new Date().toISOString(),
       cloudUserEmail: cloudState.email
     };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    persist(STORAGE_KEY, state);
     cloudState.status = "synced";
     state.lastAlert = "Primera copia subida a la nube.";
     renderCloudStatusChange();
@@ -488,7 +567,13 @@ async function pullCloudAfterLogin() {
 }
 
 function scheduleCloudSave() {
-  if (!cloudState.signedIn || cloudState.status === "syncing") {
+  if (!cloudState.signedIn) {
+    return;
+  }
+  if (cloudState.status === "syncing") {
+    // Don't drop this edit: flag it so pushCloudState reschedules itself once the
+    // in-flight round trip finishes, instead of the edit silently never being synced.
+    cloudState.dirty = true;
     return;
   }
   cloudState.status = "pending";
@@ -503,6 +588,7 @@ async function pushCloudState() {
   }
 
   cloudState.status = "syncing";
+  cloudState.dirty = false;
   renderCloudStatusChange();
 
   try {
@@ -514,7 +600,7 @@ async function pushCloudState() {
       // ultima sincronizacion (otro dispositivo). Si no, subimos nuestros cambios: esta
       // funcion se dispara justo despues de una edicion local, asi que lo local manda.
       if (remoteChangedSinceLastSync(remote) && remoteHasData) {
-        applyRemoteState(remote.app_state, remote.updated_at, "La nube tenía cambios más recientes. Descargue esa version.");
+        applyRemoteState(remote.app_state, remote.updated_at, "La nube tenía cambios más recientes. Descargué esa versión.");
         cloudState.status = "synced";
         renderCloudStatusChange();
         return;
@@ -530,6 +616,14 @@ async function pushCloudState() {
     cloudState.status = "error";
     cloudState.error = friendlyCloudError(error);
     renderCloudStatusChange();
+  } finally {
+    // Any edit made while this push was in flight (getCloudPayload() above already
+    // missed it) sets cloudState.dirty via scheduleCloudSave(). Reschedule so it isn't
+    // silently dropped — scheduleCloudSave() re-reads `state` fresh when it fires.
+    if (cloudState.dirty) {
+      cloudState.dirty = false;
+      scheduleCloudSave();
+    }
   }
 }
 
@@ -569,14 +663,14 @@ function applyRemoteState(remoteState, remoteUpdatedAt, alert) {
 }
 
 function markCloudSynced(updatedAt, options = {}) {
-  const { persist = true } = options;
+  const { persist: shouldPersist = true } = options;
   state.meta = {
     ...(state.meta || {}),
     cloudUpdatedAt: updatedAt,
     cloudUserEmail: cloudState.email
   };
-  if (persist) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (shouldPersist) {
+    persist(STORAGE_KEY, state);
   }
 }
 
@@ -640,15 +734,42 @@ function saveLocalBackup(reason, snapshot = state) {
       showDiagnosis: false
     }
   };
-  const backups = [backup, ...readLocalBackups()].slice(0, 5);
-  localStorage.setItem(BACKUP_KEY, JSON.stringify(backups));
+  const backups = [backup, ...readLocalBackups()].slice(0, 3);
+  persist(BACKUP_KEY, backups);
+}
+
+function restoreLocalBackup(id) {
+  const backup = readLocalBackups().find((item) => item.id === id);
+  if (!backup?.state) {
+    state.lastAlert = "No encontré esa copia local.";
+    return;
+  }
+  saveLocalBackup("antes de restaurar una copia local");
+  state = migrateState(backup.state);
+  // backup.state carries the cloudUpdatedAt from whenever the backup was taken. Left
+  // as-is, the next pushCloudState() would see the real cloud as "changed since our
+  // last sync" and immediately re-download it, silently undoing the restore the user
+  // just asked for. Bumping it to now makes the restored state win that comparison,
+  // the same way the "nube vacía" first-sync case forces local to win.
+  state.meta = {
+    ...(state.meta || {}),
+    cloudUpdatedAt: new Date().toISOString(),
+    cloudUserEmail: cloudState.email
+  };
+  state.showDiagnosis = false;
+  pendingExtraAllocation = null;
+  editingTransactionId = "";
+  editingExtraId = "";
+  clearSnackbar({ renderNow: false });
+  activateView(DEFAULT_VIEW);
+  state.lastAlert = `Restauramos la copia del ${formatBackupTimestamp(backup.created_at)}.`;
 }
 
 function friendlyCloudError(error) {
   const message = error?.message || String(error);
   const normalizedMessage = message.toLowerCase();
   if (normalizedMessage.includes("row-level security") || normalizedMessage.includes("42501")) {
-    return "Supabase bloqueó el guardado por permisos de esta sesión. Tus datos locales siguen aquí; cierra sesión e inicia de nuevo. Si se repite, actualiza las políticas SQL de finance_app_state.";
+    return "No pude guardar en la nube por un problema de permisos de tu sesión. Tus datos locales siguen aquí; cierra sesión e inicia de nuevo. Si se repite, contáctanos.";
   }
   if (normalizedMessage.includes("invalid login")) {
     return "Correo o contraseña incorrectos.";
@@ -663,14 +784,17 @@ function friendlyCloudError(error) {
 }
 
 function renderCloudStatusChange() {
+  // Perder la sesion si manda: dejar un formulario abierto sobre una sesion muerta es
+  // peor que perderlo, porque al guardarlo fallaria igual.
   if (shouldShowAuthGate()) {
     render();
     return;
   }
-  if (quickExpenseOpen || state.showDiagnosis || pendingExtraAllocation || editingTransactionId || editingExtraId || periodReportOpen || quickClassifyQueue.length || deleteAccountOpen) {
-    return;
-  }
-  render();
+  // La lista que habia aqui se quedo corta con el tiempo: no incluia planSheet (las
+  // hojas de "Apartar dinero", "Crear categoria" y "Dinero extra", todas con campos de
+  // texto) ni el onboarding de un usuario nuevo, que se muestra con showDiagnosis en
+  // false. hasOpenUserInput() es ahora la unica definicion.
+  renderBackground();
 }
 
 function openQuickExpense() {
@@ -745,6 +869,40 @@ function syncQuickExpenseWithLocation(options = {}) {
   return true;
 }
 
+// Superficies que pueden contener algo que el usuario escribio o eligio y que todavia
+// no vive en `state`. Los formularios son no controlados: su contenido existe solo en
+// el DOM, asi que `app.innerHTML = ...` lo borra sin dejar rastro.
+function hasOpenUserInput() {
+  return Boolean(
+    quickExpenseOpen ||
+      planSheet ||
+      state.showDiagnosis ||
+      profileNeedsOnboarding() ||
+      pendingExtraAllocation ||
+      editingTransactionId ||
+      editingExtraId ||
+      quickClassifyQueue.length ||
+      pendingJobRemovalId ||
+      pendingBackupRestoreId ||
+      deleteAccountOpen ||
+      periodReportOpen ||
+      lockMode
+  );
+}
+
+// Para los re-render que el usuario NO pidio: la red que aparece o se cae, el tema del
+// sistema, la sincronizacion en segundo plano, el arranque. Ninguno de esos puede
+// reconstruir el DOM mientras hay un formulario abierto. No hace falta reintentarlo
+// despues: cerrar la superficie ya dispara su propio render(), que repinta todo desde
+// `state`. Lo unico que se aplaza es cosmetico (p. ej. el aviso de "sin conexion"),
+// que es mucho mejor que perder un gasto a medio escribir.
+function renderBackground() {
+  if (hasOpenUserInput()) {
+    return;
+  }
+  render();
+}
+
 function render() {
   // Must run before the early returns below: the lock, session-check and auth
   // screens are rendered without ever reaching the main branch, so otherwise they
@@ -772,7 +930,12 @@ function render() {
     return;
   }
 
-  const currentTheme = applyThemePreference();
+  applyThemePreference();
+  // Covers the selfManagedAction paths (cloud-sign-out, confirm-delete-account) that
+  // skip saveState() but still call render() — saveState() already invalidates this
+  // cache on every other path. Must run before ensurePeriodIncomeApplication(), which
+  // can itself mutate state right here.
+  cachedBudgetSummary = null;
   ensurePeriodIncomeApplication();
   const plan = calculatePlan();
   app.classList.toggle("is-menu-open", menuOpen);
@@ -798,7 +961,7 @@ function render() {
           </button>
           ${NAV_ITEMS.map((item) => renderNavItem(item)).join("")}
         </nav>
-        ${renderThemeSwitcher(currentTheme)}
+        ${renderThemeSwitcher()}
         <div class="menu-tools">
           <button class="btn primary" type="button" data-action="open-diagnosis">Editar mi plan</button>
           <button class="btn ghost" type="button" data-action="cloud-sign-out">Cerrar sesión</button>
@@ -815,6 +978,7 @@ function render() {
     ${quickExpenseOpen ? renderQuickExpensePanel() : ""}
     ${planSheet ? renderPlanSheet() : ""}
     ${pendingJobRemovalId ? renderJobRemovalConfirmation() : ""}
+    ${pendingBackupRestoreId ? renderBackupRestoreConfirmation() : ""}
     ${deleteAccountOpen ? renderDeleteAccountConfirmation() : ""}
     ${editingTransactionId ? renderTransactionEditor() : ""}
     ${editingExtraId ? renderExtraEditor() : ""}
@@ -829,17 +993,26 @@ function render() {
   bindEvents();
 }
 
-function renderThemeSwitcher(currentTheme = themePreference()) {
+function renderThemeSwitcher() {
+  // Active state must reflect the STORED choice, not themePreference()'s resolved
+  // value — otherwise picking "Sistema" while the OS is dark would show "Oscuro" as
+  // active too, since themePreference() resolves both to "dark".
+  const stored = storedThemeChoice();
+  const options = [
+    { value: "system", label: "Sistema" },
+    { value: "light", label: "Claro" },
+    { value: "dark", label: "Oscuro" }
+  ];
   return `
     <div class="theme-switcher" role="group" aria-label="Cambiar tema">
       <span>Apariencia</span>
       <div class="theme-options">
-        <button class="theme-choice ${currentTheme === "light" ? "is-active" : ""}" type="button" data-action="set-theme" data-theme-choice="light" aria-pressed="${currentTheme === "light" ? "true" : "false"}">
-          Claro
-        </button>
-        <button class="theme-choice ${currentTheme === "dark" ? "is-active" : ""}" type="button" data-action="set-theme" data-theme-choice="dark" aria-pressed="${currentTheme === "dark" ? "true" : "false"}">
-          Oscuro
-        </button>
+        ${options
+          .map((option) => {
+            const isActive = option.value === "system" ? stored === "" : stored === option.value;
+            return `<button class="theme-choice ${isActive ? "is-active" : ""}" type="button" data-action="set-theme" data-theme-choice="${option.value}" aria-pressed="${isActive ? "true" : "false"}">${option.label}</button>`;
+          })
+          .join("")}
       </div>
     </div>
   `;
@@ -855,8 +1028,11 @@ function renderNavItem(item) {
   `;
 }
 
+// "system" (or anything else unrecognised) normalizes to "" — storedThemeChoice()
+// already treats "" as "no explicit choice, follow the OS", so this is what lets the
+// theme switcher's "Sistema" button hand control back to prefers-color-scheme.
 function normalizeTheme(theme) {
-  return theme === "dark" ? "dark" : "light";
+  return theme === "dark" || theme === "light" ? theme : "";
 }
 
 function systemPrefersDark() {
@@ -979,7 +1155,16 @@ function shouldShowSessionCheck() {
 }
 
 function shouldShowAuthGate() {
-  return cloudState.sessionReady && !cloudState.signedIn;
+  if (!cloudState.sessionReady || cloudState.signedIn) {
+    return false;
+  }
+  // A real sign-out (explicit action, or Supabase confirming the session is gone)
+  // always runs clearLocalUserState() first, wiping this data. So if there's still
+  // meaningful local data here, `signedIn` is false because of a connectivity problem
+  // confirming the session — not an actual sign-out — and showing the login wall would
+  // lock the user out of their own local data over a network hiccup. Let them in;
+  // renderConnectionBanner() and cloudState.error already surface that sync is stuck.
+  return !hasMeaningfulLocalData(state);
 }
 
 function profileNeedsOnboarding() {
@@ -1107,7 +1292,7 @@ function renderAuthGate() {
               ${
                 isSignIn
                   ? "Entra con el correo y la contraseña que registraste."
-                  : "Después de registrarte configuras tu presupuesto y tus campos habituales."
+                  : "Después de registrarte configuras tu presupuesto y tus categorías habituales."
               }
             </p>
           </div>
@@ -1165,7 +1350,7 @@ function renderAuthGate() {
             </article>
             <article>
               <strong>Plan por categorías</strong>
-              <span>Define límites para gasolina, salidas, universidad o cualquier campo que quieras cuidar.</span>
+              <span>Define límites para gasolina, salidas, universidad o cualquier categoría que quieras cuidar.</span>
             </article>
             <article>
               <strong>Sincronización segura</strong>
@@ -1253,13 +1438,13 @@ function renderHeader(plan) {
         }
       </div>
       <details class="money-help-toggle">
-        <summary>Por que libre no es igual a total real</summary>
+        <summary>Por qué libre no es igual a total real</summary>
         <p class="money-help">${
           summary.usesLiquidityBasedFree
             ? `Como tienes un ingreso fijo programado, libre es tu saldo real (cuenta + efectivo) menos lo reservado en categorías — nunca incluye dinero que aún no te ha llegado. El día que te pagan, ese ingreso se suma automáticamente a tu saldo real, y "libre" sube en ese momento, no antes. Total real es cuenta + efectivo ahora mismo, incluyendo lo reservado en categorías.`
-            : `Libre es tu cupo de este periodo menos lo ya gastado sin categoria. Total real es cuenta + efectivo ahora mismo, incluyendo lo que si esta reservado en categorias y cualquier saldo extra que aun no has clasificado.${
+            : `Libre es tu cupo de este periodo menos lo ya gastado sin categoría. Total real es cuenta + efectivo ahora mismo, incluyendo lo que sí está reservado en categorías y cualquier saldo extra que aún no has clasificado.${
                 summary.unclaimedLiquidity > 0
-                  ? ` "Saldo extra sin usar" (${formatMoney(summary.unclaimedLiquidity)}) es dinero real que ya tienes y que ninguna categoria reclama todavia. Si ya sabes que es parte de tu ingreso de este periodo, regístralo como ingreso para que se sume a libre.`
+                  ? ` "Saldo extra sin usar" (${formatMoney(summary.unclaimedLiquidity)}) es dinero real que ya tienes y que ninguna categoría reclama todavía. Si ya sabes que es parte de tu ingreso de este periodo, regístralo como ingreso para que se sume a libre.`
                   : ""
               }`
         }</p>
@@ -1282,9 +1467,16 @@ function periodExtraSourceLabel(summary = budgetSummary()) {
   return hiddenCount > 0 ? `${labels} · +${hiddenCount} más` : labels;
 }
 
+// Only these two are pure no-op confirmations (nothing local changed, nothing to
+// react to). Every other cloud message — including "la nube tenía cambios más
+// recientes, descargué esa versión" — means the user's local data just got
+// overwritten, and must always reach the sidebar. A previous version silenced any
+// message matching /nube|sincron/i, which swallowed that overwrite warning too.
+const SILENT_ALERTS = new Set(["Nube al día.", "Primera copia subida a la nube."]);
+
 function menuAlertText() {
   const alert = String(state.lastAlert || "");
-  return /nube|sincron/i.test(alert) ? "" : alert;
+  return SILENT_ALERTS.has(alert) ? "" : alert;
 }
 
 function renderView(plan) {
@@ -1386,7 +1578,7 @@ function renderPredictionDetailsModal() {
   const prediction = periodPrediction();
   const summary = budgetSummary();
   return `
-    <div class="sheet-backdrop" role="presentation">
+    <div class="sheet-backdrop" role="presentation" data-action="close-prediction-details">
       <section class="bottom-sheet prediction-detail-modal" role="dialog" aria-modal="true" aria-labelledby="prediction-detail-title">
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
@@ -1423,7 +1615,7 @@ function renderPredictionDetailsModal() {
           ${prediction.ignoredOneOffSpent > 0 ? `<p><strong>gasto_unico</strong> = ${formatMoney(prediction.ignoredOneOffSpent)}. Baja el libre hoy, pero no se usa para ritmo diario.</p>` : ""}
           ${
             prediction.usesLiquidityBasedFree
-              ? `<p><strong>libre_hoy</strong> = saldo_real_en_cuenta_y_efectivo - reservado_en_categorias${prediction.incomeApplied ? " (ya te pagaron este periodo)" : " (aun no te pagan este periodo: el cupo no cuenta todavia)"}</p>
+              ? `<p><strong>libre_hoy</strong> = saldo_real_en_cuenta_y_efectivo - reservado_en_categorias${prediction.incomeApplied ? " (ya te pagaron este periodo)" : " (aún no te pagan este periodo: el cupo no cuenta todavía)"}</p>
                  <code>${formatMoney(prediction.liquidityTotal)} - ${formatMoney(prediction.reservedRemaining)} = ${formatMoney(prediction.freeToday)}</code>`
               : `<p><strong>libre_hoy</strong> = dinero_libre_inicial - gasto_libre_real</p>
                  <code>${formatMoney(prediction.freeBudget)} - ${formatMoney(prediction.actualFreeImpactSpent)} = ${formatMoney(prediction.freeToday)}</code>`
@@ -1449,12 +1641,12 @@ function predictionOutcomeText(prediction) {
     return `Si sigues a este ritmo, llegarías con ${formatMoney(Math.max(0, prediction.projectedEndFree))}.`;
   }
   if (prediction.status === "learning") {
-    return "Aun no proyecto el resultado final porque faltan días observados.";
+    return "Aún no proyecto el resultado final porque faltan días observados.";
   }
   if (prediction.status === "over_reserved") {
     return `Hay ${formatMoney(prediction.overReserved)} más reservado que presupuesto.`;
   }
-  return "Aun no hay gasto libre para calcular un ritmo.";
+  return "Aún no hay gasto libre para calcular un ritmo.";
 }
 
 function predictionPaceText(prediction) {
@@ -1476,10 +1668,10 @@ function predictionHeadline(prediction) {
     return "Tu plan está sobreasignado";
   }
   if (prediction.status === "empty") {
-    return "Aun no hay gasto libre que proyectar";
+    return "Aún no hay gasto libre que proyectar";
   }
   if (prediction.status === "learning") {
-    return "Aun no hay tendencia suficiente";
+    return "Aún no hay tendencia suficiente";
   }
   if (prediction.status === "risk") {
     return "Si sigues así, no alcanza";
@@ -1711,7 +1903,7 @@ function renderBudget(plan) {
             ? state.budgetJobs.map((job) => renderBudgetJob(job)).join("")
             : `<div class="empty-state actionable-empty">
                 <span class="empty-icon" aria-hidden="true">+</span>
-                <strong>Aun no separas dinero por categorías</strong>
+                <strong>Aún no separas dinero por categorías</strong>
                 <span>Aparta plata para algo y verás su límite siempre antes de gastar.</span>
                 <button class="btn primary" type="button" data-action="open-setaside-sheet">Apartar dinero</button>
               </div>`
@@ -1876,7 +2068,7 @@ function renderPeriodReportModal(plan = calculatePlan()) {
   const report = periodCloseReport(plan, summary);
   const content = generatePeriodReport(plan, summary, report);
   return `
-    <div class="sheet-backdrop" role="presentation">
+    <div class="sheet-backdrop" role="presentation" data-action="close-period-report">
       <section class="bottom-sheet period-report-modal" role="dialog" aria-modal="true" aria-labelledby="period-report-title">
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
@@ -2211,7 +2403,7 @@ function renderSetAsideSheet() {
   const summary = budgetSummary();
   const reusable = state.budgetJobs.slice(0, 6);
   return `
-    <div class="sheet-backdrop" role="presentation">
+    <div class="sheet-backdrop" role="presentation" data-action="close-plan-sheet">
       <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="setaside-sheet-title">
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
@@ -2266,7 +2458,7 @@ function renderPlanSheet() {
 
   if (planSheet === "category") {
     return `
-      <div class="sheet-backdrop" role="presentation">
+      <div class="sheet-backdrop" role="presentation" data-action="close-plan-sheet">
         <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="category-sheet-title">
           <div class="sheet-handle"></div>
           <div class="sheet-heading">
@@ -2280,7 +2472,7 @@ function renderPlanSheet() {
   }
 
   return `
-    <div class="sheet-backdrop" role="presentation">
+    <div class="sheet-backdrop" role="presentation" data-action="close-plan-sheet">
       <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="extra-sheet-title">
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
@@ -2364,7 +2556,7 @@ function renderJobRemovalConfirmation() {
   }
   const affected = state.transactions.filter((transaction) => transaction.category === job.id).length;
   return `
-    <div class="sheet-backdrop destructive-backdrop" role="presentation">
+    <div class="sheet-backdrop destructive-backdrop" role="presentation" data-action="cancel-remove-job">
       <section class="bottom-sheet destructive-sheet" role="alertdialog" aria-modal="true" aria-labelledby="remove-category-title">
         <div class="sheet-handle"></div>
         <span class="destructive-icon" aria-hidden="true">!</span>
@@ -2381,9 +2573,45 @@ function renderJobRemovalConfirmation() {
   `;
 }
 
+function formatBackupTimestamp(isoValue) {
+  const date = new Date(isoValue);
+  if (Number.isNaN(date.getTime())) {
+    return "fecha desconocida";
+  }
+  return new Intl.DateTimeFormat("es-CO", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+}
+
+function renderBackupRestoreConfirmation() {
+  const backup = readLocalBackups().find((item) => item.id === pendingBackupRestoreId);
+  if (!backup) {
+    return "";
+  }
+  return `
+    <div class="sheet-backdrop destructive-backdrop" role="presentation" data-action="cancel-restore-backup">
+      <section class="bottom-sheet destructive-sheet" role="alertdialog" aria-modal="true" aria-labelledby="restore-backup-title">
+        <div class="sheet-handle"></div>
+        <span class="destructive-icon" aria-hidden="true">!</span>
+        <h2 id="restore-backup-title">Restaurar copia del ${escapeHtml(formatBackupTimestamp(backup.created_at))}</h2>
+        <p>Reemplazará tu presupuesto, movimientos y ahorro actuales por los de esa copia. Antes de reemplazar, guardamos tus datos actuales como otra copia.</p>
+        <div class="destructive-consequence">
+          <strong>${backup.counts?.transactions || 0} movimientos, ${backup.counts?.fields || 0} categorías</strong>
+          <span>Es lo que había guardado en ese momento.</span>
+        </div>
+        <button class="btn danger" type="button" data-action="confirm-restore-backup">Restaurar esta copia</button>
+        <button class="btn ghost" type="button" data-action="cancel-restore-backup">Cancelar</button>
+      </section>
+    </div>
+  `;
+}
+
 function renderDeleteAccountConfirmation() {
   return `
-    <div class="sheet-backdrop destructive-backdrop" role="presentation">
+    <div class="sheet-backdrop destructive-backdrop" role="presentation" data-action="cancel-delete-account">
       <section class="bottom-sheet destructive-sheet" role="alertdialog" aria-modal="true" aria-labelledby="delete-account-title">
         <div class="sheet-handle"></div>
         <span class="destructive-icon" aria-hidden="true">!</span>
@@ -2468,7 +2696,7 @@ function renderSavings(plan) {
       </article>
 
       <article class="reference-fund">
-        <div><p class="eyebrow">Fondo de referencia</p><h2>${targetCovered ? "Meta cubierta" : `${periodsToTarget || "Sin"} periodos estimados`}</h2></div>
+        <div><p class="eyebrow">Fondo de emergencia</p><h2>${targetCovered ? "Meta cubierta" : `${periodsToTarget || "Sin"} periodos estimados`}</h2></div>
         ${renderProgress(plan.emergencyProgress, "Avance simulado con el ahorro actual")}
         <p>${futureFreedom(plan)}. Es una proyección orientativa, no una promesa.</p>
       </article>
@@ -2549,7 +2777,7 @@ function renderCalendar() {
         <form class="financial-event-form" id="financial-event-form">
           <label>
             Evento
-            <input name="title" type="text" maxlength="48" placeholder="Ej. Regalo para la novia" required>
+            <input name="title" type="text" maxlength="48" placeholder="Ej. Regalo de cumpleaños" required>
           </label>
           <label>
             Fecha
@@ -2586,7 +2814,7 @@ function renderFinancialEvents(events) {
   if (!events.length) {
     return `<div class="empty-state actionable-empty">
       <span class="empty-icon" aria-hidden="true">+</span>
-      <strong>Aun no hay planes con dinero</strong>
+      <strong>Aún no hay planes con dinero</strong>
       <span>Guarda fechas que suelen traer gastos: regalos, viajes, aniversarios o planes especiales.</span>
     </div>`;
   }
@@ -2643,7 +2871,7 @@ function renderQuickExpensePanel() {
   const draft = expenseDraft || {};
   const selectedCategory = categoryChoiceOptions().some((option) => option.value === draft.category) ? draft.category : FREE_CATEGORY_ID;
   return `
-    <div class="quick-expense-backdrop" role="presentation">
+    <div class="quick-expense-backdrop" role="presentation" data-action="close-expense">
       <section class="quick-expense-panel" role="dialog" aria-modal="true" aria-labelledby="quick-expense-title">
         <div class="quick-expense-header">
           <button class="icon-btn muted" type="button" data-action="close-expense" aria-label="Volver">←</button>
@@ -3095,7 +3323,7 @@ function renderTransactionHistory(summary = budgetSummary(), sort = "recent", fi
       : filter !== "all" || search.trim()
         ? `<div class="empty-state actionable-empty">
           <span class="empty-icon" aria-hidden="true">+</span>
-          <strong>Sin movimientos con esa busqueda</strong>
+          <strong>Sin movimientos con esa búsqueda</strong>
           <span>Prueba otro termino, filtro u orden.</span>
         </div>`
         : `<div class="empty-state actionable-empty">
@@ -3173,7 +3401,7 @@ function renderTransactionEditor() {
     return "";
   }
   return `
-    <div class="sheet-backdrop" role="presentation">
+    <div class="sheet-backdrop" role="presentation" data-action="close-transaction-editor">
       <section class="bottom-sheet transaction-editor" role="dialog" aria-modal="true" aria-labelledby="transaction-editor-title">
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
@@ -3218,7 +3446,7 @@ function renderQuickClassifyPanel() {
   }
   const categoryChips = categoryChoiceOptions().filter((option) => option.value !== FREE_CATEGORY_ID);
   return `
-    <div class="sheet-backdrop" role="presentation">
+    <div class="sheet-backdrop" role="presentation" data-action="close-quick-classify">
       <section class="bottom-sheet quick-classify-panel" role="dialog" aria-modal="true" aria-labelledby="quick-classify-title">
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
@@ -3245,7 +3473,7 @@ function renderQuickClassifyPanel() {
                             )
                             .join("")}
                         </div>`
-                      : `<p class="quick-classify-empty">Aun no tienes categorías creadas. Crea una desde Plan para poder clasificar.</p>`
+                      : `<p class="quick-classify-empty">Aún no tienes categorías creadas. Crea una desde Plan para poder clasificar.</p>`
                   }
                 </article>
               `
@@ -3265,7 +3493,7 @@ function renderExtraEditor() {
   const savingsPercent = clamp(Number(extra.allocation?.savingsPercent || 0), 0, 100);
   const savingsAmount = Math.round(Number(extra.amount || 0) * savingsPercent / 100);
   return `
-    <div class="sheet-backdrop" role="presentation">
+    <div class="sheet-backdrop" role="presentation" data-action="close-extra-editor">
       <section class="bottom-sheet transaction-editor" role="dialog" aria-modal="true" aria-labelledby="extra-editor-title">
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
@@ -3336,7 +3564,6 @@ function renderCooldown(cooldown) {
 }
 
 function renderProfile(plan) {
-  const script = dominantMoneyScript();
   const monthlyIncome = getMonthlyIncome(state.profile);
   const liquidity = liquiditySummary();
 
@@ -3367,12 +3594,7 @@ function renderProfile(plan) {
       </article>
 
       <article class="data-section">
-        <div class="data-section-heading"><span class="data-icon">${renderIcon("user")}</span><div><strong>Perfil conductual</strong><small>Opcional, ayuda a orientar el tono</small></div><button type="button" data-action="open-diagnosis" data-section="behavior">Editar</button></div>
-        <div class="data-metrics three"><div><span>Patron dominante</span><strong>${script.name}</strong></div><div><span>Confianza</span><strong>${state.profile.selfEfficacy}/10</strong></div><div><span>Ansiedad</span><strong>${state.profile.financialAnxiety}/10</strong></div></div>
-      </article>
-
-      <article class="data-section">
-        <div class="data-section-heading"><span class="data-icon">${renderIcon("lock")}</span><div><strong>Bloqueo con PIN</strong><small>${lockConfig.enabled ? "Activado. Pedimos tu PIN al abrir la app." : "Protege la app con un PIN de 4 digitos."}</small></div></div>
+        <div class="data-section-heading"><span class="data-icon">${renderIcon("lock")}</span><div><strong>Bloqueo con PIN</strong><small>${lockConfig.enabled ? "Activado. Pedimos tu PIN al abrir la app." : "Pide un PIN de 4 dígitos para abrir la app. No cifra tus datos guardados en el teléfono."}</small></div></div>
         <div class="lock-settings-actions">
           ${
             lockConfig.enabled
@@ -3386,6 +3608,29 @@ function renderProfile(plan) {
               : `<button class="btn primary" type="button" data-action="open-lock-setup">Activar bloqueo</button>`
           }
         </div>
+      </article>
+
+      <article class="data-section">
+        <div class="data-section-heading"><span class="data-icon">${renderIcon("calculator")}</span><div><strong>Copias locales</strong><small>Guardadas automáticamente en este dispositivo antes de cambios grandes</small></div></div>
+        ${
+          readLocalBackups().length
+            ? `<div class="local-backup-list">
+                ${readLocalBackups()
+                  .map(
+                    (backup) => `
+                  <div class="local-backup-row">
+                    <span class="local-backup-text">
+                      <strong>${escapeHtml(formatBackupTimestamp(backup.created_at))}</strong>
+                      <span>${escapeHtml(backup.reason || "Copia automática")} · ${backup.counts?.transactions || 0} movimientos</span>
+                    </span>
+                    <button class="btn ghost" type="button" data-action="request-restore-backup" data-id="${escapeAttr(backup.id)}">Restaurar</button>
+                  </div>
+                `
+                  )
+                  .join("")}
+              </div>`
+            : `<p class="data-note">Aún no hay copias locales guardadas.</p>`
+        }
       </article>
 
       <article class="sign-out-section">
@@ -3439,7 +3684,7 @@ function renderProgressView() {
           <div><p class="eyebrow">Historial entre periodos</p><h1>Progreso</h1></div>
         </div>
         <div class="empty-state actionable-empty">
-          <p>Aun no has cerrado ningun periodo. Cuando guardes tu primer cierre, aquí verás como cambia tu resultado con el tiempo.</p>
+          <p>Aún no has cerrado ningún periodo. Cuando guardes tu primer cierre, aquí verás cómo cambia tu resultado con el tiempo.</p>
           <button class="btn primary" type="button" data-view="periodClose">Ver cierre de periodo</button>
         </div>
         ${renderBehaviorInsights()}
@@ -3673,14 +3918,25 @@ function renderOnboardingModal() {
   const profile = state.profile;
   const liquidity = normalizeLiquidity(state.liquidity);
   const income = getPeriodIncome(profile);
+  // "Otro" es un estado de la interfaz, no una frecuencia: el valor real siempre vive
+  // en el input oculto. Se compara por igualdad exacta (y no "todo lo que no sea
+  // semanal/mensual es Otro") para que una cadencia vacia no marque nada por defecto.
+  const usesSecondaryCadence = SECONDARY_INCOME_CADENCES.includes(profile.incomeCadence);
+  const secondaryCadence = usesSecondaryCadence ? profile.incomeCadence : "semester";
+  // Solo "fixed" revela el dia de pago. Un perfil sin responder ("") no es "fijo":
+  // preguntar el dia de pago antes de saber si el ingreso es fijo no tiene sentido.
+  const usesFixedIncome = profile.incomeType === "fixed";
+  // Ninguna viene marcada. Son sugerencias para tocar, no un plan por defecto: marcar
+  // Comida + Gasolina + Salidas reservaba el 36% del ingreso de quien pulsara
+  // "Siguiente" sin mirar, incluido el porcentaje de gasolina de alguien sin vehiculo.
   const suggestions = [
-    ["Comida", 0.18, true],
-    ["Gasolina", 0.1, true],
-    ["Transporte", 0.08, false],
-    ["Salidas", 0.08, true],
-    ["Arriendo", 0.25, false],
-    ["Salud", 0.06, false],
-    ["Ropa", 0.05, false]
+    ["Comida", 0.18],
+    ["Gasolina", 0.1],
+    ["Transporte", 0.08],
+    ["Salidas", 0.08],
+    ["Arriendo", 0.25],
+    ["Salud", 0.06],
+    ["Ropa", 0.05]
   ];
 
   return `
@@ -3697,31 +3953,39 @@ function renderOnboardingModal() {
             <div class="sheet-field">
               <span class="sheet-label">¿Tu ingreso es fijo o variable?</span>
               <div class="onboarding-segmented" data-onboarding-income-type-group>
-                <button type="button" data-onboarding-income-type="fixed" class="${profile.incomeType !== "variable" ? "is-active" : ""}">Fijo (salario)</button>
+                <button type="button" data-onboarding-income-type="fixed" class="${profile.incomeType === "fixed" ? "is-active" : ""}">Fijo (salario)</button>
                 <button type="button" data-onboarding-income-type="variable" class="${profile.incomeType === "variable" ? "is-active" : ""}">Variable / freelance</button>
               </div>
-              <input name="incomeType" type="hidden" value="${escapeAttr(profile.incomeType === "variable" ? "variable" : "fixed")}">
+              <input name="incomeType" type="hidden" value="${escapeAttr(INCOME_TYPES.includes(profile.incomeType) ? profile.incomeType : "")}">
             </div>
             <div class="sheet-field">
               <span class="sheet-label">¿Cada cuánto recibes?</span>
-              <div class="onboarding-segmented" data-onboarding-cadence-group>
+              <div class="onboarding-segmented is-quad" data-onboarding-cadence-group>
                 <button type="button" data-onboarding-cadence="weekly" class="${profile.incomeCadence === "weekly" ? "is-active" : ""}">Semanal</button>
+                <button type="button" data-onboarding-cadence="biweekly" class="${profile.incomeCadence === "biweekly" ? "is-active" : ""}">Quincenal</button>
                 <button type="button" data-onboarding-cadence="monthly" class="${profile.incomeCadence === "monthly" ? "is-active" : ""}">Mensual</button>
-                <button type="button" data-onboarding-cadence="semester" class="${!["weekly", "monthly"].includes(profile.incomeCadence) ? "is-active" : ""}">Otro</button>
+                <button type="button" data-onboarding-cadence="other" class="${usesSecondaryCadence ? "is-active" : ""}">Otro</button>
               </div>
+              <label class="onboarding-cadence-other" data-onboarding-cadence-other ${usesSecondaryCadence ? "" : "hidden"}>
+                ¿Cada cuánto exactamente?
+                <select data-onboarding-cadence-select>
+                  <option value="semester" ${secondaryCadence === "semester" ? "selected" : ""}>Cada 6 meses (semestral)</option>
+                  <option value="yearly" ${secondaryCadence === "yearly" ? "selected" : ""}>Una vez al año (anual)</option>
+                </select>
+              </label>
               <input name="incomeCadence" type="hidden" value="${escapeAttr(profile.incomeCadence)}">
             </div>
             <label>
               ¿Cuánto recibes por periodo?
-              <input name="incomeAmount" type="number" min="1" step="1000" inputmode="numeric" value="${getPeriodIncome(profile)}" required>
+              <input name="incomeAmount" type="number" min="1" step="1000" inputmode="numeric" placeholder="$0" value="${income > 0 ? income : ""}" required>
             </label>
             <div class="onboarding-preview"><span>Libre estimado</span><strong data-onboarding-income-preview>${formatMoney(income)}</strong></div>
             <small class="onboarding-note">Después separarás reservas para gastos habituales y este número bajará.</small>
-            <label data-onboarding-payday-field ${profile.incomeType === "variable" ? "hidden" : ""}>
+            <label data-onboarding-payday-field ${usesFixedIncome ? "" : "hidden"}>
               ¿Qué día te pagan?
-              <input name="periodStart" type="${profile.incomeType === "variable" ? "hidden" : "date"}" value="${escapeAttr(profile.periodStart || monthStartKey())}" ${profile.incomeType === "variable" ? "" : "required"}>
+              <input name="periodStart" type="${usesFixedIncome ? "date" : "hidden"}" value="${escapeAttr(profile.periodStart || monthStartKey())}" ${usesFixedIncome ? "required" : ""}>
             </label>
-            <small class="onboarding-note" data-onboarding-payday-note ${profile.incomeType === "variable" ? "hidden" : ""}>Ese día tu ingreso se suma automáticamente a tu dinero libre. Podrás corregirlo si aún no te ha llegado.</small>
+            <small class="onboarding-note" data-onboarding-payday-note ${usesFixedIncome ? "" : "hidden"}>Ese día tu ingreso se suma automáticamente a tu dinero libre. Podrás corregirlo si aún no te ha llegado.</small>
           </section>
 
           <section class="onboarding-step" data-step="2">
@@ -3747,17 +4011,17 @@ function renderOnboardingModal() {
             <h2>¿Para qué separas dinero?</h2>
             <p>Elige categorías habituales. Puedes ajustar sus montos después.</p>
             <div class="onboarding-category-chips">
-              ${suggestions.map(([name, rate, selected], index) => `
-                <button type="button" class="onboarding-category-chip ${selected ? "is-active" : ""}" data-onboarding-category-chip data-category-index="${index}" data-rate="${rate}">${name}</button>
-                <input name="categoryName${index}" type="hidden" value="${name}" ${selected ? "" : "disabled"}>
-                <input name="categoryAmount${index}" type="hidden" value="${Math.round(income * rate)}" ${selected ? "" : "disabled"}>
-                <input name="categoryCadence${index}" type="hidden" value="period" ${selected ? "" : "disabled"}>
+              ${suggestions.map(([name, rate], index) => `
+                <button type="button" class="onboarding-category-chip" data-onboarding-category-chip data-category-index="${index}" data-rate="${rate}">${name}</button>
+                <input name="categoryName${index}" type="hidden" value="${name}" disabled>
+                <input name="categoryAmount${index}" type="hidden" value="${Math.round(income * rate)}" disabled>
+                <input name="categoryCadence${index}" type="hidden" value="period" disabled>
               `).join("")}
             </div>
             <div class="onboarding-preview category-preview">
               <span>Libre estimado después de reservas</span>
-              <strong data-onboarding-free-preview>${formatMoney(income * 0.64)}</strong>
-              <small data-onboarding-category-count>de ${formatMoney(income)} · 3 categorías seleccionadas</small>
+              <strong data-onboarding-free-preview>${formatMoney(income)}</strong>
+              <small data-onboarding-category-count>de ${formatMoney(income)} · 0 categorías seleccionadas</small>
             </div>
           </section>
 
@@ -3779,19 +4043,13 @@ const DIAGNOSIS_SECTIONS = {
     icon: "plan",
     title: "Plan básico",
     subtitle: "Ingreso y frecuencia del periodo",
-    fields: ["name", "incomeCadence", "incomeType", "incomeAmount", "periodStart", "committedExpenses", "payday"]
+    fields: ["name", "incomeCadence", "incomeType", "incomeAmount", "periodStart", "volatility", "committedExpenses", "payday"]
   },
   balances: {
     icon: "wallet",
     title: "Saldos",
     subtitle: "Dinero disponible hoy",
     fields: ["account", "cash", "emergencySavings"]
-  },
-  behavior: {
-    icon: "user",
-    title: "Perfil conductual",
-    subtitle: "Opcional, ayuda a orientar el tono",
-    fields: ["volatility", "selfEfficacy", "financialAnxiety", "worship", "avoidance", "status", "vigilance"]
   }
 };
 
@@ -3804,12 +4062,11 @@ function renderDiagnosisModal() {
   const section = DIAGNOSIS_SECTIONS[sectionKey];
   const bodyBySection = {
     plan: renderDiagnosisPlanFields,
-    balances: renderDiagnosisBalancesFields,
-    behavior: renderDiagnosisBehaviorFields
+    balances: renderDiagnosisBalancesFields
   };
 
   return `
-    <div class="modal-backdrop" role="presentation">
+    <div class="modal-backdrop" role="presentation" data-action="close-diagnosis">
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="diagnosis-title">
         <div class="modal-heading">
           <div>
@@ -3871,6 +4128,16 @@ function renderDiagnosisPlanFields() {
       <input name="periodStart" type="date" value="${escapeAttr(profile.periodStart || profile.semesterStart || monthStartKey())}" required ${diagnosisInvalidAttr("periodStart")}>
       ${renderDiagnosisFieldError("periodStart")}
     </label>
+    <label data-volatility-field ${profile.incomeType === "variable" ? "" : "hidden"}>
+      ¿Qué tanto varía lo que recibes?
+      <select name="volatility" ${diagnosisInvalidAttr("volatility")}>
+        <option value="low" ${profile.volatility === "low" ? "selected" : ""}>Poco: mes a mes es parecido</option>
+        <option value="medium" ${profile.volatility === "medium" ? "selected" : ""}>Algo: hay meses buenos y flojos</option>
+        <option value="high" ${profile.volatility === "high" ? "selected" : ""}>Mucho: cambia bastante</option>
+      </select>
+      <small>Cuanto más varíe, más prudente es el ahorro que te sugerimos.</small>
+      ${renderDiagnosisFieldError("volatility")}
+    </label>
     <label>
       Ingreso mensual equivalente
       <input name="monthlyIncome" type="number" min="0" step="1000" value="${getMonthlyIncome(profile)}" readonly>
@@ -3906,51 +4173,9 @@ function renderDiagnosisBalancesFields() {
     </label>
     <small class="balance-hint" data-liquidity-match-hint></small>
     <label>
-      Ahorro actual para simular
+      Ahorro de emergencia actual
       <input name="emergencySavings" type="number" min="0" step="1000" value="${profile.emergencySavings}" required ${diagnosisInvalidAttr("emergencySavings")}>
       ${renderDiagnosisFieldError("emergencySavings")}
-    </label>
-  `;
-}
-
-function renderDiagnosisBehaviorFields() {
-  const profile = state.profile;
-  return `
-    <label>
-      Volatilidad
-      <select name="volatility" ${diagnosisInvalidAttr("volatility")}>
-        <option value="low" ${profile.volatility === "low" ? "selected" : ""}>Baja</option>
-        <option value="medium" ${profile.volatility === "medium" ? "selected" : ""}>Media</option>
-        <option value="high" ${profile.volatility === "high" ? "selected" : ""}>Alta</option>
-      </select>
-      ${renderDiagnosisFieldError("volatility")}
-    </label>
-    <label>
-      Confianza financiera: ${profile.selfEfficacy}/10
-      <input name="selfEfficacy" type="range" min="1" max="10" value="${profile.selfEfficacy}">
-    </label>
-    <label>
-      Ansiedad financiera: ${profile.financialAnxiety}/10
-      <input name="financialAnxiety" type="range" min="1" max="10" value="${profile.financialAnxiety}">
-    </label>
-    ${renderScriptQuestion("worship", "Siento que las cosas mejorarian mucho si tuviera más dinero.")}
-    ${renderScriptQuestion("avoidance", "A veces siento que no merezco dinero cuando otras personas tienen menos.")}
-    ${renderScriptQuestion("status", "Mi valor personal se refleja en mis logros financieros.")}
-    ${renderScriptQuestion("vigilance", "Me cuesta disfrutar el dinero porque prefiero guardarlo por seguridad.")}
-  `;
-}
-
-function renderScriptQuestion(key, label) {
-  const value = state.profile.moneyScripts[key];
-  return `
-    <label>
-      ${label}
-      <select name="${key}" ${diagnosisInvalidAttr(key)}>
-        ${[1, 2, 3, 4, 5]
-          .map((score) => `<option value="${score}" ${score === Number(value) ? "selected" : ""}>${score}</option>`)
-          .join("")}
-      </select>
-      ${renderDiagnosisFieldError(key)}
     </label>
   `;
 }
@@ -4006,7 +4231,7 @@ function renderExtraAllocationModal() {
   const target = savingsAllocationTarget();
 
   return `
-    <div class="sheet-backdrop" role="presentation">
+    <div class="sheet-backdrop" role="presentation" data-action="cancel-extra-allocation">
       <section class="bottom-sheet extra-suggestion-sheet" role="dialog" aria-modal="true" aria-labelledby="extra-allocation-title">
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
@@ -4353,6 +4578,32 @@ function closeTopDialog() {
     render();
     return true;
   }
+  if (pendingBackupRestoreId) {
+    pendingBackupRestoreId = "";
+    render();
+    return true;
+  }
+  if (deleteAccountOpen) {
+    cloudState.error = "";
+    deleteAccountOpen = false;
+    render();
+    return true;
+  }
+  if (quickClassifyQueue.length) {
+    quickClassifyQueue = [];
+    render();
+    return true;
+  }
+  if (predictionDetailsOpen) {
+    predictionDetailsOpen = false;
+    render();
+    return true;
+  }
+  if (periodReportOpen) {
+    periodReportOpen = false;
+    render();
+    return true;
+  }
   return false;
 }
 
@@ -4410,7 +4661,9 @@ function bindOnboardingFlowV2(form) {
     });
     if (incomePreview) incomePreview.textContent = formatMoney(income);
     if (freePreview) freePreview.textContent = formatMoney(Math.max(0, income - reserved));
-    if (categoryCount) categoryCount.textContent = `de ${formatMoney(income)} · ${selected} categorías seleccionadas`;
+    if (categoryCount) {
+      categoryCount.textContent = `de ${formatMoney(income)} · ${selected} ${selected === 1 ? "categoría seleccionada" : "categorías seleccionadas"}`;
+    }
   };
 
   const showStep = (step) => {
@@ -4418,7 +4671,7 @@ function bindOnboardingFlowV2(form) {
     form.querySelectorAll("[data-step]").forEach((section) => section.classList.toggle("is-active", Number(section.dataset.step) === step));
     modal.querySelectorAll(".onboarding-progress span").forEach((dot, index) => dot.classList.toggle("is-active", index === step - 1));
     progress?.setAttribute("aria-label", `Paso ${step} de 3`);
-    backButton.hidden = step === 1 || step === 3;
+    backButton.hidden = step === 1;
     nextButton.hidden = step === 3;
     finishButton.hidden = step !== 3;
     skipButton.hidden = step !== 3;
@@ -4439,11 +4692,23 @@ function bindOnboardingFlowV2(form) {
   backButton.addEventListener("click", () => showStep(Math.max(1, Number(modal.dataset.onboardingStep || 1) - 1)));
   form.elements.namedItem("incomeAmount")?.addEventListener("input", updateCategories);
   ["account", "cash"].forEach((name) => form.elements.namedItem(name)?.addEventListener("input", updateBalance));
+  const cadenceInput = form.elements.namedItem("incomeCadence");
+  const cadenceOtherField = form.querySelector("[data-onboarding-cadence-other]");
+  const cadenceOtherSelect = form.querySelector("[data-onboarding-cadence-select]");
   form.querySelectorAll("[data-onboarding-cadence]").forEach((button) => {
     button.addEventListener("click", () => {
-      form.elements.namedItem("incomeCadence").value = button.dataset.onboardingCadence;
+      const choice = button.dataset.onboardingCadence;
+      const isOther = choice === "other";
+      if (cadenceOtherField) {
+        cadenceOtherField.hidden = !isOther;
+      }
+      // El boton "Otro" no es una frecuencia; toma la del select que acaba de revelar.
+      cadenceInput.value = isOther ? cadenceOtherSelect?.value || "semester" : choice;
       form.querySelectorAll("[data-onboarding-cadence]").forEach((item) => item.classList.toggle("is-active", item === button));
     });
+  });
+  cadenceOtherSelect?.addEventListener("change", () => {
+    cadenceInput.value = cadenceOtherSelect.value;
   });
   const paydayField = form.querySelector("[data-onboarding-payday-field]");
   const paydayNote = form.querySelector("[data-onboarding-payday-note]");
@@ -4484,10 +4749,19 @@ function bindOnboardingFlowV2(form) {
 
 function validateOnboardingStep(form, step) {
   const data = new FormData(form);
-  if (step === 1 && numberFrom(data.get("incomeAmount")) <= 0) {
-    return "Escribe un presupuesto mayor que cero.";
+  // En el orden en que el usuario ve los campos, para que el mensaje apunte siempre a
+  // lo primero que falta. Ninguno de estos tiene ya un valor por defecto que lo
+  // resuelva en silencio, asi que los tres son respuestas reales del usuario.
+  if (step === 1 && !INCOME_TYPES.includes(data.get("incomeType"))) {
+    return "Dinos si tu ingreso es fijo o variable.";
   }
-  if (step === 1 && data.get("incomeType") !== "variable" && !cleanDate(data.get("periodStart"), "")) {
+  if (step === 1 && !INCOME_CADENCE_VALUES.includes(data.get("incomeCadence"))) {
+    return "Elige cada cuánto recibes tu dinero.";
+  }
+  if (step === 1 && numberFrom(data.get("incomeAmount")) <= 0) {
+    return "Escribe cuánto recibes por periodo.";
+  }
+  if (step === 1 && data.get("incomeType") === "fixed" && !cleanDate(data.get("periodStart"), "")) {
     return "Elige el día en que te pagan.";
   }
   // El paso 2 (saldo real) no se valida contra el presupuesto: son dos numeros
@@ -4507,7 +4781,7 @@ function handleOnboardingSubmit(event) {
   }
 
   const data = new FormData(form);
-  const incomeCadence = ["weekly", "biweekly", "monthly", "semester", "yearly"].includes(data.get("incomeCadence"))
+  const incomeCadence = INCOME_CADENCE_VALUES.includes(data.get("incomeCadence"))
     ? data.get("incomeCadence")
     : "monthly";
   const incomeType = data.get("incomeType") === "variable" ? "variable" : "fixed";
@@ -4530,7 +4804,7 @@ function handleOnboardingSubmit(event) {
   const jobs = onboardingCategories(data, profileDraft, now);
   const reserved = jobs.reduce((sum, job) => sum + getBudgetAmountForJob(job, profileDraft), 0);
   if (reserved > incomeAmount) {
-    error.textContent = `Los campos separan ${formatMoney(reserved)}, más que tu presupuesto de ${formatMoney(incomeAmount)}.`;
+    error.textContent = `Las categorías separan ${formatMoney(reserved)}, más que tu presupuesto de ${formatMoney(incomeAmount)}.`;
     return;
   }
 
@@ -4579,7 +4853,7 @@ function onboardingCategories(data, profile, updatedAt) {
 function bindDiagnosisPreview(form) {
   const updateMonthlyEquivalent = () => {
     const data = new FormData(form);
-    const incomeCadence = ["weekly", "biweekly", "monthly", "semester", "yearly"].includes(data.get("incomeCadence"))
+    const incomeCadence = INCOME_CADENCE_VALUES.includes(data.get("incomeCadence"))
       ? data.get("incomeCadence")
       : "monthly";
     const monthlyInput = form.elements.namedItem("monthlyIncome");
@@ -4614,12 +4888,24 @@ function bindDiagnosisPreview(form) {
     hint.classList.toggle("is-ok", matches);
     hint.classList.toggle("is-error", !matches);
   };
+  // La volatilidad solo altera el ahorro sugerido cuando el ingreso es variable
+  // (getSavingsRate la ignora si es fijo), asi que no se le pregunta a quien cobra un
+  // salario. Se oculta en vez de quitarse del DOM para que el valor guardado viaje
+  // igual en el FormData si el usuario alterna entre fijo y variable sin guardar.
+  const updateVolatilityVisibility = () => {
+    const field = form.querySelector("[data-volatility-field]");
+    if (!field) {
+      return;
+    }
+    field.hidden = form.elements.namedItem("incomeType")?.value !== "variable";
+  };
   const updatePreview = () => {
     updateMonthlyEquivalent();
     updateLiquidityMatch();
+    updateVolatilityVisibility();
   };
 
-  ["incomeCadence", "incomeAmount", "account", "cash"].forEach((name) => {
+  ["incomeCadence", "incomeAmount", "account", "cash", "incomeType"].forEach((name) => {
     const field = form.elements.namedItem(name);
     if (field) {
       field.addEventListener("input", updatePreview);
@@ -4810,6 +5096,18 @@ function setFormChoiceValue(form, name, value) {
 }
 
 function handleAction(event) {
+  // Backdrops carry the same data-action as their sheet's own close/cancel button, so
+  // tapping outside the sheet dismisses it — the standard Android gesture, previously
+  // missing entirely. But clicks inside the sheet bubble up through the backdrop too;
+  // only actually close when the tap landed on the backdrop itself, not on its content.
+  if (
+    event.currentTarget !== event.target &&
+    (event.currentTarget.classList.contains("sheet-backdrop") ||
+      event.currentTarget.classList.contains("quick-expense-backdrop") ||
+      event.currentTarget.classList.contains("modal-backdrop"))
+  ) {
+    return;
+  }
   event.preventDefault();
   const action = event.currentTarget.dataset.action;
   const id = event.currentTarget.dataset.id;
@@ -4831,6 +5129,8 @@ function handleAction(event) {
     "close-plan-sheet",
     "request-remove-job",
     "cancel-remove-job",
+    "request-restore-backup",
+    "cancel-restore-backup",
     "open-delete-account",
     "cancel-delete-account",
     "edit-transaction",
@@ -4919,6 +5219,16 @@ function handleAction(event) {
     "confirm-remove-job": () => {
       removeBudgetJob(pendingJobRemovalId);
       pendingJobRemovalId = "";
+    },
+    "request-restore-backup": () => {
+      pendingBackupRestoreId = id;
+    },
+    "cancel-restore-backup": () => {
+      pendingBackupRestoreId = "";
+    },
+    "confirm-restore-backup": () => {
+      restoreLocalBackup(pendingBackupRestoreId);
+      pendingBackupRestoreId = "";
     },
     "open-delete-account": () => {
       cloudState.error = "";
@@ -5022,7 +5332,10 @@ function handleAction(event) {
     "send-test-reminder": sendTestReminder,
     "register-calendar-event": () => startCalendarEventExpense(id),
     "open-lock-setup": () => {
-      lockMode = "set";
+      // Changing an existing PIN must prove you know the current one first — otherwise
+      // anyone who picks up an already-unlocked phone could silently swap in their own
+      // PIN. First-time setup has no current PIN to verify, so it goes straight to "set".
+      lockMode = lockConfig.enabled ? "verify-change" : "set";
       lockDigits = "";
       lockFirstEntry = "";
       lockError = "";
@@ -5062,6 +5375,10 @@ function handleAction(event) {
         status.applied = false;
         status.rejected = true;
         status.bannerDismissed = true;
+        const logged = findLoggedIncomeForToday(todayKey());
+        if (logged) {
+          logged.status = "rejected";
+        }
       }
     }
   };
@@ -5097,10 +5414,13 @@ function recoverAuthStartup() {
   if (cloudState.signedIn) {
     cloudState.status = "error";
     cloudState.error = "La sincronización está tardando. Puedes usar tus datos locales mientras vuelve la conexión.";
-  } else {
-    cloudState.status = "signed-out";
-    cloudState.error = "No pude comprobar una sesión guardada. Inicia sesión de nuevo.";
+    // Solo cambia un aviso: si hay un formulario abierto (el acceso directo del widget
+    // puede haberlo abierto hace segundos) no vale la pena borrarlo por eso.
+    renderBackground();
+    return;
   }
+  cloudState.status = "signed-out";
+  cloudState.error = "No pude comprobar una sesión guardada. Inicia sesión de nuevo.";
   render();
 }
 
@@ -5131,14 +5451,18 @@ function submitDiagnosisForm(form) {
 
   if (sectionKey === "plan") {
     const shouldClearTemplateBudget = shouldClearTemplateBudgetOnPlanSave();
-    const incomeCadence = ["weekly", "biweekly", "monthly", "semester", "yearly"].includes(data.get("incomeCadence"))
+    const incomeCadence = INCOME_CADENCE_VALUES.includes(data.get("incomeCadence"))
       ? data.get("incomeCadence")
       : "monthly";
     const incomeAmount = numberFrom(data.get("incomeAmount"));
     const periodStart = cleanDate(data.get("periodStart"), monthStartKey());
-    const semesterIncome = incomeCadence === "semester" ? incomeAmount : state.profile.semesterIncome || STUDENT_SEMESTER_INCOME;
-    const semesterMonths = incomeCadence === "semester" ? STUDENT_SEMESTER_MONTHS : state.profile.semesterMonths || STUDENT_SEMESTER_MONTHS;
-    const monthlyIncome = getMonthlyIncome({ ...state.profile, incomeCadence, incomeAmount, semesterIncome, semesterMonths });
+    // getMonthlyIncome saca los meses del periodo de la cadencia (INCOME_CADENCES) y
+    // nunca lee semesterMonths; y solo cae en semesterIncome si incomeAmount es null,
+    // cosa que migrateState garantiza que no pasa. Ambos campos eran ruido, pero uno
+    // hacia dano real: con `state.profile.semesterIncome || STUDENT_SEMESTER_INCOME`,
+    // guardar el Plan con semesterIncome en 0 escribia $1.750.000 (el ingreso de la
+    // plantilla "estudiante") dentro del perfil real del usuario.
+    const monthlyIncome = getMonthlyIncome({ ...state.profile, incomeCadence, incomeAmount });
 
     state.profile = {
       ...state.profile,
@@ -5147,11 +5471,10 @@ function submitDiagnosisForm(form) {
       incomeCadence,
       incomeType: data.get("incomeType") === "variable" ? "variable" : "fixed",
       incomeAmount,
-      semesterIncome,
-      semesterMonths,
       periodStart,
       semesterStart: periodStart,
       monthlyIncome,
+      volatility: VOLATILITY_VALUES.includes(data.get("volatility")) ? data.get("volatility") : state.profile.volatility || "medium",
       committedExpenses: numberFrom(data.get("committedExpenses")),
       payday: normalizePayday(data.get("payday")),
       updated_at: new Date().toISOString()
@@ -5161,7 +5484,7 @@ function submitDiagnosisForm(form) {
       clearTemplateBudget();
     }
     successMessage = shouldClearTemplateBudget
-      ? "Datos guardados. Quite los campos de plantilla; ahora crea tus propios campos de gasto."
+      ? "Datos guardados. Quité las categorías de ejemplo; ahora crea las tuyas."
       : "Plan básico guardado.";
   }
 
@@ -5179,24 +5502,6 @@ function submitDiagnosisForm(form) {
       updated_at: new Date().toISOString()
     };
     successMessage = "Saldos actualizados.";
-  }
-
-  if (sectionKey === "behavior") {
-    state.profile = {
-      ...state.profile,
-      completed: true,
-      volatility: ["low", "medium", "high"].includes(data.get("volatility")) ? data.get("volatility") : "medium",
-      selfEfficacy: clamp(numberFrom(data.get("selfEfficacy")), 1, 10),
-      financialAnxiety: clamp(numberFrom(data.get("financialAnxiety")), 1, 10),
-      moneyScripts: {
-        worship: clamp(numberFrom(data.get("worship")), 1, 5),
-        avoidance: clamp(numberFrom(data.get("avoidance")), 1, 5),
-        status: clamp(numberFrom(data.get("status")), 1, 5),
-        vigilance: clamp(numberFrom(data.get("vigilance")), 1, 5)
-      },
-      updated_at: new Date().toISOString()
-    };
-    successMessage = "Perfil conductual guardado.";
   }
 
   if (wasIncomplete) {
@@ -5218,7 +5523,7 @@ function validateDiagnosisForm(form) {
   const data = new FormData(form);
   const sectionKey = DIAGNOSIS_SECTIONS[form.dataset.diagnosisSection] ? form.dataset.diagnosisSection : "plan";
   const activeFields = new Set(DIAGNOSIS_SECTIONS[sectionKey].fields);
-  const allowedCadences = ["weekly", "biweekly", "monthly", "semester", "yearly"];
+  const allowedCadences = INCOME_CADENCE_VALUES;
   const requiredNumbers = [
     ["incomeAmount", "El presupuesto por periodo debe ser mayor que cero.", 1],
     ["committedExpenses", "Los gastos comprometidos no pueden estar vacios.", 0],
@@ -5261,27 +5566,14 @@ function validateDiagnosisForm(form) {
     return { field: "incomeType", message: "Elige si tu ingreso es fijo o variable." };
   }
 
-  if (activeFields.has("volatility") && !["low", "medium", "high"].includes(data.get("volatility"))) {
-    return { field: "volatility", message: "Elige la volatilidad de tus ingresos." };
-  }
-
-  const rangeFields = [
-    ["selfEfficacy", "La confianza financiera debe estar entre 1 y 10.", 1, 10],
-    ["financialAnxiety", "La ansiedad financiera debe estar entre 1 y 10.", 1, 10],
-    ["worship", "Revisa la pregunta de buscar más dinero.", 1, 5],
-    ["avoidance", "Revisa la pregunta de evitar mirar dinero.", 1, 5],
-    ["status", "Revisa la pregunta de dinero como estatus.", 1, 5],
-    ["vigilance", "Revisa la pregunta de control y seguridad.", 1, 5]
-  ];
-
-  for (const [field, message, min, max] of rangeFields) {
-    if (!activeFields.has(field)) {
-      continue;
-    }
-    const value = numberValue(data.get(field));
-    if (value == null || value < min || value > max) {
-      return { field, message };
-    }
+  // Solo se exige cuando el ingreso es variable: con ingreso fijo el campo va oculto
+  // (ver bindDiagnosisPreview) y getSavingsRate ni siquiera lee la volatilidad.
+  if (
+    activeFields.has("volatility") &&
+    data.get("incomeType") === "variable" &&
+    !VOLATILITY_VALUES.includes(data.get("volatility"))
+  ) {
+    return { field: "volatility", message: "Elige qué tanto varía lo que recibes." };
   }
 
   return null;
@@ -5332,11 +5624,11 @@ function handleBudgetSubmit(event) {
     return;
   }
 
-  const name = cleanText(data.get("name"), "Nuevo campo");
+  const name = cleanText(data.get("name"), "Nueva categoría");
   const amount = numberFrom(data.get("amount"));
-  const cadence = ["weekly", "biweekly", "monthly", "semester", "yearly", "period"].includes(data.get("cadence")) ? data.get("cadence") : "monthly";
+  const cadence = JOB_CADENCE_VALUES.includes(data.get("cadence")) ? data.get("cadence") : "monthly";
   if (amount <= 0) {
-    state.lastAlert = "El monto del campo debe ser mayor que cero.";
+    state.lastAlert = "El monto de la categoría debe ser mayor que cero.";
     showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
     saveState();
     render();
@@ -5481,7 +5773,7 @@ function handleTransactionSubmit(event) {
       unlockAt: hoursFromNow(24).toISOString(),
       updated_at: new Date().toISOString()
     });
-    state.lastAlert = `${merchant} quedo en pausa 24 horas antes de decidir.`;
+    state.lastAlert = `${merchant} quedó en pausa 24 horas antes de decidir.`;
   } else {
     const transaction = addTransaction({ merchant, description, amount, category, budgeted, oneOff, source, calendarEventId });
     if (calendarEventId) {
@@ -5527,7 +5819,7 @@ function handleTransactionEditSubmit(event) {
   transaction.oneOff = nextOneOff;
   transaction.updated_at = new Date().toISOString();
   rememberMerchantRule(transaction);
-  state.lastAlert = `${transaction.merchant} quedo reclasificado.`;
+  state.lastAlert = `${transaction.merchant} quedó reclasificado.`;
   editingTransactionId = "";
   saveState();
   render();
@@ -5569,7 +5861,7 @@ function validateTransactionDraft({ amount, category, source }) {
 
   const validCategory = category === FREE_CATEGORY_ID || state.budgetJobs.some((job) => job.id === category);
   if (!validCategory) {
-    return "Elige un campo valido para clasificar el gasto.";
+    return "Elige una categoría válida para clasificar el gasto.";
   }
 
   const available = liquiditySummary()[normalizeLocation(source)];
@@ -6087,7 +6379,11 @@ function syncHomeWidget() {
   }
   const summary = budgetSummary();
   const periodLabel = `${formatShortDate(summary.window.start)} - ${formatShortDate(previousDay(summary.window.end))}`;
-  bridge.update({ freeMoney: formatMoney(summary.freeRemaining), periodLabel }).catch(() => {});
+  // The whole point of the PIN lock is that someone holding the phone can't see your
+  // money without it — showing the exact amount on the home screen widget defeats that
+  // even while the app itself is locked, since widgets render outside the lock screen.
+  const freeMoney = lockConfig.enabled ? "Bloqueado" : formatMoney(summary.freeRemaining);
+  bridge.update({ freeMoney, periodLabel }).catch(() => {});
 }
 
 const BACK_CLOSE_SELECTORS = [
@@ -6097,6 +6393,7 @@ const BACK_CLOSE_SELECTORS = [
   '[data-action="close-quick-classify"]',
   '[data-action="cancel-delete-account"]',
   '[data-action="cancel-remove-job"]',
+  '[data-action="cancel-restore-backup"]',
   '[data-action="close-diagnosis"]',
   '[data-action="close-plan-sheet"]',
   '[data-action="close-period-report"]',
@@ -6105,6 +6402,17 @@ const BACK_CLOSE_SELECTORS = [
 ];
 
 function handleHardwareBackButton() {
+  // The onboarding "Atrás" button has no data-action (it's bound directly in
+  // bindOnboardingFlowV2), so it never matches BACK_CLOSE_SELECTORS below. Without this,
+  // the hardware back button skipped straight to exitApp() on any onboarding step,
+  // silently discarding whatever the user had typed — the worst possible moment to lose
+  // someone. On step 1 there's nothing to go back to within the flow, so fall through
+  // to the normal exit-app behavior, same as Android's back button on any first screen.
+  const onboardingModal = document.querySelector("[data-onboarding-step]");
+  if (onboardingModal && Number(onboardingModal.dataset.onboardingStep || 1) > 1) {
+    onboardingModal.querySelector("[data-onboarding-back]")?.click();
+    return;
+  }
   for (const selector of BACK_CLOSE_SELECTORS) {
     const button = document.querySelector(selector);
     if (button) {
@@ -6206,7 +6514,7 @@ function bindAppLock() {
 }
 
 async function pushLockDigit(digit) {
-  if ((lockMode === "unlock" || lockMode === "disable") && lockIsCoolingDown()) {
+  if ((lockMode === "unlock" || lockMode === "disable" || lockMode === "verify-change") && lockIsCoolingDown()) {
     return;
   }
   if (lockDigits.length >= LOCK_PIN_LENGTH) {
@@ -6243,6 +6551,7 @@ async function resolveLockEntry() {
     const hash = await hashPin(entry, salt);
     lockConfig = { enabled: true, hash, salt, biometric: false, failedAttempts: 0, lockUntil: 0 };
     saveLockConfig(lockConfig);
+    syncHomeWidget();
     lockMode = "";
     lockDigits = "";
     lockFirstEntry = "";
@@ -6257,11 +6566,29 @@ async function resolveLockEntry() {
     if (lockMode === "disable") {
       lockConfig = { enabled: false, hash: "", salt: "", biometric: false, failedAttempts: 0, lockUntil: 0 };
       saveLockConfig(lockConfig);
+      syncHomeWidget();
       showNoticeSnackbar("Bloqueo desactivado.", { renderNow: false });
-    } else {
+      lockMode = "";
+      lockDigits = "";
+      lockError = "";
+      render();
+      return;
+    }
+    if (lockMode === "verify-change") {
+      // Current PIN confirmed — now walk through "set" → "confirm" same as first-time
+      // setup. The new hash/salt only get saved once that new PIN is confirmed
+      // (see the "confirm" branch above), so bailing out here via Cancelar leaves the
+      // old PIN in place.
       lockConfig = { ...lockConfig, failedAttempts: 0, lockUntil: 0 };
       saveLockConfig(lockConfig);
+      lockMode = "set";
+      lockDigits = "";
+      lockError = "";
+      render();
+      return;
     }
+    lockConfig = { ...lockConfig, failedAttempts: 0, lockUntil: 0 };
+    saveLockConfig(lockConfig);
     lockMode = "";
     lockDigits = "";
     lockError = "";
@@ -6282,19 +6609,21 @@ async function resolveLockEntry() {
 function renderLockScreen() {
   const titles = {
     unlock: "Ingresa tu PIN",
-    set: "Crea un PIN de 4 digitos",
+    set: "Crea un PIN de 4 dígitos",
     confirm: "Confirma tu PIN",
-    disable: "Ingresa tu PIN"
+    disable: "Ingresa tu PIN",
+    "verify-change": "Ingresa tu PIN actual"
   };
   const subtitles = {
-    unlock: "Protege tus finanzas en este dispositivo.",
+    unlock: "Evita que alguien abra la app sin tu PIN.",
     set: "Lo pediremos cada vez que abras la app.",
-    confirm: "Escribelo otra vez para confirmar.",
-    disable: "Confirma tu PIN para desactivar el bloqueo."
+    confirm: "Escríbelo otra vez para confirmar.",
+    disable: "Confirma tu PIN para desactivar el bloqueo.",
+    "verify-change": "Confirma tu PIN actual para cambiarlo."
   };
-  const cooling = (lockMode === "unlock" || lockMode === "disable") && lockIsCoolingDown();
+  const cooling = (lockMode === "unlock" || lockMode === "disable" || lockMode === "verify-change") && lockIsCoolingDown();
   const dots = Array.from({ length: LOCK_PIN_LENGTH }, (_, index) => `<span class="lock-dot ${index < lockDigits.length ? "filled" : ""}"></span>`).join("");
-  const canCancel = lockMode === "set" || lockMode === "confirm" || lockMode === "disable";
+  const canCancel = lockMode === "set" || lockMode === "confirm" || lockMode === "disable" || lockMode === "verify-change";
   const digitKey = (value) => `<button class="lock-key" type="button" data-lock-digit="${value}" ${cooling ? "disabled" : ""}>${value}</button>`;
   return `
     <div class="lock-screen" role="dialog" aria-modal="true" aria-label="${escapeHtml(titles[lockMode] || titles.unlock)}">
@@ -6397,7 +6726,7 @@ function buildMovementsCsv() {
 
 function downloadMovementsCsv() {
   if (!(state.transactions || []).length && !(state.budgetExtras || []).length) {
-    showNoticeSnackbar("Aun no tienes movimientos para exportar.", { duration: 3500, renderNow: false });
+    showNoticeSnackbar("Aún no tienes movimientos para exportar.", { duration: 3500, renderNow: false });
     return;
   }
   const csv = "﻿" + buildMovementsCsv();
@@ -6448,7 +6777,7 @@ function shouldClearTemplateBudgetOnPlanSave() {
 }
 
 function clearTemplateBudget(target = state) {
-  const templateIds = new Set(STUDENT_BUDGET_JOBS.map((job) => job.id));
+  const templateIds = new Set(LEGACY_TEMPLATE_BUDGET_JOBS.map((job) => job.id));
   target.budgetJobs = [];
   target.cooldowns = (target.cooldowns || []).filter((cooldown) => !templateIds.has(cooldown.category));
   target.merchantRules = (target.merchantRules || []).filter((rule) => !templateIds.has(rule.category));
@@ -6735,7 +7064,7 @@ function showNoticeSnackbar(message, options = {}) {
     clearSnackbar();
   }, duration);
   if (renderNow) {
-    render();
+    paintSnackbar();
   }
 }
 
@@ -6744,16 +7073,46 @@ function clearSnackbar(options = {}) {
   clearTimeout(snackbarTimer);
   snackbar = null;
   if (renderNow) {
-    render();
+    paintSnackbar();
   }
+}
+
+// Toca solo el nodo del snackbar en vez de reconstruir la app. Antes mostrar u ocultar
+// un aviso llamaba a render(), y eso borraba cualquier formulario abierto. El caso peor
+// era el aviso de validacion: "Efectivo solo tiene $X disponible" limpiaba el gasto que
+// el usuario acababa de escribir, justo cuando necesitaba corregirlo. El temporizador
+// de 8 segundos del "Deshacer" hacia lo mismo si el usuario ya estaba registrando el
+// siguiente gasto. Mismo motivo por el que bindPasswordToggles toca el DOM directo.
+function paintSnackbar() {
+  document.querySelector(".snackbar")?.remove();
+  const markup = renderSnackbar();
+  if (!markup) {
+    return;
+  }
+  app.insertAdjacentHTML("beforeend", markup);
+  // bindEvents() enlaza elemento por elemento, no por delegacion: volver a llamarlo
+  // aqui duplicaria los listeners de todo lo que ya esta en pantalla.
+  app.querySelector(".snackbar [data-action]")?.addEventListener("click", handleAction);
 }
 
 function calculatePlan() {
   return calculateFinancePlan(state, todayKey());
 }
 
+// Cached because a single Plan-view render calls budgetSummary() 15-25 times
+// (calculatePlan, periodPrediction and freeImpactForPrediction all call it, and each
+// category/prediction card calls it again), and getBudgetSummary() rescans every
+// transaction from scratch on each call. Invalidated at the top of saveState() (so any
+// mutation is visible to the very next read, including syncHomeWidget() which runs
+// inside saveState() before render()) and at the top of render() (covers the
+// selfManagedAction paths — sign-out, delete-account — that skip saveState() but still
+// render()). Confirmed safe: no code path reads budgetSummary(), mutates state, then
+// reads it again expecting the post-mutation value within the same synchronous call.
 function budgetSummary() {
-  return getBudgetSummary(state, todayKey());
+  if (!cachedBudgetSummary) {
+    cachedBudgetSummary = getBudgetSummary(state, todayKey());
+  }
+  return cachedBudgetSummary;
 }
 
 function periodPrediction() {
@@ -7112,19 +7471,43 @@ function liquiditySummary(summary = budgetSummary()) {
 // hasn't landed yet, in which case it stays pending until they log it manually. Before
 // that deposit happens, "dinero libre" is just the real balance (finance-core.js),
 // never a promise — so there is nothing to freeze or reconcile here anymore.
+function findLoggedIncomeForToday(today) {
+  const ledger = state.periodIncomeApplied || [];
+  return ledger.find((entry) => today >= entry.windowStart && today < entry.windowEnd);
+}
+
 function ensurePeriodIncomeApplication() {
   const window = getBudgetWindow(state.profile, todayKey());
   const current = state.periodIncomeStatus;
+  const today = todayKey();
+  // Editing periodStart/cadence in "Editar mi plan" recomputes window.start for what,
+  // from the user's perspective, is still the same real-world pay period (today didn't
+  // move). Looking up by exact windowStart equality would treat that edit as a brand
+  // new never-paid period and deposit the income a second time, so instead look up by
+  // date-range overlap against the durable ledger below — that identity survives the edit.
+  const logged = findLoggedIncomeForToday(today);
 
   if (!current || current.windowStart !== window.start) {
-    state.periodIncomeStatus = {
-      windowStart: window.start,
-      applied: false,
-      rejected: false,
-      bannerDismissed: false,
-      amount: 0,
-      location: null
-    };
+    if (logged) {
+      state.periodIncomeStatus = {
+        windowStart: window.start,
+        applied: logged.status === "applied",
+        rejected: logged.status === "rejected",
+        bannerDismissed: true,
+        amount: logged.amount || 0,
+        location: logged.status === "applied" ? "account" : null,
+        appliedAt: logged.appliedAt
+      };
+    } else {
+      state.periodIncomeStatus = {
+        windowStart: window.start,
+        applied: false,
+        rejected: false,
+        bannerDismissed: false,
+        amount: 0,
+        location: null
+      };
+    }
   }
 
   const status = state.periodIncomeStatus;
@@ -7136,8 +7519,8 @@ function ensurePeriodIncomeApplication() {
   // reading intent on day one: if the RAW date the user typed is still in the future,
   // their first payday hasn't arrived yet, no matter what window.start resolved to.
   const rawPeriodStart = cleanDate(state.profile.periodStart, "");
-  const paydayAlreadyArrived = !rawPeriodStart || rawPeriodStart <= todayKey();
-  if (state.profile.incomeType === "fixed" && paydayAlreadyArrived && !status.applied && !status.rejected) {
+  const paydayAlreadyArrived = !rawPeriodStart || rawPeriodStart <= today;
+  if (state.profile.incomeType === "fixed" && paydayAlreadyArrived && !status.applied && !status.rejected && !logged) {
     const amount = getPeriodIncome(state.profile);
     if (amount > 0) {
       adjustLiquidity("account", amount, "ingreso-periodico");
@@ -7146,6 +7529,10 @@ function ensurePeriodIncomeApplication() {
       status.amount = amount;
       status.location = "account";
       status.appliedAt = new Date().toISOString();
+      const ledger = [...(state.periodIncomeApplied || []), { windowStart: window.start, windowEnd: window.end, status: "applied", amount, appliedAt: status.appliedAt }];
+      // Only the ledger entries that could still overlap "today" after a plausible
+      // date edit matter for the duplicate-deposit guard above; keep it bounded.
+      state.periodIncomeApplied = ledger.slice(-12);
     }
   }
 }
@@ -7291,29 +7678,6 @@ function spendByCategory() {
 
 function monthlyLabeledSpend() {
   return getMonthlyLabeledSpend(state, todayKey());
-}
-
-function dominantMoneyScript() {
-  const labels = {
-    worship: {
-      name: "Buscar más dinero",
-      guidance: "Convierte deseos grandes en metas concretas antes de gastar."
-    },
-    avoidance: {
-      name: "Evitar mirar dinero",
-      guidance: "Mira solo el siguiente paso y evita cargar todo el peso de una vez."
-    },
-    status: {
-      name: "Dinero como estatus",
-      guidance: "Separa tu valor personal de compras visibles y comparaciones."
-    },
-    vigilance: {
-      name: "Control y seguridad",
-      guidance: "Automatiza seguridad y deja un margen claro para gastar sin culpa."
-    }
-  };
-  const key = Object.entries(state.profile.moneyScripts).sort((a, b) => b[1] - a[1])[0][0];
-  return labels[key];
 }
 
 function futureFreedom(plan) {
@@ -7480,9 +7844,7 @@ function formatMoneyInputValue(value) {
   if (!digits) {
     return "";
   }
-  return new Intl.NumberFormat("es-CO", {
-    maximumFractionDigits: 0
-  }).format(Number(digits));
+  return PLAIN_NUMBER_FORMATTER.format(Number(digits));
 }
 
 function positionAfterDigitCount(value, digitCount) {
@@ -7542,32 +7904,18 @@ function normalizePayday(value) {
   return clamp(day, 1, 28);
 }
 
-function monthlyFromSemester(amount, months) {
-  return Math.round(numberFrom(amount) / Math.max(1, Number(months) || STUDENT_SEMESTER_MONTHS));
-}
-
-function monthlyFromWeekly(amount) {
-  return Math.round((numberFrom(amount) * 52) / 12);
-}
-
+// Antes esta funcion tenia un mapa de montos por defecto indexado por los ids de la
+// plantilla "estudiante" (gas, dates, gifts, university, flex). Corria sobre TODAS las
+// categorias en cada migracion, y como uniqueCategoryId() convierte el nombre en slug,
+// una categoria que el usuario llamara "Gas" recibia el id `gas` y podia heredar
+// $30.000 semanales que nunca escribio.
 function normalizeBudgetJobs(jobs) {
-  const defaults = {
-    gas: { amount: STUDENT_WEEKLY_GAS, cadence: "weekly" },
-    dates: { amount: 45_000, cadence: "monthly" },
-    gifts: { amount: 20_000, cadence: "monthly" },
-    university: { amount: 25_000, cadence: "monthly" },
-    flex: { amount: 9_000, cadence: "monthly" }
-  };
-
-  return jobs.map((job) => {
-    const known = defaults[job.id] || {};
-    return {
-      ...job,
-      amount: Number(job.amount ?? known.amount ?? job.budget ?? 0),
-      cadence: ["weekly", "biweekly", "monthly", "semester", "yearly", "period"].includes(job.cadence) ? job.cadence : known.cadence || "monthly",
-      updated_at: job.updated_at || ""
-    };
-  });
+  return jobs.map((job) => ({
+    ...job,
+    amount: Number(job.amount ?? job.budget ?? 0),
+    cadence: JOB_CADENCE_VALUES.includes(job.cadence) ? job.cadence : "monthly",
+    updated_at: job.updated_at || ""
+  }));
 }
 
 function normalizeTransactions(transactions) {
@@ -7728,7 +8076,7 @@ function normalizeDailyReminder(reminder = {}) {
 
 function isTemplateBudgetJobs(jobs) {
   return Boolean(jobs?.length) && jobs.every((job) => {
-    const template = STUDENT_BUDGET_JOBS.find((item) => item.id === job.id);
+    const template = LEGACY_TEMPLATE_BUDGET_JOBS.find((item) => item.id === job.id);
     if (!template) {
       return false;
     }
@@ -7837,30 +8185,29 @@ function relativeUnlock(dateValue) {
   return `en ${hours} horas`;
 }
 
+function getMoneyFormatter(currency) {
+  let formatter = moneyFormatterCache.get(currency);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat("es-CO", { style: "currency", currency, maximumFractionDigits: 0 });
+    moneyFormatterCache.set(currency, formatter);
+  }
+  return formatter;
+}
+
 function formatDate(dateValue) {
-  return new Intl.DateTimeFormat("es-CO", {
-    month: "short",
-    day: "numeric"
-  }).format(new Date(`${dateValue}T12:00:00`));
+  return SHORT_DATE_FORMATTER.format(new Date(`${dateValue}T12:00:00`));
 }
 
 function formatShortDate(dateValue) {
-  return new Intl.DateTimeFormat("es-CO", {
-    month: "short",
-    day: "numeric"
-  }).format(new Date(`${dateValue}T12:00:00`)).replace(".", "");
+  return SHORT_DATE_FORMATTER.format(new Date(`${dateValue}T12:00:00`)).replace(".", "");
 }
 
 function eventMonthLabel(dateValue) {
-  return new Intl.DateTimeFormat("es-CO", {
-    month: "short"
-  }).format(new Date(`${dateValue}T12:00:00`)).replace(".", "");
+  return EVENT_MONTH_FORMATTER.format(new Date(`${dateValue}T12:00:00`)).replace(".", "");
 }
 
 function eventDayLabel(dateValue) {
-  return new Intl.DateTimeFormat("es-CO", {
-    day: "2-digit"
-  }).format(new Date(`${dateValue}T12:00:00`));
+  return EVENT_DAY_FORMATTER.format(new Date(`${dateValue}T12:00:00`));
 }
 
 function formatRelativeEventDate(dateValue) {
@@ -7877,19 +8224,11 @@ function formatRelativeEventDate(dateValue) {
 function movementDayLabel(dateValue) {
   if (dateValue === todayKey()) return "Hoy";
   if (dateValue === previousDay(todayKey())) return "Ayer";
-  return new Intl.DateTimeFormat("es-CO", {
-    weekday: "long",
-    month: "short",
-    day: "numeric"
-  }).format(new Date(`${dateValue}T12:00:00`));
+  return MOVEMENT_DAY_FORMATTER.format(new Date(`${dateValue}T12:00:00`));
 }
 
 function formatMoney(value) {
-  return new Intl.NumberFormat("es-CO", {
-    style: "currency",
-    currency: state.profile.currency || "COP",
-    maximumFractionDigits: 0
-  }).format(Number(value || 0));
+  return getMoneyFormatter(state.profile.currency || "COP").format(Number(value || 0));
 }
 
 function formatCompactMoney(value) {
@@ -7897,7 +8236,7 @@ function formatCompactMoney(value) {
   if (Math.abs(amount) < 1000) {
     return formatMoney(amount);
   }
-  return `$${new Intl.NumberFormat("es-CO", { maximumFractionDigits: 1 }).format(amount / 1000)}k`;
+  return `$${COMPACT_MONEY_FORMATTER.format(amount / 1000)}k`;
 }
 
 function clamp(value, min, max) {

@@ -76,6 +76,58 @@ test("returns a current saved session immediately while Supabase reconnects", as
   releaseSetSession();
 });
 
+test("returns the stale backup instead of throwing when the session check fails due to network issues", async () => {
+  const backupKey = "finanzas-conductuales:cloud-session:v1";
+  const backup = {
+    access_token: "stale-access",
+    expires_at: Math.floor(Date.now() / 1000) - 3600,
+    refresh_token: "stale-refresh",
+    user: { id: "user-stale", email: "stale@example.com" }
+  };
+  const storage = createStorage({ [backupKey]: JSON.stringify(backup) });
+  const cloud = {
+    auth: {
+      getSession: async () => {
+        throw new TypeError("Failed to fetch");
+      }
+    }
+  };
+  installCloudMock(cloud, storage);
+
+  const syncClient = await import(`../sync-client.js?network-fallback-test=${Date.now()}`);
+  const session = await syncClient.getCloudSession();
+
+  assert.equal(session.user.email, "stale@example.com");
+});
+
+test("does not fall back to the backup when Supabase confirms the session is really invalid", async () => {
+  const backupKey = "finanzas-conductuales:cloud-session:v1";
+  const backup = {
+    access_token: "stale-access",
+    expires_at: Math.floor(Date.now() / 1000) - 3600,
+    refresh_token: "stale-refresh",
+    user: { id: "user-stale", email: "stale@example.com" }
+  };
+  const storage = createStorage({ [backupKey]: JSON.stringify(backup) });
+  const cloud = {
+    auth: {
+      getSession: async () => ({ data: { session: null }, error: null }),
+      setSession: async () => ({
+        data: { session: null },
+        error: { message: "Invalid Refresh Token: Refresh Token Not Found" }
+      })
+    }
+  };
+  installCloudMock(cloud, storage);
+
+  const syncClient = await import(`../sync-client.js?real-signout-test=${Date.now()}`);
+
+  await assert.rejects(
+    () => syncClient.getCloudSession(),
+    (error) => error.message === "Invalid Refresh Token: Refresh Token Not Found"
+  );
+});
+
 test("sign in persists the backup and explicit sign out removes it", async () => {
   const backupKey = "finanzas-conductuales:cloud-session:v1";
   const session = {

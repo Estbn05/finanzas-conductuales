@@ -125,6 +125,15 @@ export function getCloudClient() {
   return client;
 }
 
+// A network/timeout failure here doesn't mean the user signed out — it means we
+// couldn't reach Supabase to confirm either way. A genuine auth rejection (revoked
+// session, bad refresh token) comes back as a different error shape from Supabase and
+// does NOT match this, so it still propagates and correctly shows the sign-in screen.
+function isNetworkError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return message.includes("fetch") || message.includes("tardo demasiado") || message.includes("network");
+}
+
 export async function getCloudSession() {
   const cloud = getCloudClient();
   if (!cloud) {
@@ -138,7 +147,18 @@ export async function getCloudSession() {
     return backup;
   }
 
-  return getStoredCloudSession(cloud, backup);
+  try {
+    return await getStoredCloudSession(cloud, backup);
+  } catch (error) {
+    // Treating "can't reach Supabase" as "signed out" would lock the user out of their
+    // own local data over a connectivity hiccup (see shouldShowAuthGate() in app.js).
+    // If we have a backup at all, hand it back optimistically — autoRefreshToken and
+    // onAuthStateChange pick up the real session once connectivity returns.
+    if (backup && isNetworkError(error)) {
+      return backup;
+    }
+    throw error;
+  }
 }
 
 export function onCloudAuthChange(callback) {

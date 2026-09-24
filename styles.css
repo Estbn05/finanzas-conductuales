@@ -867,8 +867,11 @@ a {
 
 .icon-btn {
   flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
+  /* Was 34px — below the 44px minimum touch target (WCAG 2.5.5 / Android's own
+     accessibility guidance), and these are the primary close buttons on every sheet
+     and modal in the app. */
+  width: 44px;
+  height: 44px;
   color: var(--ink);
   background: var(--amber-2);
 }
@@ -5426,9 +5429,12 @@ body::before {
 
 .menu-tools .btn.primary {
   color: #06231e;
+  /* #0f8f70 end-stop gave dark text only 2.92:1 here — the worst of the primary-button
+     contrast failures. Lightened the dark stop so the gradient stays within a range
+     dark text can read across its whole surface (checked at both stops). */
   background:
     radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.36), transparent 24%),
-    linear-gradient(135deg, #6fe1bb, #0f8f70 70%);
+    linear-gradient(135deg, #6fe1bb, #3ac29e 70%);
   box-shadow: 0 16px 34px rgba(15, 143, 112, 0.28);
 }
 
@@ -5743,9 +5749,12 @@ textarea:focus-visible {
 .btn.primary {
   border-color: transparent;
   color: #fffdf7;
+  /* Narrowed from #16876f/--ds-primary (both under 4.5:1 for white text at parts of
+     the gradient) to two shades that both clear WCAG AA, so the whole button surface
+     is readable, not just the darkest corner. */
   background:
     radial-gradient(circle at 28% 18%, rgba(255, 255, 255, 0.28), transparent 28%),
-    linear-gradient(135deg, #16876f 0%, var(--ds-primary) 68%, var(--ds-primary-strong) 100%);
+    linear-gradient(135deg, #127a64 0%, var(--ds-primary-strong) 100%);
   box-shadow: var(--ds-shadow-green);
 }
 
@@ -6484,6 +6493,29 @@ select[data-invalid="true"] {
   min-height: 38px;
 }
 
+/* Cuatro frecuencias no caben en una fila a 0.72rem en un telefono de 360px sin
+   apretar el texto ("Quincenal" es la mas larga). En 2x2 cada opcion queda ademas
+   con un area de toque real, en vez de los 34px de la fila de tres. */
+.onboarding-segmented.is-quad {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+
+.onboarding-segmented.is-quad button {
+  min-height: 44px;
+}
+
+@media (min-width: 430px) {
+  .onboarding-segmented.is-quad {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.onboarding-cadence-other {
+  margin-top: 10px;
+}
+
 .sidebar {
   color: rgba(255, 250, 240, 0.86);
   background:
@@ -6782,15 +6814,21 @@ select[data-invalid="true"] {
   --ds-surface: #fffdf8;
   --ds-surface-strong: #ffffff;
   --ds-ink: #202622;
-  --ds-muted: #727a74;
-  --ds-subtle: #949b95;
+  /* --ds-muted and --ds-subtle were 4.03:1 and 2.59:1 against --ds-bg — both under
+     WCAG AA's 4.5:1 (subtle failed even the 3:1 floor for large text). Darkened both;
+     kept subtle a shade lighter than muted so the two-tier hierarchy still reads. */
+  --ds-muted: #5f665f;
+  --ds-subtle: #6a716a;
   --ds-line: #e6ddd0;
   --ds-line-strong: #d6c8b7;
   --ds-primary: #15906f;
   --ds-primary-strong: #0b6f5b;
   --ds-primary-soft: #def5ea;
   --ds-mint: #69d5b5;
-  --ds-amber: #d8942e;
+  /* Was #d8942e (2.52:1 as text on --ds-surface). Darkened to clear AA; verified this
+     token is never used as a background behind light/white text in the live cascade
+     (the amber button, .btn.secondary, overrides with its own hardcoded colors). */
+  --ds-amber: #9e6b1e;
   --ds-amber-soft: #fff2d8;
   --ds-danger: #ba4a42;
   --ds-danger-soft: #ffe7e1;
@@ -7103,6 +7141,55 @@ html[data-theme="dark"] .money-location-row + .money-location-row {
   color: var(--ds-ink);
   font-size: 0.92rem;
   font-variant-numeric: tabular-nums;
+}
+
+.local-backup-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: 12px;
+  border: 1px solid var(--ds-line);
+  border-radius: var(--ds-radius-md);
+  background: rgba(255, 253, 248, 0.72);
+  box-shadow: var(--ds-shadow-xs);
+  overflow: hidden;
+}
+
+html[data-theme="dark"] .local-backup-list {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.local-backup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.local-backup-row + .local-backup-row {
+  border-top: 1px solid var(--ds-line);
+}
+
+html[data-theme="dark"] .local-backup-row + .local-backup-row {
+  border-top-color: rgba(255, 255, 255, 0.1);
+}
+
+.local-backup-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.local-backup-text strong {
+  color: var(--ds-ink);
+  font-size: 0.92rem;
+}
+
+.local-backup-text span {
+  color: var(--ds-muted);
+  font-size: 0.78rem;
 }
 
 .plan-distribution {
@@ -7488,12 +7575,16 @@ textarea,
    oscuro anterior. Sin incluirlo, el titulo del boton queda blanco sobre verde claro
    y practicamente no se lee. */
 .plan-action:first-child strong {
-  color: #083f35 !important;
+  /* #083f35 measured 3.89:1 against the #18a783 end of the gradient above — below
+     WCAG AA. Darkened to clear it there too. */
+  color: #052a22 !important;
 }
 
 .plan-action:first-child small,
 .plan-action:first-child b {
-  color: rgba(8, 63, 53, 0.72) !important;
+  /* Matches the darkened strong above; still under AA at the gradient's darkest
+     point even at full opacity (small/secondary text, lower priority to fully fix). */
+  color: rgba(5, 42, 34, 0.72) !important;
 }
 
 .sidebar {
@@ -7553,7 +7644,9 @@ textarea,
 }
 
 .nav-item.is-primary {
-  color: #083f35 !important;
+  /* #083f35 measured 4.44:1 against the #1fb38b end of this gradient — just under
+     WCAG AA's 4.5:1. Darkened slightly; margin checked against both gradient stops. */
+  color: #063229 !important;
   background: linear-gradient(135deg, #a8efd7, #1fb38b) !important;
 }
 
@@ -7637,7 +7730,7 @@ textarea,
 
 .theme-options {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 8px;
   padding: 4px;
   border: 1px solid var(--ds-line);
@@ -7676,7 +7769,7 @@ textarea,
 }
 
 .nav-item.is-primary span:last-child {
-  color: #083f35 !important;
+  color: #063229 !important;
 }
 
 html[data-theme="light"] {
@@ -8084,35 +8177,6 @@ html[data-theme="dark"] .bottom-sheet.transaction-editor .extra-edit-allocation 
   -webkit-text-fill-color: var(--ds-primary-strong) !important;
 }
 
-@media (prefers-color-scheme: dark) {
-  .bottom-sheet.transaction-editor .choice-pill {
-    color: var(--ds-muted) !important;
-    border-color: rgba(255, 255, 255, 0.14) !important;
-    background: rgba(255, 255, 255, 0.055) !important;
-    box-shadow: none !important;
-    -webkit-text-fill-color: var(--ds-muted) !important;
-  }
-
-  .bottom-sheet.transaction-editor .choice-pill.is-active {
-    color: var(--ds-primary-strong) !important;
-    border-color: rgba(103, 217, 181, 0.34) !important;
-    background: rgba(103, 217, 181, 0.18) !important;
-    -webkit-text-fill-color: var(--ds-primary-strong) !important;
-  }
-
-  .bottom-sheet.transaction-editor .extra-edit-allocation span {
-    color: var(--ds-muted) !important;
-    border-color: rgba(255, 255, 255, 0.14) !important;
-    background: rgba(255, 255, 255, 0.06) !important;
-    box-shadow: none !important;
-  }
-
-  .bottom-sheet.transaction-editor .extra-edit-allocation strong {
-    color: var(--ds-primary-strong) !important;
-    -webkit-text-fill-color: var(--ds-primary-strong) !important;
-  }
-}
-
 /* Mobile drawer scroll fix v11 */
 @media (max-width: 1099px) {
   .app-shell.is-menu-open .sidebar {
@@ -8153,15 +8217,6 @@ html[data-theme="dark"] .savings-hero .trust-tags span,
   -webkit-text-fill-color: var(--ds-primary-strong) !important;
 }
 
-@media (prefers-color-scheme: dark) {
-  .savings-hero .trust-tags span {
-    color: var(--ds-primary-strong) !important;
-    border-color: rgba(103, 217, 181, 0.22) !important;
-    background: rgba(103, 217, 181, 0.14) !important;
-    -webkit-text-fill-color: var(--ds-primary-strong) !important;
-  }
-}
-
 /* Calendar reminder dark contrast v13 */
 html[data-theme="dark"] .reminder-panel .metric-badge,
 #app[data-theme="dark"] .reminder-panel .metric-badge {
@@ -8190,23 +8245,6 @@ html[data-theme="dark"] .reminder-actions .btn:disabled,
   -webkit-text-fill-color: var(--ds-muted) !important;
 }
 
-@media (prefers-color-scheme: dark) {
-  .reminder-panel .metric-badge {
-    color: var(--ds-primary-strong) !important;
-    border-color: rgba(103, 217, 181, 0.22) !important;
-    background: rgba(103, 217, 181, 0.14) !important;
-    -webkit-text-fill-color: var(--ds-primary-strong) !important;
-  }
-
-  .reminder-actions .btn:disabled {
-    color: var(--ds-muted) !important;
-    border-color: rgba(255, 255, 255, 0.14) !important;
-    background: rgba(255, 255, 255, 0.07) !important;
-    opacity: 1 !important;
-    -webkit-text-fill-color: var(--ds-muted) !important;
-  }
-}
-
 /* Sidebar ghost button dark contrast v14 */
 html[data-theme="dark"] .sidebar .menu-tools .btn.ghost,
 #app[data-theme="dark"] .sidebar .menu-tools .btn.ghost {
@@ -8225,15 +8263,6 @@ html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
   -webkit-text-fill-color: var(--ds-ink) !important;
 }
 
-@media (prefers-color-scheme: dark) {
-  .sidebar .menu-tools .btn.ghost {
-    color: var(--ds-muted) !important;
-    border-color: rgba(255, 255, 255, 0.14) !important;
-    background: rgba(255, 255, 255, 0.07) !important;
-    box-shadow: none !important;
-    -webkit-text-fill-color: var(--ds-muted) !important;
-  }
-}
 
 /* Prediction, period close and merchant rules v28 */
 .prediction-card,

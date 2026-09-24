@@ -36,7 +36,7 @@ export function calculatePlan(state, today) {
   );
   const projectedPeriodSavings = summary.savingsRemaining + suggestedPeriodSavings;
   const savingsCapacityGap = Math.max(0, idealPeriodSavings - projectedPeriodSavings);
-  const savings = Math.round(projectedPeriodSavings / Math.max(1, summary.months));
+  const savings = Math.round(projectedPeriodSavings / summary.months);
   const expenses = Math.max(0, income - savings);
 
   return {
@@ -289,11 +289,12 @@ function predictionMinimumObservedDays(totalDays) {
 
 function freeImpactForPrediction(state, summary, today) {
   const validCategoryIds = new Set((state.budgetJobs || []).map((job) => job.id));
+  const window = budgetWindow(state.profile, today);
   const spent = {};
   let ignoredOneOffSpent = 0;
 
   (state.transactions || [])
-    .filter((transaction) => isInBudgetWindow(transaction.date, state.profile, today))
+    .filter((transaction) => isDateInWindow(transaction.date, window))
     .forEach((transaction) => {
       const amount = Number(transaction.amount || 0);
       if (transaction.oneOff || transaction.excludeFromPrediction) {
@@ -340,8 +341,9 @@ export function isSavingsJob(job) {
 }
 
 export function extraIncomeForPeriod(state, today) {
+  const window = budgetWindow(state.profile, today);
   return (state.budgetExtras || [])
-    .filter((extra) => isInBudgetWindow(extra.date, state.profile, today))
+    .filter((extra) => isDateInWindow(extra.date, window))
     .reduce((sum, extra) => sum + Number(extra.amount || 0), 0);
 }
 
@@ -364,8 +366,9 @@ export function categoryStatus(state, today) {
 
 export function spendByCategory(state, today) {
   const validCategoryIds = new Set((state.budgetJobs || []).map((job) => job.id));
+  const window = budgetWindow(state.profile, today);
   return state.transactions
-    .filter((transaction) => isInBudgetWindow(transaction.date, state.profile, today))
+    .filter((transaction) => isDateInWindow(transaction.date, window))
     .reduce((acc, transaction) => {
       const category =
         transaction.labeled && validCategoryIds.has(transaction.category)
@@ -377,8 +380,9 @@ export function spendByCategory(state, today) {
 }
 
 export function monthlyLabeledSpend(state, today) {
+  const window = budgetWindow(state.profile, today);
   return state.transactions
-    .filter((transaction) => transaction.labeled && isInBudgetWindow(transaction.date, state.profile, today))
+    .filter((transaction) => transaction.labeled && isDateInWindow(transaction.date, window))
     .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
 }
 
@@ -415,8 +419,11 @@ export function budgetWindow(profile, today) {
   };
 }
 
-export function isInBudgetWindow(dateValue, profile, today) {
-  const window = budgetWindow(profile, today);
+// Takes an already-computed window instead of (profile, today) so callers that filter
+// an array of transactions/extras compute budgetWindow() once, not once per item —
+// budgetWindow() walks the period cadence forward from periodStart to find today's
+// window, so recomputing it per item made filtering an O(n * periods-since-start) scan.
+export function isDateInWindow(dateValue, window) {
   const date = String(dateValue).slice(0, 10);
   return date >= window.start && date < window.end;
 }

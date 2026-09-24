@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "1.0.9";
+const ASSET_VERSION = "1.1.10";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -66,8 +66,10 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(app.includes('class="brand-mark-icon"'));
   assert.equal(app.includes("brand-ring-spark"), false);
   assert.equal(app.includes('<span class="brand-mark">FC</span>'), false);
-  assert.ok(app.includes('data-theme-choice="light"'));
-  assert.ok(app.includes('data-theme-choice="dark"'));
+  assert.ok(app.includes('{ value: "system", label: "Sistema" }'));
+  assert.ok(app.includes('{ value: "light", label: "Claro" }'));
+  assert.ok(app.includes('{ value: "dark", label: "Oscuro" }'));
+  assert.ok(app.includes('data-theme-choice="${option.value}"'));
   assert.ok(app.includes("function applyThemePreference()"));
   assert.ok(app.includes('document.documentElement.dataset.theme = theme'));
   assert.ok(app.includes('theme: normalizeTheme'));
@@ -426,13 +428,42 @@ test("authenticated new users get a three-step financial onboarding", async () =
   assert.ok(styles.includes("-webkit-text-fill-color: #e8f5ee !important"));
 });
 
+// Regresion: createDefaultState() describia a una persona concreta (un estudiante con
+// ingreso semestral de $1.750.000, gasolina semanal y un perfil de money scripts ya
+// respondido). Esos numeros aparecian ya escritos en el formulario del primer usuario
+// que abriera la app, y Datos le informaba un "Patron dominante" deducido de
+// puntuaciones que nadie contesto. Un perfil nuevo no debe afirmar nada del usuario.
+test("a new profile carries no invented data about the user", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const defaults = app.slice(app.indexOf("function createDefaultState()"), app.indexOf("function loadState()"));
+
+  assert.equal(/1_750_000|1750000/.test(app), false, "el ingreso de la plantilla no debe existir en ningun sitio");
+  assert.match(defaults, /incomeAmount: 0/);
+  assert.match(defaults, /incomeCadence: ""/);
+  assert.match(defaults, /incomeType: ""/);
+  assert.match(defaults, /committedExpenses: 0/);
+
+  for (const removed of ["moneyScripts", "financialAnxiety", "selfEfficacy", "dominantMoneyScript"]) {
+    assert.equal(app.includes(removed), false, `${removed} debe haber desaparecido por completo`);
+  }
+
+  // El onboarding no responde por el usuario: ni monto, ni cadencia, ni categorias.
+  assert.ok(app.includes('value="${income > 0 ? income : ""}"'));
+  assert.equal(app.includes('["Comida", 0.18, true]'), false, "ninguna categoria debe venir premarcada");
+  // Y ofrece la cadencia quincenal, que antes caia en "Otro" = semestral.
+  assert.ok(app.includes('data-onboarding-cadence="biweekly"'));
+});
+
 test("saving Mis datos uses one native form submission per section", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
-  const diagnosisModal = app.slice(app.indexOf("function renderDiagnosisModal()"), app.indexOf("function renderScriptQuestion"));
+  const diagnosisModal = app.slice(app.indexOf("function renderDiagnosisModal()"), app.indexOf("function renderDiagnosisPlanFields"));
   const bindEvents = app.slice(app.indexOf("function bindEvents()"), app.indexOf("function bindOnboardingFlowV2"));
 
   assert.ok(app.includes("const DIAGNOSIS_SECTIONS = {"));
-  assert.ok(app.includes('plan: {') && app.includes('balances: {') && app.includes('behavior: {'));
+  assert.ok(app.includes('plan: {') && app.includes('balances: {'));
+  // La seccion "Perfil conductual" se elimino: no alimentaba ninguna decision de la
+  // app y se mostraba con respuestas que el usuario nunca dio.
+  assert.equal(app.includes('behavior: {'), false);
   assert.ok(diagnosisModal.includes('data-diagnosis-section="${sectionKey}"'));
   assert.ok(diagnosisModal.includes('<button class="btn primary" type="submit">Guardar</button>'));
   assert.equal(diagnosisModal.includes("data-diagnosis-save"), false);
@@ -440,7 +471,7 @@ test("saving Mis datos uses one native form submission per section", async () =>
   assert.equal(bindEvents.includes("[data-diagnosis-save]"), false);
   assert.ok(app.includes('data-action="open-diagnosis" data-section="plan"'));
   assert.ok(app.includes('data-action="open-diagnosis" data-section="balances"'));
-  assert.ok(app.includes('data-action="open-diagnosis" data-section="behavior"'));
+  assert.equal(app.includes('data-section="behavior"'), false);
 });
 
 test("movements can be exported as a CSV with expenses negative and income positive", async () => {
@@ -530,7 +561,11 @@ test("home screen widget shows free money and stays in sync with app state", asy
   assert.ok(app.includes("function nativeWidgetBridge()"));
   assert.ok(app.includes("window.Capacitor?.Plugins?.WidgetBridge"));
   assert.ok(app.includes("function syncHomeWidget()"));
-  assert.ok(app.includes("bridge.update({ freeMoney: formatMoney(summary.freeRemaining), periodLabel })"));
+  // Widgets render outside the lock screen, so the amount must not leak while the app
+  // is PIN-locked — same principle as allowBackup="false" for the same file.
+  const syncWidgetFn = app.slice(app.indexOf("function syncHomeWidget()"), app.indexOf("const BACK_CLOSE_SELECTORS"));
+  assert.ok(syncWidgetFn.includes('lockConfig.enabled ? "Bloqueado" : formatMoney(summary.freeRemaining)'));
+  assert.ok(syncWidgetFn.includes("bridge.update({ freeMoney, periodLabel })"));
   const saveStateFn = app.slice(app.indexOf("function saveState(options = {})"), app.indexOf("async function initializeCloudSync()"));
   assert.ok(saveStateFn.includes("syncHomeWidget();"));
   assert.ok(app.includes("render();\ninitializeNativeNotificationActions();"));
@@ -684,6 +719,16 @@ test("PIN lock protects the app with device-local hashed storage separate from s
   assert.ok(styles.includes(".lock-keypad"));
   assert.ok(styles.includes(".lock-dot"));
   assert.ok(styles.includes('html[data-theme="dark"] .lock-key'));
+
+  // Changing an existing PIN must verify the current one first, not jump straight to
+  // "set" a new one — otherwise anyone holding an already-unlocked phone could swap in
+  // their own PIN. First-time setup (no PIN yet) still goes straight to "set".
+  assert.ok(app.includes('lockMode = lockConfig.enabled ? "verify-change" : "set";'));
+  assert.ok(app.includes('if (lockMode === "verify-change") {'));
+
+  // Copy must not claim the PIN encrypts/protects data — it only gates the app's UI.
+  assert.equal(app.includes("Protege tus finanzas en este dispositivo."), false);
+  assert.ok(app.includes("No cifra tus datos guardados en el teléfono."));
 });
 
 test("biometric unlock layers on top of the PIN with a native BiometricPrompt plugin", async () => {
@@ -708,6 +753,11 @@ test("biometric unlock layers on top of the PIN with a native BiometricPrompt pl
   assert.ok(mainActivity.includes("registerPlugin(BiometricAuthPlugin.class);"));
   assert.ok(manifest.includes("android.permission.USE_BIOMETRIC"));
   assert.ok(buildGradle.includes("androidx.biometric:biometric"));
+
+  // allowBackup="true" would let Android's Auto Backup upload localStorage (including
+  // the Supabase refresh token stored in the clear) to the user's Google Drive, outside
+  // any control the PIN lock has.
+  assert.ok(manifest.includes('android:allowBackup="false"'));
 
   // JS: biometric is an optional layer, PIN remains the fallback.
   assert.ok(app.includes("function nativeBiometric()"));
@@ -931,7 +981,12 @@ test("authentication gates onboarding and signed-in users can close their sessio
   assert.ok(app.includes('"recover-auth": recoverAuthStartup'));
   assert.equal(app.includes('data-action="reload-app"'), false);
   assert.ok(app.includes("if (!cloudState.sessionReady) {"));
-  assert.ok(app.includes("return cloudState.sessionReady && !cloudState.signedIn;"));
+  // Offline-first: signedIn=false must not gate the app when local data already
+  // proves this device was previously authenticated — only a real sign-out (which
+  // wipes local data via clearLocalUserState()) should show the login wall.
+  const authGateFn = app.slice(app.indexOf("function shouldShowAuthGate()"), app.indexOf("function profileNeedsOnboarding()"));
+  assert.ok(authGateFn.includes("if (!cloudState.sessionReady || cloudState.signedIn) {"));
+  assert.ok(authGateFn.includes("return !hasMeaningfulLocalData(state);"));
   assert.ok(app.includes("Estamos verificando automáticamente si ya tienes una sesión iniciada."));
   assert.ok(app.includes("Continuar al acceso"));
   assert.equal(app.includes("Estamos cargando tu cuenta y tus datos antes de mostrar el formulario inicial."), false);
@@ -1115,8 +1170,49 @@ test("opening an expense form does not trigger cloud sync or replace active form
   assert.ok(app.includes('"open-expense"'));
   assert.ok(app.includes("!interfaceOnlyActions.has(action)"));
   assert.ok(app.includes("function renderCloudStatusChange()"));
-  assert.ok(app.includes("quickExpenseOpen || state.showDiagnosis || pendingExtraAllocation"));
+  // renderCloudStatusChange ya no lleva su propia lista de superficies abiertas: esa
+  // copia se quedo corta (le faltaban planSheet y el onboarding). Ahora delega en
+  // hasOpenUserInput(), que es la unica definicion.
+  assert.equal(app.includes("quickExpenseOpen || state.showDiagnosis || pendingExtraAllocation"), false);
+  assert.ok(app.includes("function hasOpenUserInput()"));
   assert.ok(app.includes("saveState({ sync: false, touch: false });"));
+});
+
+// Regresion: render() reconstruye el DOM entero (app.innerHTML = ...) y los formularios
+// son no controlados, asi que lo escrito vive solo en el DOM. Cualquier render que el
+// usuario no pidio se lo borraba. Los disparadores reales eran mucho mas frecuentes que
+// un corte de red: el temporizador de 8s del "Deshacer" y, peor, el aviso de validacion
+// ("Efectivo solo tiene $X"), que limpiaba el gasto que el usuario debia corregir.
+test("background re-renders never wipe a form the user is filling in", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const guard = app.slice(app.indexOf("function hasOpenUserInput()"), app.indexOf("function renderBackground()"));
+
+  for (const surface of [
+    "quickExpenseOpen",
+    "planSheet",
+    "state.showDiagnosis",
+    "profileNeedsOnboarding()",
+    "pendingExtraAllocation",
+    "editingTransactionId",
+    "editingExtraId",
+    "quickClassifyQueue.length",
+    "pendingJobRemovalId",
+    "deleteAccountOpen"
+  ]) {
+    assert.ok(guard.includes(surface), `hasOpenUserInput() debe cubrir ${surface}`);
+  }
+
+  // Los eventos incidentales no pueden llamar a render() directamente.
+  assert.ok(app.includes('window.addEventListener("online", renderBackground)'));
+  assert.ok(app.includes('window.addEventListener("offline", renderBackground)'));
+  assert.equal(app.includes('window.addEventListener("online", render)'), false);
+  assert.equal(app.includes('window.addEventListener("offline", render)'), false);
+
+  // Mostrar u ocultar un aviso toca solo su nodo, nunca la app entera.
+  assert.ok(app.includes("function paintSnackbar()"));
+  const snackbars = app.slice(app.indexOf("function showNoticeSnackbar("), app.indexOf("function paintSnackbar()"));
+  assert.ok(snackbars.includes("paintSnackbar();"));
+  assert.equal(/\n\s+render\(\);/.test(snackbars), false, "el snackbar no debe llamar a render()");
 });
 
 test("Android back navigation closes the quick expense form before leaving the app", async () => {
@@ -1273,7 +1369,7 @@ test("every form keeps readable controls in Android PWA themes", async () => {
   // later block, but an earlier rule had left its title near-white (#fff9ee) for the dark
   // background that block replaced — leaving white-on-light-green. `strong` has to be
   // repainted alongside `small`/`b` or the button's own title is the hardest part to read.
-  assert.match(styles, /\.plan-action:first-child strong \{\s*color: #083f35 !important;/);
+  assert.match(styles, /\.plan-action:first-child strong \{[\s\S]{0,300}color: #052a22 !important;/);
 
   assert.ok(styles.includes("--field-bg: #ffffff"));
   assert.ok(styles.includes("--field-bg: #1d2421"));
@@ -1384,7 +1480,7 @@ test("mockup system covers progressive plan, correction and special states", asy
   assert.ok(app.includes("Tus datos locales siguen disponibles."));
   assert.ok(app.includes('type="range" min="0" max="100"'));
   assert.ok(app.includes("Plan básico"));
-  assert.ok(app.includes("Perfil conductual"));
+  assert.ok(app.includes("<strong>Saldos</strong>"));
   assert.ok(app.includes("data-onboarding-skip"));
   assert.ok(styles.includes(".sheet-backdrop"));
   assert.ok(styles.includes(".destructive-consequence"));
@@ -1410,6 +1506,61 @@ test("category creation validates against freeRemaining, not the gross freeBudge
   const previewFn = app.slice(app.indexOf("function bindPlanCategoryPreview"), app.indexOf("function bindSavingsSimulatorPreview"));
   assert.ok(previewFn.includes("budgetSummary().freeRemaining"));
   assert.ok(!previewFn.includes("budgetSummary().freeBudget"));
+});
+
+// Regression: none of the 13-15 sheet/modal backdrops closed on tap-outside, the
+// universal Android gesture for dismissing a bottom sheet. Fixed by giving each
+// backdrop the same data-action as its sheet's own close/cancel button, guarded so
+// clicks that bubble up from the sheet's own content don't also trigger it.
+test("sheet and modal backdrops close on tap-outside, and clicks inside the sheet don't bubble into closing it", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
+
+  const guardFn = app.slice(app.indexOf("function handleAction(event)"), app.indexOf("function handleAction(event)") + 700);
+  assert.ok(guardFn.includes("event.currentTarget !== event.target"));
+  assert.ok(guardFn.includes('classList.contains("sheet-backdrop")'));
+  assert.ok(guardFn.includes('classList.contains("quick-expense-backdrop")'));
+  assert.ok(guardFn.includes('classList.contains("modal-backdrop")'));
+
+  const expectedBackdropActions = [
+    'role="presentation" data-action="close-prediction-details"',
+    'role="presentation" data-action="close-period-report"',
+    'role="presentation" data-action="cancel-remove-job"',
+    'role="presentation" data-action="cancel-restore-backup"',
+    'role="presentation" data-action="cancel-delete-account"',
+    'role="presentation" data-action="close-expense"',
+    'role="presentation" data-action="close-transaction-editor"',
+    'role="presentation" data-action="close-quick-classify"',
+    'role="presentation" data-action="close-extra-editor"',
+    'role="presentation" data-action="close-diagnosis"',
+    'role="presentation" data-action="cancel-extra-allocation"'
+  ];
+  for (const needle of expectedBackdropActions) {
+    assert.ok(app.includes(needle), `missing backdrop close wiring: ${needle}`);
+  }
+  // The 3 plan-sheet backdrops (setaside/category/extra) share one action.
+  assert.equal(
+    app.split('role="presentation" data-action="close-plan-sheet"').length - 1,
+    3
+  );
+  // Onboarding is deliberately excluded — it has no cancel concept.
+  assert.ok(app.includes('<div class="modal-backdrop onboarding-backdrop" role="presentation">'));
+
+  // closeTopDialog() (used by Escape) must cover every dismissable surface, not just
+  // the 7 it originally had — delete-account, backup restore, quick-classify,
+  // prediction details and the period report were all missing.
+  const closeTopDialogFn = app.slice(app.indexOf("function closeTopDialog()"), app.indexOf("function firstFocusable"));
+  assert.ok(closeTopDialogFn.includes("if (pendingBackupRestoreId) {"));
+  assert.ok(closeTopDialogFn.includes("if (deleteAccountOpen) {"));
+  assert.ok(closeTopDialogFn.includes("if (quickClassifyQueue.length) {"));
+  assert.ok(closeTopDialogFn.includes("if (predictionDetailsOpen) {"));
+  assert.ok(closeTopDialogFn.includes("if (periodReportOpen) {"));
+
+  // 34px was below the 44px minimum touch target, and these are the close buttons on
+  // every sheet/modal in the app.
+  const iconBtnSizeFn = styles.slice(styles.lastIndexOf(".icon-btn {"), styles.indexOf(".icon-btn.muted"));
+  assert.ok(iconBtnSizeFn.includes("width: 44px;"));
+  assert.ok(iconBtnSizeFn.includes("height: 44px;"));
 });
 
 test("drawer visual system keeps menu contrast in mobile themes", async () => {
