@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "1.1.15";
+const ASSET_VERSION = "1.1.17";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -1410,13 +1410,11 @@ test("behavioral finance, silent sync, undo and automatic backups remain availab
   assert.ok(app.includes("Compras en pausa"));
   assert.ok(app.includes('"cancel-cooldown"'));
   assert.ok(app.includes('"unlock-cooldown"'));
-  // La decisión de subir/bajar se hace comparando marcas del SERVIDOR entre sí
-  // (remote.updated_at vs meta.cloudUpdatedAt), no la marca del dispositivo contra la
-  // del servidor — así un cambio local no se pierde cuando el reloj del teléfono va
-  // atrasado respecto al servidor.
-  assert.ok(app.includes("function remoteChangedSinceLastSync"));
-  assert.ok(app.includes("remoteChangedSinceLastSync(remote)"));
-  assert.ok(app.includes("hasMeaningfulLocalData"));
+  // La decisión de subir/bajar vive en state-model.js (decideLoginSync /
+  // decidePushSync, probadas por comportamiento en state-model.test.mjs, incluido el
+  // caso del reloj del teléfono atrasado). app.js solo debe usarlas.
+  assert.ok(app.includes("decideLoginSync(state, remote)"));
+  assert.ok(app.includes('decidePushSync(state, remote) === "download"'));
   assert.ok(app.includes("BACKUP_KEY"));
   assert.ok(app.includes("saveLocalBackup"));
   assert.ok(app.includes("function menuAlertText()"));

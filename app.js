@@ -14,7 +14,7 @@ import {
   predictUntilNextPeriod as getPeriodPrediction,
   resolvePeriodIncome,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.15";
+} from "./finance-core.js?v=1.1.17";
 import {
   DEFAULT_REMINDER_TIME,
   DIAGNOSIS_SECTIONS,
@@ -45,8 +45,11 @@ import {
   normalizeTransactions,
   numberFrom,
   numberValue,
+  decideLoginSync,
+  decidePushSync,
+  hasMeaningfulLocalData,
   uid
-} from "./state-model.js?v=1.1.15";
+} from "./state-model.js?v=1.1.17";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -61,7 +64,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.15";
+} from "./sync-client.js?v=1.1.17";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -398,63 +401,23 @@ async function pullCloudAfterLogin() {
 
   try {
     const remote = await loadCloudState();
-    if (remote?.app_state) {
-      const localHasData = hasMeaningfulLocalData(state);
-      const remoteHasData = hasMeaningfulLocalData(remote.app_state);
-      const remoteAhead = remoteChangedSinceLastSync(remote);
+    const decision = decideLoginSync(state, remote);
 
-      if (localHasData && !remoteHasData) {
-        const saved = await saveCloudState(getCloudPayload());
-        markCloudSynced(saved?.updated_at || new Date().toISOString());
-        state.lastAlert = "La nube estaba vacía; conservé tus datos locales y los subí.";
-        cloudState.status = "synced";
-        renderCloudStatusChange();
-        return;
-      }
-
-      // El servidor tiene una version mas nueva que la ultima que sincronizamos (otro
-      // dispositivo la edito) → bajarla. Solo aqui se sobreescribe lo local.
-      if (remoteAhead && remoteHasData) {
-        applyRemoteState(remote.app_state, remote.updated_at, "Nube sincronizada automáticamente.");
-        cloudState.status = "synced";
-        renderCloudStatusChange();
-        return;
-      }
-
-      // La nube no cambio desde nuestra ultima sincronizacion: lo local manda. Subimos
-      // nuestros cambios (aunque el reloj del telefono vaya atras del servidor).
-      if (localHasData) {
-        const saved = await saveCloudState(getCloudPayload());
-        markCloudSynced(saved?.updated_at || new Date().toISOString());
-        cloudState.status = "synced";
-        renderCloudStatusChange();
-        return;
-      }
-
-      // No teniamos datos locales; adoptar lo que haya en la nube.
-      if (remoteHasData) {
-        applyRemoteState(remote.app_state, remote.updated_at, "Nube sincronizada automáticamente.");
-        cloudState.status = "synced";
-        renderCloudStatusChange();
-        return;
-      }
-
+    if (decision === "download") {
+      applyRemoteState(remote.app_state, remote.updated_at, "Nube sincronizada automáticamente.");
+    } else if (decision === "in-sync") {
       markCloudSynced(remote.updated_at || new Date().toISOString());
-      cloudState.status = "synced";
       state.lastAlert = "Nube al día.";
-      renderCloudStatusChange();
-      return;
+    } else {
+      const saved = await saveCloudState(getCloudPayload());
+      markCloudSynced(saved?.updated_at || new Date().toISOString());
+      if (decision === "upload-remote-empty") {
+        state.lastAlert = "La nube estaba vacía; conservé tus datos locales y los subí.";
+      } else if (decision === "first-upload") {
+        state.lastAlert = "Primera copia subida a la nube.";
+      }
     }
-
-    const saved = await saveCloudState(getCloudPayload());
-    state.meta = {
-      ...(state.meta || {}),
-      cloudUpdatedAt: saved?.updated_at || new Date().toISOString(),
-      cloudUserEmail: cloudState.email
-    };
-    persist(STORAGE_KEY, state);
     cloudState.status = "synced";
-    state.lastAlert = "Primera copia subida a la nube.";
     renderCloudStatusChange();
   } catch (error) {
     applyingCloudState = false;
@@ -493,18 +456,11 @@ async function pushCloudState() {
 
   try {
     const remote = await loadCloudState();
-    if (remote?.app_state) {
-      const remoteHasData = hasMeaningfulLocalData(remote.app_state);
-
-      // Solo cedemos ante la nube si de verdad cambio en el servidor desde nuestra
-      // ultima sincronizacion (otro dispositivo). Si no, subimos nuestros cambios: esta
-      // funcion se dispara justo despues de una edicion local, asi que lo local manda.
-      if (remoteChangedSinceLastSync(remote) && remoteHasData) {
-        applyRemoteState(remote.app_state, remote.updated_at, "La nube tenía cambios más recientes. Descargué esa versión.");
-        cloudState.status = "synced";
-        renderCloudStatusChange();
-        return;
-      }
+    if (decidePushSync(state, remote) === "download") {
+      applyRemoteState(remote.app_state, remote.updated_at, "La nube tenía cambios más recientes. Descargué esa versión.");
+      cloudState.status = "synced";
+      renderCloudStatusChange();
+      return;
     }
 
     const saved = await saveCloudState(getCloudPayload());
@@ -572,37 +528,6 @@ function markCloudSynced(updatedAt, options = {}) {
   if (shouldPersist) {
     persist(STORAGE_KEY, state);
   }
-}
-
-// ¿El registro remoto cambió en el SERVIDOR desde la última vez que sincronizamos?
-// Compara la marca `updated_at` del servidor contra la última marca del servidor que
-// guardamos (state.meta.cloudUpdatedAt). Ambas vienen del reloj del servidor, así que
-// no las afecta el desfase entre el reloj del teléfono y el del servidor. Antes se
-// comparaba la marca del dispositivo (updated_at local) contra la del servidor, y como
-// el servidor suele ir unos segundos adelante, un cambio local recién hecho parecía
-// "más viejo" que la nube y un pull automático (por refresco de token) lo borraba.
-function remoteChangedSinceLastSync(remote) {
-  const remoteServerTime = timestampValue(remote?.updated_at);
-  const lastSyncedServerTime = timestampValue(state.meta?.cloudUpdatedAt);
-  return remoteServerTime > lastSyncedServerTime;
-}
-
-function timestampValue(value) {
-  const time = Date.parse(value || "");
-  return Number.isFinite(time) ? time : 0;
-}
-
-function hasMeaningfulLocalData(payload) {
-  return Boolean(
-    payload?.profile?.completed ||
-      payload?.liquidity?.initialized ||
-      payload?.transactions?.length ||
-      payload?.budgetExtras?.length ||
-      payload?.calendarEvents?.length ||
-      payload?.dailyReminder?.enabled ||
-      payload?.budgetJobs?.length ||
-      payload?.wins?.length
-  );
 }
 
 function readLocalBackups() {
@@ -6617,7 +6542,7 @@ function removeTransaction(id) {
     reopenCalendarEvent(transaction.calendarEventId);
   }
   state.lastAlert = transaction
-    ? `${transaction.merchant} eliminado. La categoría se recalculo.`
+    ? `${transaction.merchant} eliminado. La categoría se recalculó.`
     : "Gasto eliminado.";
   if (snackbar?.transactionId === id) {
     clearSnackbar({ renderNow: false });

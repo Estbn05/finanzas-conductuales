@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.15";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.17";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
@@ -449,4 +449,66 @@ export function migrateState(savedState, today, defaultView) {
     migrated.lastAlert = "Quité las categorías de ejemplo que traía una versión vieja. Crea solo las que de verdad usas.";
   }
   return migrated;
+}
+
+// True when a state payload holds anything the user would lose if it were overwritten.
+export function hasMeaningfulLocalData(payload) {
+  return Boolean(
+    payload?.profile?.completed ||
+      payload?.liquidity?.initialized ||
+      payload?.transactions?.length ||
+      payload?.budgetExtras?.length ||
+      payload?.calendarEvents?.length ||
+      payload?.dailyReminder?.enabled ||
+      payload?.budgetJobs?.length ||
+      payload?.wins?.length
+  );
+}
+
+function timestampValue(value) {
+  const time = Date.parse(value || "");
+  return Number.isFinite(time) ? time : 0;
+}
+
+// ¿El registro remoto cambió en el SERVIDOR desde la última vez que sincronizamos?
+// Compara la marca `updated_at` del servidor contra la última marca del servidor que
+// guardamos (localState.meta.cloudUpdatedAt). Ambas vienen del reloj del servidor, así
+// que no las afecta el desfase con el reloj del teléfono. Antes se comparaba la marca
+// del dispositivo contra la del servidor, y como el servidor suele ir unos segundos
+// adelante, un cambio local recién hecho parecía "más viejo" y un pull lo borraba.
+export function remoteChangedSinceLastSync(localState, remote) {
+  return timestampValue(remote?.updated_at) > timestampValue(localState?.meta?.cloudUpdatedAt);
+}
+
+// What to do right after sign-in / app start, given the local state and the cloud row
+// (`remote` is null when this account has no row yet). Returns one of:
+//   "first-upload"        no cloud row: create it from local
+//   "upload-remote-empty" cloud row has nothing worth keeping: local wins
+//   "download"            cloud changed since our last sync, or we have nothing local
+//   "upload"              cloud unchanged since our last sync: local edits win
+//   "in-sync"             neither side has meaningful data
+// Local data is only ever overwritten on "download".
+export function decideLoginSync(localState, remote) {
+  if (!remote?.app_state) {
+    return "first-upload";
+  }
+  const localHasData = hasMeaningfulLocalData(localState);
+  const remoteHasData = hasMeaningfulLocalData(remote.app_state);
+  if (localHasData && !remoteHasData) {
+    return "upload-remote-empty";
+  }
+  if (remoteHasData && (remoteChangedSinceLastSync(localState, remote) || !localHasData)) {
+    return "download";
+  }
+  return localHasData ? "upload" : "in-sync";
+}
+
+// What to do when pushing a local edit. Only yields to the cloud if it really changed on
+// the server since our last sync (another device); otherwise the local edit wins.
+export function decidePushSync(localState, remote) {
+  return remote?.app_state &&
+    hasMeaningfulLocalData(remote.app_state) &&
+    remoteChangedSinceLastSync(localState, remote)
+    ? "download"
+    : "upload";
 }
