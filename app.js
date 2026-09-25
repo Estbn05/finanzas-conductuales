@@ -14,7 +14,7 @@ import {
   predictUntilNextPeriod as getPeriodPrediction,
   resolvePeriodIncome,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.17";
+} from "./finance-core.js?v=1.1.18";
 import {
   DEFAULT_REMINDER_TIME,
   DIAGNOSIS_SECTIONS,
@@ -49,7 +49,7 @@ import {
   decidePushSync,
   hasMeaningfulLocalData,
   uid
-} from "./state-model.js?v=1.1.17";
+} from "./state-model.js?v=1.1.18";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -64,7 +64,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.17";
+} from "./sync-client.js?v=1.1.18";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -95,6 +95,46 @@ const MOVEMENT_DAY_FORMATTER = new Intl.DateTimeFormat("es-CO", { weekday: "long
 const COMPACT_MONEY_FORMATTER = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 1 });
 const PLAIN_NUMBER_FORMATTER = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 });
 const moneyFormatterCache = new Map();
+
+// Every module-level constant lives up here, above the boot code further down:
+// render() and initializeCloudSync() run synchronously at module init, and a const
+// declared below them throws a TDZ ReferenceError on any path that reaches it
+// before script execution does (tests/app-smoke.test.mjs boots the real app).
+// Only these two are pure no-op confirmations (nothing local changed, nothing to
+// react to). Every other cloud message — including "la nube tenía cambios más
+// recientes, descargué esa versión" — means the user's local data just got
+// overwritten, and must always reach the sidebar. A previous version silenced any
+// message matching /nube|sincron/i, which swallowed that overwrite warning too.
+const SILENT_ALERTS = new Set(["Nube al día.", "Primera copia subida a la nube."]);
+
+const SMALL_EXPENSE_THRESHOLD = 15000;
+const WEEKDAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+
+// Matches FreeMoneyWidgetProvider.QUICK_ADD_URI and the intent-filter data (scheme +
+// host) declared in AndroidManifest.xml for the home screen widget's "+" button.
+const WIDGET_QUICK_ADD_HOST = "registrar-gasto";
+
+// Tope de digitos para cualquier campo de dinero: sin este limite, escribir muchos
+// ceros produce un numero formateado tan largo (ej. "100.000.000.000.000.000.000")
+// que desborda su contenedor y empuja toda la pantalla horizontalmente, cortando el
+// resto del formulario. 12 digitos (hasta ~999.999.999.999) cubre cualquier cifra
+// real de finanzas personales con margen de sobra.
+const MONEY_INPUT_MAX_DIGITS = 12;
+
+const BACK_CLOSE_SELECTORS = [
+  '[data-action="close-transaction-editor"]',
+  '[data-action="close-extra-editor"]',
+  '[data-action="cancel-extra-allocation"]',
+  '[data-action="close-quick-classify"]',
+  '[data-action="cancel-delete-account"]',
+  '[data-action="cancel-remove-job"]',
+  '[data-action="cancel-restore-backup"]',
+  '[data-action="close-diagnosis"]',
+  '[data-action="close-plan-sheet"]',
+  '[data-action="close-period-report"]',
+  '[data-action="close-prediction-details"]',
+  '[data-action="close-expense"]'
+];
 const DAILY_REMINDER_NOTIFICATION_ID = 7301;
 const TEST_REMINDER_NOTIFICATION_ID = 7302;
 const INCOME_TYPES = ["fixed", "variable"];
@@ -1291,13 +1331,6 @@ function periodExtraSourceLabel(summary = budgetSummary()) {
   const hiddenCount = extras.length - 2;
   return hiddenCount > 0 ? `${labels} · +${hiddenCount} más` : labels;
 }
-
-// Only these two are pure no-op confirmations (nothing local changed, nothing to
-// react to). Every other cloud message — including "la nube tenía cambios más
-// recientes, descargué esa versión" — means the user's local data just got
-// overwritten, and must always reach the sidebar. A previous version silenced any
-// message matching /nube|sincron/i, which swallowed that overwrite warning too.
-const SILENT_ALERTS = new Set(["Nube al día.", "Primera copia subida a la nube."]);
 
 function menuAlertText() {
   const alert = String(state.lastAlert || "");
@@ -3552,9 +3585,6 @@ function renderProgressView() {
     </section>
   `;
 }
-
-const SMALL_EXPENSE_THRESHOLD = 15000;
-const WEEKDAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
 
 function previousPeriodWindow(summary) {
   const start = new Date(`${summary.window.start}T00:00:00`);
@@ -6163,21 +6193,6 @@ function syncHomeWidget() {
   bridge.update({ freeMoney, periodLabel }).catch(() => {});
 }
 
-const BACK_CLOSE_SELECTORS = [
-  '[data-action="close-transaction-editor"]',
-  '[data-action="close-extra-editor"]',
-  '[data-action="cancel-extra-allocation"]',
-  '[data-action="close-quick-classify"]',
-  '[data-action="cancel-delete-account"]',
-  '[data-action="cancel-remove-job"]',
-  '[data-action="cancel-restore-backup"]',
-  '[data-action="close-diagnosis"]',
-  '[data-action="close-plan-sheet"]',
-  '[data-action="close-period-report"]',
-  '[data-action="close-prediction-details"]',
-  '[data-action="close-expense"]'
-];
-
 function handleHardwareBackButton() {
   // The onboarding "Atrás" button has no data-action (it's bound directly in
   // bindOnboardingFlowV2), so it never matches BACK_CLOSE_SELECTORS below. Without this,
@@ -7097,10 +7112,6 @@ function initializeNativeNotificationActions() {
   } catch {}
 }
 
-// Matches FreeMoneyWidgetProvider.QUICK_ADD_URI and the intent-filter data (scheme +
-// host) declared in AndroidManifest.xml for the home screen widget's "+" button.
-const WIDGET_QUICK_ADD_HOST = "registrar-gasto";
-
 function nativeCapacitorApp() {
   return window.Capacitor?.Plugins?.App || null;
 }
@@ -7520,13 +7531,6 @@ function formatMoneyInput(input) {
     input.selectionEnd = nextCursor;
   }
 }
-
-// Tope de digitos para cualquier campo de dinero: sin este limite, escribir muchos
-// ceros produce un numero formateado tan largo (ej. "100.000.000.000.000.000.000")
-// que desborda su contenedor y empuja toda la pantalla horizontalmente, cortando el
-// resto del formulario. 12 digitos (hasta ~999.999.999.999) cubre cualquier cifra
-// real de finanzas personales con margen de sobra.
-const MONEY_INPUT_MAX_DIGITS = 12;
 
 function formatMoneyInputValue(value) {
   const digits = String(value ?? "").replace(/\D/g, "").slice(0, MONEY_INPUT_MAX_DIGITS);

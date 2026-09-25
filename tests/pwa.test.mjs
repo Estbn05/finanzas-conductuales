@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "1.1.17";
+const ASSET_VERSION = "1.1.18";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -527,7 +527,8 @@ test("hardware back button closes the topmost open sheet/menu instead of exiting
   assert.ok(app.includes("function bindHardwareBackButton()"));
   assert.ok(app.includes('app.addListener("backButton", handleHardwareBackButton)'));
   assert.ok(app.includes("bindHardwareBackButton();"));
-  const closeOrder = app.slice(app.indexOf("const BACK_CLOSE_SELECTORS"), app.indexOf("function handleHardwareBackButton()"));
+  const closeOrderStart = app.indexOf("const BACK_CLOSE_SELECTORS");
+  const closeOrder = app.slice(closeOrderStart, app.indexOf("];", closeOrderStart));
   assert.ok(closeOrder.indexOf('"close-transaction-editor"') < closeOrder.indexOf('"close-expense"'));
   assert.equal(closeOrder.includes('"close-menu"'), false);
   const backHandler = app.slice(app.indexOf("function handleHardwareBackButton()"), app.indexOf("function bindHardwareBackButton()"));
@@ -566,7 +567,7 @@ test("home screen widget shows free money and stays in sync with app state", asy
   assert.ok(app.includes("function syncHomeWidget()"));
   // Widgets render outside the lock screen, so the amount must not leak while the app
   // is PIN-locked — same principle as allowBackup="false" for the same file.
-  const syncWidgetFn = app.slice(app.indexOf("function syncHomeWidget()"), app.indexOf("const BACK_CLOSE_SELECTORS"));
+  const syncWidgetFn = app.slice(app.indexOf("function syncHomeWidget()"), app.indexOf("function handleHardwareBackButton()"));
   assert.ok(syncWidgetFn.includes('lockConfig.enabled ? "Bloqueado" : formatMoney(summary.freeRemaining)'));
   assert.ok(syncWidgetFn.includes("bridge.update({ freeMoney, periodLabel })"));
   const saveStateFn = app.slice(app.indexOf("function saveState(options = {})"), app.indexOf("async function initializeCloudSync()"));
