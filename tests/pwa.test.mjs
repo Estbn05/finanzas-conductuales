@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "1.1.14";
+const ASSET_VERSION = "1.1.15";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -642,8 +642,11 @@ test("fixed income is auto-applied to real liquidity once the period starts, wit
   assert.ok(app.includes("data-onboarding-income-type=\"variable\""));
   assert.ok(app.includes("¿Qué día te pagan?"));
 
-  assert.ok(app.includes("function ensurePeriodIncomeApplication()"));
-  assert.ok(app.includes("state.periodIncomeStatus = {"));
+  // The decision lives in finance-core.js (resolvePeriodIncome, behavior-tested in
+  // finance-core.test.mjs); app.js must only apply its result and do the deposit.
+  const ensureFn = app.slice(app.indexOf("function ensurePeriodIncomeApplication()"), app.indexOf("function adjustLiquidity"));
+  assert.ok(ensureFn.includes("resolvePeriodIncome(state, todayKey())"));
+  assert.ok(ensureFn.includes('adjustLiquidity("account", result.deposit, "ingreso-periodico")'));
   const renderFn = app.slice(app.indexOf("function render() {"), app.indexOf("function renderHeader"));
   assert.ok(renderFn.includes("ensurePeriodIncomeApplication();"));
   const saveStateFn = app.slice(app.indexOf("function saveState(options = {})"), app.indexOf("async function initializeCloudSync()"));
@@ -658,21 +661,8 @@ test("fixed income is auto-applied to real liquidity once the period starts, wit
   assert.ok(stateModel.includes("savedState.periodIncomeStatus"));
 });
 
-// Regression: getBudgetWindow() treats periodStart as a recurring anchor and rolls it
-// BACKWARD to find the window containing today. A brand-new user who enters a payday
-// "in 7 days" (weekly cadence) gets window.start rolled back exactly one cadence
-// length, landing on today — making the app think payday already happened on day one,
-// auto-depositing money that hasn't actually arrived. The fix checks the RAW
-// profile.periodStart the user typed against today, not just the rolled-back window.
-test("a payday entered in the future is not auto-applied until that date actually arrives", async () => {
-  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
-
-  const fn = app.slice(app.indexOf("function ensurePeriodIncomeApplication()"), app.indexOf("function adjustLiquidity"));
-  assert.ok(fn.includes("rawPeriodStart"));
-  assert.ok(fn.includes("paydayAlreadyArrived"));
-  assert.ok(/paydayAlreadyArrived\s*&&\s*!status\.applied/.test(fn) || /!status\.applied\s*&&\s*!status\.rejected/.test(fn));
-  assert.ok(fn.includes("state.profile.incomeType === \"fixed\" && paydayAlreadyArrived"));
-});
+// The future-payday regression (a payday typed as "in 7 days" must not deposit on day
+// one) is now a behavior test of resolvePeriodIncome() in finance-core.test.mjs.
 
 test("PIN lock protects the app with device-local hashed storage separate from synced state", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");

@@ -5,15 +5,16 @@ import {
   budgetAmountForJob as getBudgetAmountForJob,
   budgetRingAllocation as getBudgetRingAllocation,
   budgetSummary as getBudgetSummary,
-  budgetWindow as getBudgetWindow,
   calculatePlan as calculateFinancePlan,
   categoryStatus as getCategoryStatus,
+  findLoggedIncome,
   getPeriodIncome,
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictUntilNextPeriod as getPeriodPrediction,
+  resolvePeriodIncome,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.14";
+} from "./finance-core.js?v=1.1.15";
 import {
   DEFAULT_REMINDER_TIME,
   DIAGNOSIS_SECTIONS,
@@ -45,7 +46,7 @@ import {
   numberFrom,
   numberValue,
   uid
-} from "./state-model.js?v=1.1.14";
+} from "./state-model.js?v=1.1.15";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -60,7 +61,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.14";
+} from "./sync-client.js?v=1.1.15";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -5226,7 +5227,7 @@ function handleAction(event) {
         status.applied = false;
         status.rejected = true;
         status.bannerDismissed = true;
-        const logged = findLoggedIncomeForToday(todayKey());
+        const logged = findLoggedIncome(state.periodIncomeApplied, todayKey());
         if (logged) {
           logged.status = "rejected";
         }
@@ -7301,76 +7302,15 @@ function liquiditySummary(summary = budgetSummary()) {
   };
 }
 
-// Runs once per period, before anything else reads budgetSummary(). For users with a
-// fixed/scheduled income (periodStart doubles as their payday), it automatically
-// deposits this period's income into real liquidity the moment the period begins —
-// unless the user already said (via the "aun no me pagan" banner button) that it
-// hasn't landed yet, in which case it stays pending until they log it manually. Before
-// that deposit happens, "dinero libre" is just the real balance (finance-core.js),
-// never a promise — so there is nothing to freeze or reconcile here anymore.
-function findLoggedIncomeForToday(today) {
-  const ledger = state.periodIncomeApplied || [];
-  return ledger.find((entry) => today >= entry.windowStart && today < entry.windowEnd);
-}
-
+// Runs before anything else reads budgetSummary(). The decision itself (is this
+// period's fixed income due? was it already logged or rejected?) is the pure
+// resolvePeriodIncome() in finance-core.js; this only applies its result to `state`.
 function ensurePeriodIncomeApplication() {
-  const window = getBudgetWindow(state.profile, todayKey());
-  const current = state.periodIncomeStatus;
-  const today = todayKey();
-  // Editing periodStart/cadence in "Editar mi plan" recomputes window.start for what,
-  // from the user's perspective, is still the same real-world pay period (today didn't
-  // move). Looking up by exact windowStart equality would treat that edit as a brand
-  // new never-paid period and deposit the income a second time, so instead look up by
-  // date-range overlap against the durable ledger below — that identity survives the edit.
-  const logged = findLoggedIncomeForToday(today);
-
-  if (!current || current.windowStart !== window.start) {
-    if (logged) {
-      state.periodIncomeStatus = {
-        windowStart: window.start,
-        applied: logged.status === "applied",
-        rejected: logged.status === "rejected",
-        bannerDismissed: true,
-        amount: logged.amount || 0,
-        location: logged.status === "applied" ? "account" : null,
-        appliedAt: logged.appliedAt
-      };
-    } else {
-      state.periodIncomeStatus = {
-        windowStart: window.start,
-        applied: false,
-        rejected: false,
-        bannerDismissed: false,
-        amount: 0,
-        location: null
-      };
-    }
-  }
-
-  const status = state.periodIncomeStatus;
-  // getBudgetWindow() treats periodStart as a recurring anchor and rolls it forward
-  // or BACKWARD until it finds the window containing today — so a payday entered as
-  // "in 7 days" (weekly cadence) rolls back exactly one cadence length and lands on
-  // window.start === today, making the app think payday already happened. That rollback
-  // is correct for finding "what period are we in" on an ongoing account, but wrong for
-  // reading intent on day one: if the RAW date the user typed is still in the future,
-  // their first payday hasn't arrived yet, no matter what window.start resolved to.
-  const rawPeriodStart = cleanDate(state.profile.periodStart, "");
-  const paydayAlreadyArrived = !rawPeriodStart || rawPeriodStart <= today;
-  if (state.profile.incomeType === "fixed" && paydayAlreadyArrived && !status.applied && !status.rejected && !logged) {
-    const amount = getPeriodIncome(state.profile);
-    if (amount > 0) {
-      adjustLiquidity("account", amount, "ingreso-periodico");
-      status.applied = true;
-      status.bannerDismissed = false;
-      status.amount = amount;
-      status.location = "account";
-      status.appliedAt = new Date().toISOString();
-      const ledger = [...(state.periodIncomeApplied || []), { windowStart: window.start, windowEnd: window.end, status: "applied", amount, appliedAt: status.appliedAt }];
-      // Only the ledger entries that could still overlap "today" after a plausible
-      // date edit matter for the duplicate-deposit guard above; keep it bounded.
-      state.periodIncomeApplied = ledger.slice(-12);
-    }
+  const result = resolvePeriodIncome(state, todayKey());
+  state.periodIncomeStatus = result.periodIncomeStatus;
+  state.periodIncomeApplied = result.periodIncomeApplied;
+  if (result.deposit > 0) {
+    adjustLiquidity("account", result.deposit, "ingreso-periodico");
   }
 }
 

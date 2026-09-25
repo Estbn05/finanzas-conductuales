@@ -469,3 +469,60 @@ function dateKey(date) {
 function cadenceLabel(cadence) {
   return INCOME_CADENCES[cadence]?.label || "mensual";
 }
+
+// The ledger entry (if any) for a pay period whose date range contains `today`.
+// Looked up by date overlap, not by exact windowStart: editing periodStart/cadence
+// recomputes window.start for what is still the same real-world pay period, and an
+// equality lookup would treat that edit as a new, never-paid period.
+export function findLoggedIncome(ledger, today) {
+  return (ledger || []).find((entry) => today >= entry.windowStart && today < entry.windowEnd);
+}
+
+// Decides this period's fixed-income deposit without touching `state`. Returns the next
+// periodIncomeStatus / periodIncomeApplied and `deposit`, the amount the caller must add
+// to the real "account" balance (0 when nothing is due). For fixed income, periodStart
+// doubles as the payday: the income is deposited once, the day the period begins —
+// unless the user already rejected it ("aún no me pagan") or it was already logged.
+export function resolvePeriodIncome(state, today, nowIso = new Date().toISOString()) {
+  const window = budgetWindow(state.profile, today);
+  const ledger = state.periodIncomeApplied || [];
+  const logged = findLoggedIncome(ledger, today);
+  let status = state.periodIncomeStatus;
+
+  if (!status || status.windowStart !== window.start) {
+    status = logged
+      ? {
+          windowStart: window.start,
+          applied: logged.status === "applied",
+          rejected: logged.status === "rejected",
+          bannerDismissed: true,
+          amount: logged.amount || 0,
+          location: logged.status === "applied" ? "account" : null,
+          appliedAt: logged.appliedAt
+        }
+      : { windowStart: window.start, applied: false, rejected: false, bannerDismissed: false, amount: 0, location: null };
+  }
+
+  // budgetWindow() rolls periodStart forward OR backward to the window containing today,
+  // so a payday typed as "in 7 days" (weekly) resolves to window.start === today. If the
+  // RAW date the user typed is still in the future, the first payday hasn't arrived.
+  const rawPeriodStart = /^\d{4}-\d{2}-\d{2}$/.test(String(state.profile.periodStart || ""))
+    ? String(state.profile.periodStart)
+    : "";
+  const paydayArrived = !rawPeriodStart || rawPeriodStart <= today;
+  const amount = getPeriodIncome(state.profile);
+  const due =
+    state.profile.incomeType === "fixed" && paydayArrived && !status.applied && !status.rejected && !logged && amount > 0;
+
+  if (!due) {
+    return { periodIncomeStatus: status, periodIncomeApplied: ledger, deposit: 0 };
+  }
+
+  return {
+    periodIncomeStatus: { ...status, applied: true, bannerDismissed: false, amount, location: "account", appliedAt: nowIso },
+    // Only entries that could still overlap "today" after a plausible date edit matter
+    // for the duplicate-deposit guard; keep the ledger bounded.
+    periodIncomeApplied: [...ledger, { windowStart: window.start, windowEnd: window.end, status: "applied", amount, appliedAt: nowIso }].slice(-12),
+    deposit: amount
+  };
+}

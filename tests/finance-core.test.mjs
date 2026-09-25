@@ -10,7 +10,8 @@ import {
   extraIncomeForPeriod,
   getEmergencyTarget,
   isLargeUnbudgetedPurchase,
-  predictUntilNextPeriod
+  predictUntilNextPeriod,
+  resolvePeriodIncome
 } from "../finance-core.js";
 
 // El saldo real (cuenta + efectivo, seguido en app.js via adjustLiquidity) es un
@@ -807,4 +808,107 @@ test("one-off spending lowers free money but does not affect the daily pace", ()
   assert.equal(prediction.dailyRate, 0);
   assert.equal(prediction.projectedEndFree, 700_000);
   assert.equal(prediction.status, "empty");
+});
+
+function incomeState(profile = {}, extra = {}) {
+  return {
+    profile: {
+      incomeType: "fixed",
+      incomeCadence: "monthly",
+      incomeAmount: 2_000_000,
+      periodStart: "2026-06-01",
+      ...profile
+    },
+    periodIncomeStatus: null,
+    periodIncomeApplied: [],
+    ...extra
+  };
+}
+
+const NOW = "2026-06-10T15:00:00.000Z";
+
+test("fixed income is deposited once when the period's payday has arrived", () => {
+  const result = resolvePeriodIncome(incomeState(), "2026-06-10", NOW);
+
+  assert.equal(result.deposit, 2_000_000);
+  assert.equal(result.periodIncomeStatus.applied, true);
+  assert.equal(result.periodIncomeStatus.windowStart, "2026-06-01");
+  assert.deepEqual(result.periodIncomeApplied, [
+    { windowStart: "2026-06-01", windowEnd: "2026-07-01", status: "applied", amount: 2_000_000, appliedAt: NOW }
+  ]);
+});
+
+test("resolving the same period again never deposits a second time", () => {
+  const first = resolvePeriodIncome(incomeState(), "2026-06-10", NOW);
+  const second = resolvePeriodIncome(
+    incomeState({}, { periodIncomeStatus: first.periodIncomeStatus, periodIncomeApplied: first.periodIncomeApplied }),
+    "2026-06-12",
+    NOW
+  );
+
+  assert.equal(second.deposit, 0);
+  assert.equal(second.periodIncomeApplied.length, 1);
+});
+
+// Regression: editing the payday in "Editar mi plan" moves window.start for what is still
+// the same real-world pay period. Keying on exact windowStart treated that as a new,
+// never-paid period and deposited the income again.
+test("editing the payday date does not re-deposit income already logged for today", () => {
+  const first = resolvePeriodIncome(incomeState(), "2026-06-10", NOW);
+  const edited = resolvePeriodIncome(
+    incomeState(
+      { periodStart: "2026-06-05" },
+      { periodIncomeStatus: first.periodIncomeStatus, periodIncomeApplied: first.periodIncomeApplied }
+    ),
+    "2026-06-10",
+    NOW
+  );
+
+  assert.equal(edited.periodIncomeStatus.windowStart, "2026-06-05");
+  assert.equal(edited.deposit, 0);
+  assert.equal(edited.periodIncomeStatus.applied, true);
+  assert.equal(edited.periodIncomeApplied.length, 1);
+});
+
+test("a period the user marked as 'aún no me pagan' stays undeposited after a payday edit", () => {
+  const edited = resolvePeriodIncome(
+    incomeState(
+      { periodStart: "2026-06-05" },
+      {
+        periodIncomeApplied: [
+          { windowStart: "2026-06-01", windowEnd: "2026-07-01", status: "rejected", amount: 2_000_000, appliedAt: NOW }
+        ]
+      }
+    ),
+    "2026-06-10",
+    NOW
+  );
+
+  assert.equal(edited.deposit, 0);
+  assert.equal(edited.periodIncomeStatus.rejected, true);
+});
+
+// Regression: budgetWindow() rolls a future periodStart BACK to the window containing
+// today, so a payday typed as "in 5 days" looked like it had already happened.
+test("a payday entered in the future is not deposited until that date arrives", () => {
+  const before = resolvePeriodIncome(incomeState({ periodStart: "2026-06-15" }), "2026-06-10", NOW);
+  const onPayday = resolvePeriodIncome(incomeState({ periodStart: "2026-06-15" }), "2026-06-15", NOW);
+
+  assert.equal(before.deposit, 0);
+  assert.equal(onPayday.deposit, 2_000_000);
+});
+
+test("variable income is never auto-deposited", () => {
+  const result = resolvePeriodIncome(incomeState({ incomeType: "variable" }), "2026-06-10", NOW);
+
+  assert.equal(result.deposit, 0);
+  assert.equal(result.periodIncomeStatus.applied, false);
+});
+
+test("resolvePeriodIncome does not mutate the state it is given", () => {
+  const state = incomeState();
+  const snapshot = JSON.stringify(state);
+  resolvePeriodIncome(state, "2026-06-10", NOW);
+
+  assert.equal(JSON.stringify(state), snapshot);
 });
