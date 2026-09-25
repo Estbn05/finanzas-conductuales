@@ -9,13 +9,14 @@ import {
   categoryStatus as getCategoryStatus,
   findLoggedIncome,
   freeShareOfBudget,
+  isSavingsJob,
   getPeriodIncome,
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictUntilNextPeriod as getPeriodPrediction,
   resolvePeriodIncome,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.20";
+} from "./finance-core.js?v=1.1.21";
 import {
   DEFAULT_REMINDER_TIME,
   DIAGNOSIS_SECTIONS,
@@ -30,6 +31,8 @@ import {
   filterMerchantRulesForJobs,
   isTemplateBudgetJobs,
   merchantKey,
+  merchantRuleMatches,
+  csvField,
   migrateState,
   normalizeBudgetExtras,
   normalizeBudgetJobs,
@@ -50,7 +53,7 @@ import {
   decidePushSync,
   hasMeaningfulLocalData,
   uid
-} from "./state-model.js?v=1.1.20";
+} from "./state-model.js?v=1.1.21";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -65,7 +68,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.20";
+} from "./sync-client.js?v=1.1.21";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -4067,7 +4070,7 @@ function renderSnackbar() {
   }
 
   return `
-    <div class="snackbar ${snackbar.kind || ""}" role="${snackbar.kind === "error" ? "alert" : "status"}" aria-live="${snackbar.kind === "error" ? "assertive" : "polite"}">
+    <div class="snackbar ${snackbar.kind || ""}">
       <span>${escapeHtml(snackbar.message)}</span>
       ${
         snackbar.action === "undo"
@@ -6484,11 +6487,6 @@ function downloadPeriodReport() {
   exportFile(`reporte-periodo-${summary.window.start}.txt`, reportText, "text/plain", "Reporte listo.");
 }
 
-function csvField(value) {
-  const text = String(value ?? "");
-  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
 function movementsCsvRows() {
   const expenseRows = (state.transactions || []).map((transaction) => ({
     date: transaction.date,
@@ -6705,7 +6703,7 @@ function savingsAllocationTarget() {
 }
 
 function findSavingsJob() {
-  const matches = state.budgetJobs.filter((job) => /ahorro|emergencia|buffer/i.test(job.name));
+  const matches = state.budgetJobs.filter(isSavingsJob);
   return matches.find((job) => job.cadence === "period") || matches[0];
 }
 
@@ -6814,6 +6812,20 @@ function reduceSavingsAllocation(jobId, amount) {
   }
 }
 
+// Speaks a message to screen readers through the permanent live regions in
+// index.html. Cleared first and set on the next tick so repeating the same message
+// ("Gasto registrado") is announced again instead of being ignored as unchanged.
+function announce(message, kind = "") {
+  const region = document.getElementById(kind === "error" ? "live-alert" : "live-status");
+  if (!region || !message) {
+    return;
+  }
+  region.textContent = "";
+  window.setTimeout(() => {
+    region.textContent = message;
+  }, 50);
+}
+
 function showUndoSnackbar(transactionId) {
   clearTimeout(snackbarTimer);
   snackbar = {
@@ -6822,6 +6834,7 @@ function showUndoSnackbar(transactionId) {
     kind: "",
     transactionId
   };
+  announce(snackbar.message);
   // 8s (not the original 5s) so there's enough time to read the message and react,
   // not just for users who need it — nobody benefits from a confirmation that vanishes
   // before they've finished reading it.
@@ -6839,6 +6852,7 @@ function showNoticeSnackbar(message, options = {}) {
     kind,
     transactionId: ""
   };
+  announce(message, kind);
   snackbarTimer = setTimeout(() => {
     clearSnackbar();
   }, duration);
@@ -7342,7 +7356,7 @@ function findMerchantRule(merchant) {
 
   const rules = activeMerchantRules();
   return rules.find((rule) => rule.key === key)
-    || rules.find((rule) => rule.key.length >= 3 && (key.includes(rule.key) || rule.key.includes(key)))
+    || rules.find((rule) => merchantRuleMatches(key, rule.key))
     || null;
 }
 

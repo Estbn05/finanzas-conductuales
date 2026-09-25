@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.20";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.21";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
@@ -76,8 +76,14 @@ export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, Number(value) || 0));
 }
 
+// IDs pick the transaction/extra an edit or delete acts on, so a collision would edit
+// or delete the wrong one. 7 base-36 chars of Math.random made that rare but possible
+// on long histories; a UUID makes it a non-issue. Fallback only for old WebViews.
 export function uid(prefix) {
-  return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
+  const random = globalThis.crypto?.randomUUID
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
+  return `${prefix}-${random}`;
 }
 
 export function merchantKey(value) {
@@ -88,6 +94,39 @@ export function merchantKey(value) {
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");
+}
+
+// Whether a typed merchant (already normalized with merchantKey) should reuse a saved
+// rule. Beyond an exact match, one side must appear in the other as WHOLE words: the
+// old check compared raw substrings both ways, so a rule for "pan" (panaderia)
+// suggested its category for "pantalones", "compania" and "japan sushi", and that
+// wrong category then silently skewed spend-by-category and every number built on it.
+export function merchantRuleMatches(key, ruleKey) {
+  if (!key || !ruleKey) {
+    return false;
+  }
+  if (key === ruleKey) {
+    return true;
+  }
+  if (key.length < 3 || ruleKey.length < 3) {
+    return false;
+  }
+  const typed = ` ${key} `;
+  const rule = ` ${ruleKey} `;
+  return typed.includes(rule) || rule.includes(typed);
+}
+
+// One CSV cell. Text the user typed (merchant, note, category) that starts with
+// = + - @ or a tab/CR is treated as a formula by Excel/Sheets when the export is opened
+// (CSV injection: "=HYPERLINK(...)" as a merchant name runs on the reader's machine),
+// so it gets a leading apostrophe. Numbers pass through untouched: expense amounts are
+// exported as negative numbers and must stay numeric for the spreadsheet to add them.
+export function csvField(value) {
+  let text = String(value ?? "");
+  if (typeof value === "string" && /^[=+\-@\t\r]/.test(text)) {
+    text = `'${text}`;
+  }
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
 export function normalizeLocation(value) {

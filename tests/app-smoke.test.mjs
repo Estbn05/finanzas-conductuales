@@ -8,6 +8,32 @@ import { JSDOM } from "jsdom";
 const STORAGE_KEY = "finanzas-conductuales:v1";
 let bootCount = 0;
 
+// app.js calls bare setTimeout, which is Node's, so window.close() does not cancel it: a
+// previous test's app instance keeps its timers and, when they fire (e.g. the 8s snackbar
+// dismiss), they act on whatever `document` is global by then, the NEXT test's DOM. Track
+// every timer created while a test's app is alive and cancel them all when it closes.
+// (Can't just alias window.setTimeout: jsdom's own implementation calls the global one.)
+const nodeSetTimeout = globalThis.setTimeout;
+const nodeClearTimeout = globalThis.clearTimeout;
+let liveTimers = new Set();
+
+function trackedSetTimeout(callback, delay, ...args) {
+  const timers = liveTimers;
+  const handle = nodeSetTimeout(() => {
+    timers.delete(handle);
+    if (typeof callback === "function") {
+      callback(...args);
+    }
+  }, delay);
+  timers.add(handle);
+  return handle;
+}
+
+function trackedClearTimeout(handle) {
+  liveTimers.delete(handle);
+  nodeClearTimeout(handle);
+}
+
 function todayKey() {
   const now = new Date();
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
@@ -37,10 +63,15 @@ function returningUserState(overrides = {}) {
 }
 
 async function bootApp({ savedState, lockConfig } = {}) {
-  const dom = new JSDOM('<!doctype html><html><body><div id="app"></div></body></html>', {
-    url: "https://localhost/",
-    pretendToBeVisual: true
-  });
+  const timers = new Set();
+  liveTimers = timers;
+  const dom = new JSDOM(
+    '<!doctype html><html><body><div id="live-status" role="status" aria-live="polite"></div><div id="live-alert" role="alert"></div><div id="app"></div></body></html>',
+    {
+      url: "https://localhost/",
+      pretendToBeVisual: true
+    }
+  );
   const { window } = dom;
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
   // No Supabase config: the app runs local-only, the way it must keep working offline.
@@ -61,7 +92,9 @@ async function bootApp({ savedState, lockConfig } = {}) {
     location: window.location,
     FormData: window.FormData,
     requestAnimationFrame: window.requestAnimationFrame.bind(window),
-    cancelAnimationFrame: window.cancelAnimationFrame.bind(window)
+    cancelAnimationFrame: window.cancelAnimationFrame.bind(window),
+    setTimeout: trackedSetTimeout,
+    clearTimeout: trackedClearTimeout
   };
   for (const [name, value] of Object.entries(globals)) {
     Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
@@ -90,7 +123,13 @@ async function bootApp({ savedState, lockConfig } = {}) {
       await settle(window);
     },
     saved: () => JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "null"),
-    close: () => window.close()
+    close: () => {
+      for (const handle of timers) {
+        nodeClearTimeout(handle);
+      }
+      timers.clear();
+      window.close();
+    }
   };
 }
 
@@ -421,6 +460,32 @@ test("changing the PIN asks for the current one first", async () => {
 
     await enterPin(ui, "1234");
     assert.match(ui.text(), /Crea un PIN de 4 dígitos/);
+  } finally {
+    ui.close();
+  }
+});
+
+// Regression: #app itself was an aria-live region, so every tap made a screen reader
+// re-read the whole screen. Announcements now go through permanent regions outside it.
+test("screen readers hear the expense confirmation without #app being a live region", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const indexHtml = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  const shell = new JSDOM(indexHtml).window.document;
+  assert.equal(shell.querySelector("#app").hasAttribute("aria-live"), false);
+  assert.ok(shell.querySelector("#live-status[aria-live='polite']"));
+  assert.ok(shell.querySelector("#live-alert[role='alert']"));
+
+  const ui = await bootApp({ savedState: returningUserState() });
+  try {
+    await ui.click('[data-action="open-expense"]');
+    const form = ui.$("#transaction-form");
+    form.elements.namedItem("amount").value = "50000";
+    form.elements.namedItem("merchant").value = "Tienda";
+    form.requestSubmit();
+    await settle(ui.window);
+
+    assert.match(ui.$("#live-status").textContent, /Gasto registrado/);
+    assert.equal(ui.$(".snackbar")?.hasAttribute("aria-live"), false, "the visual snackbar would be announced twice");
   } finally {
     ui.close();
   }

@@ -33,12 +33,12 @@
       content="App personal de finanzas conductuales con monitoreo diario, presupuesto por periodos y simulador de ahorro."
     >
     <title>Finanzas Conductuales</title>
-    <link rel="manifest" href="manifest.webmanifest?v=1.1.20">
-    <link rel="icon" href="assets/icon.svg?v=1.1.20" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png?v=1.1.20">
-    <link rel="stylesheet" href="styles.css?v=1.1.20">
+    <link rel="manifest" href="manifest.webmanifest?v=1.1.21">
+    <link rel="icon" href="assets/icon.svg?v=1.1.21" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png?v=1.1.21">
+    <link rel="stylesheet" href="styles.css?v=1.1.21">
     <script>
-      const APP_VERSION = "1.1.20";
+      const APP_VERSION = "1.1.21";
       const APP_CACHE_NAME = `finanzas-conductuales-${APP_VERSION}`;
       const hadServiceWorkerController = Boolean(navigator.serviceWorker?.controller);
 
@@ -99,7 +99,13 @@
     </script>
   </head>
   <body>
-    <div id="app" class="app-shell" aria-live="polite">
+    <!-- Screen-reader announcements live here, OUTSIDE #app: #app used to be an
+         aria-live region itself, so every tap re-read the whole screen. These two
+         stay in the DOM permanently, which is what makes announcements reliable
+         (a live region inserted together with its text often goes unannounced). -->
+    <div id="live-status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
+    <div id="live-alert" class="visually-hidden" role="alert" aria-atomic="true"></div>
+    <div id="app" class="app-shell">
       <main class="startup-fallback">
         <section class="startup-fallback-card">
           <h1>Comprobando tu sesión</h1>

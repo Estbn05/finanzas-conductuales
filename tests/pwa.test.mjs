@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "1.1.20";
+const ASSET_VERSION = "1.1.21";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -440,7 +440,7 @@ test("movements can be exported as a CSV with expenses negative and income posit
   assert.ok(app.includes('data-action="export-movements-csv">Exportar CSV</button>'));
   assert.ok(app.includes('"export-movements-csv": downloadMovementsCsv'));
   assert.ok(app.includes('"export-movements-csv",'));
-  assert.ok(app.includes("function csvField(value)"));
+  assert.ok(app.includes("row.map(csvField)"));
   assert.ok(app.includes("function movementsCsvRows()"));
   assert.ok(app.includes("function buildMovementsCsv()"));
   assert.ok(app.includes("function downloadMovementsCsv()"));

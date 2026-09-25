@@ -11,6 +11,7 @@ import {
   getEmergencyTarget,
   isLargeUnbudgetedPurchase,
   freeShareOfBudget,
+  isSavingsJob,
   predictUntilNextPeriod,
   resolvePeriodIncome
 } from "../finance-core.js";
@@ -919,4 +920,22 @@ test("the 'sigue libre' share never passes 100% even when real money exceeds the
   assert.equal(freeShareOfBudget({ income: 2_000_000, freeRemaining: 500_000 }), 25);
   assert.equal(freeShareOfBudget({ income: 2_000_000, freeRemaining: 0 }), 0);
   assert.equal(freeShareOfBudget({ income: 0, freeRemaining: 0 }), 0);
+});
+
+// Regression: /ahorro|emergencia|buffer/ counted "Emergencia médica" (an expense) as
+// savings, pulling it out of expenses and inflating free money and projected savings.
+test("savings categories are recognized by name, but an emergency expense is not savings", () => {
+  for (const name of ["Ahorro", "Ahorro viaje", "Ahorros", "Fondo de emergencia", "Buffer", "Colchón", "Ahorro extra"]) {
+    assert.equal(isSavingsJob({ name }), true, name);
+  }
+  for (const name of ["Emergencia médica", "Emergencias del carro", "Mercado", "Gasolina", "Bufferías"]) {
+    assert.equal(isSavingsJob({ name }), false, name);
+  }
+});
+
+test("emergency progress stays between 0 and 100 even with no income on file", () => {
+  const plan = calculatePlan(
+    makeState({ profile: { monthlyIncome: 0, incomeAmount: 0, committedExpenses: 0, emergencySavings: 50_000_000 }, budgetJobs: [] })
+  );
+  assert.equal(plan.emergencyProgress, 100);
 });

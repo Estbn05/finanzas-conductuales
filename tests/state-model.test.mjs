@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { decideLoginSync, decidePushSync, hasMeaningfulLocalData, remoteChangedSinceLastSync } from "../state-model.js";
+import {
+  decideLoginSync,
+  decidePushSync,
+  hasMeaningfulLocalData,
+  merchantKey,
+  csvField,
+  merchantRuleMatches,
+  remoteChangedSinceLastSync,
+  uid
+} from "../state-model.js";
 
 const EMPTY = { profile: { completed: false }, transactions: [], budgetJobs: [] };
 const withData = (cloudUpdatedAt) => ({
@@ -65,4 +74,52 @@ test("push uploads the local edit unless the cloud really changed since our last
   assert.equal(decidePushSync(local, remoteRow(withData(LAST_SYNC), LAST_SYNC)), "upload");
   assert.equal(decidePushSync(local, remoteRow(EMPTY, AFTER_LAST_SYNC)), "upload");
   assert.equal(decidePushSync(local, remoteRow(withData(AFTER_LAST_SYNC), AFTER_LAST_SYNC)), "download");
+});
+
+const matches = (typed, ruleName) => merchantRuleMatches(merchantKey(typed), merchantKey(ruleName));
+
+// Regression: raw substring matching made a "Pan" rule claim unrelated merchants.
+test("a merchant rule never matches just because its letters appear inside another word", () => {
+  assert.equal(matches("Pantalones", "Pan"), false);
+  assert.equal(matches("Compañía", "Pan"), false);
+  assert.equal(matches("Japan Sushi", "Pan"), false);
+});
+
+test("a merchant rule matches the same merchant written differently or with extra words", () => {
+  assert.equal(matches("Panadería", "panaderia"), true);
+  assert.equal(matches("Éxito Calle 80", "Éxito"), true);
+  assert.equal(matches("Éxito", "Éxito Calle 80"), true);
+  assert.equal(matches("Pan", "Pan"), true);
+});
+
+test("very short or empty names only match exactly", () => {
+  assert.equal(matches("D1", "D1"), true);
+  assert.equal(matches("D1 Centro", "D1"), false);
+  assert.equal(merchantRuleMatches("", "pan"), false);
+});
+
+// Regression: a merchant or note typed as "=HYPERLINK(...)" was exported verbatim and
+// ran as a formula when the CSV was opened in Excel or Sheets.
+test("CSV export neutralizes text that a spreadsheet would run as a formula", () => {
+  assert.equal(csvField("=HYPERLINK(\"http://x\")"), `"'=HYPERLINK(""http://x"")"`);
+  assert.equal(csvField("+57 300"), "'+57 300");
+  assert.equal(csvField("-descuento"), "'-descuento");
+  assert.equal(csvField("@usuario"), "'@usuario");
+});
+
+test("CSV export keeps amounts numeric and quotes only when needed", () => {
+  assert.equal(csvField(-50_000), "-50000");
+  assert.equal(csvField(120_000), "120000");
+  assert.equal(csvField("Panadería"), "Panadería");
+  assert.equal(csvField("Pan, leche"), '"Pan, leche"');
+  assert.equal(csvField(""), "");
+  assert.equal(csvField(null), "");
+});
+
+test("generated ids keep their prefix and do not collide", () => {
+  const ids = new Set(Array.from({ length: 5_000 }, () => uid("tx")));
+  assert.equal(ids.size, 5_000);
+  for (const id of ids) {
+    assert.ok(id.startsWith("tx-"));
+  }
 });

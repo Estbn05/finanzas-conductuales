@@ -54,7 +54,9 @@ export function calculatePlan(state, today) {
     committedForPeriod,
     emergencyTarget,
     emergencyGap,
-    emergencyProgress: (Number(state.profile.emergencySavings || 0) / emergencyTarget) * 100,
+    // getEmergencyTarget() floors at 1, so with no income on file the raw ratio can reach
+    // millions of percent; cap it here so no consumer ever gets a nonsense figure.
+    emergencyProgress: Math.min(100, Math.max(0, (Number(state.profile.emergencySavings || 0) / emergencyTarget) * 100)),
     incomeNote:
       state.profile.incomeType === "variable"
         ? `Ingreso variable con volatilidad ${state.profile.volatility || "medium"}: se recomienda un margen precautorio mayor.`
@@ -336,8 +338,17 @@ export function budgetRingAllocation(summary) {
   };
 }
 
+// A category is savings when its name says so. "emergencia" alone is NOT enough: that
+// used to match "Emergencia médica" (a real, recurring expense) and count it as savings,
+// taking it out of expenses and inflating both free money and projected savings. Only
+// the savings phrasings people actually use for an emergency fund count.
+// \p{L} lookarounds instead of \b: JS's \b is ASCII-only, so an accented letter
+// counted as a word boundary and "Bufferías" matched "buffer".
+const SAVINGS_NAME_PATTERN =
+  /(?<!\p{L})ahorr|fondo\s+de\s+emergencia|(?<!\p{L})emergency\s+fund|(?<!\p{L})buffer(?!\p{L})|(?<!\p{L})colch[oó]n(?!\p{L})/iu;
+
 export function isSavingsJob(job) {
-  return /ahorro|emergencia|buffer/i.test(String(job?.name || ""));
+  return SAVINGS_NAME_PATTERN.test(String(job?.name || ""));
 }
 
 export function extraIncomeForPeriod(state, today) {

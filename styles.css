@@ -9832,3 +9832,16 @@ html[data-theme="dark"] .btn.primary:disabled,
   color: rgba(232, 245, 238, 0.5) !important;
   background: rgba(255, 255, 255, 0.09) !important;
 }
+
+/* Visible to screen readers only (the live-region announcer in index.html). */
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
