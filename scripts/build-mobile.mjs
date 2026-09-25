@@ -10,6 +10,8 @@ const runtimeEntries = [
   "styles.css",
   "app.js",
   "finance-core.js",
+  // app.js imports it at load time; leaving it out ships an APK that never boots.
+  "state-model.js",
   "sync-client.js",
   "sync-config.js",
   "manifest.webmanifest",

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "1.1.10";
+const ASSET_VERSION = "1.1.14";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -311,6 +311,7 @@ test("tapping a day on the expense calendar filters movements to that day", asyn
 test("period prediction, period close and merchant rules are exposed in the app shell", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
   const core = await readFile(new URL("../finance-core.js", import.meta.url), "utf8");
+  const stateModel = await readFile(new URL("../state-model.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
 
   assert.ok(core.includes("export function predictUntilNextPeriod"));
@@ -367,13 +368,13 @@ test("period prediction, period close and merchant rules are exposed in the app 
   assert.ok(app.includes("function renderPeriodCloseCard"));
   assert.ok(app.includes('data-action="save-period-close"'));
   assert.ok(app.includes("function savePeriodClosure"));
-  assert.ok(app.includes("periodClosures: []"));
+  assert.ok(stateModel.includes("periodClosures: []"));
   assert.ok(app.includes("normalizePeriodClosures"));
   assert.ok(app.includes("function renderMerchantRulesPanel"));
   assert.ok(app.includes("function renderMerchantRuleSuggestion"));
   assert.ok(app.includes("function rememberMerchantRule"));
   assert.ok(app.includes("function findMerchantRule"));
-  assert.ok(app.includes("merchantRules: []"));
+  assert.ok(stateModel.includes("merchantRules: []"));
   assert.ok(app.includes("data-apply-merchant-rule"));
   assert.ok(app.includes('data-action="remove-merchant-rule"'));
   assert.ok(styles.includes("Prediction, period close and merchant rules v28"));
@@ -435,9 +436,10 @@ test("authenticated new users get a three-step financial onboarding", async () =
 // puntuaciones que nadie contesto. Un perfil nuevo no debe afirmar nada del usuario.
 test("a new profile carries no invented data about the user", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
-  const defaults = app.slice(app.indexOf("function createDefaultState()"), app.indexOf("function loadState()"));
+  const stateModel = await readFile(new URL("../state-model.js", import.meta.url), "utf8");
+  const defaults = stateModel.slice(stateModel.indexOf("function createDefaultState("), stateModel.indexOf("function migrateState("));
 
-  assert.equal(/1_750_000|1750000/.test(app), false, "el ingreso de la plantilla no debe existir en ningun sitio");
+  assert.equal(/1_750_000|1750000/.test(app) || /1_750_000|1750000/.test(stateModel), false, "el ingreso de la plantilla no debe existir en ningun sitio");
   assert.match(defaults, /incomeAmount: 0/);
   assert.match(defaults, /incomeCadence: ""/);
   assert.match(defaults, /incomeType: ""/);
@@ -456,11 +458,12 @@ test("a new profile carries no invented data about the user", async () => {
 
 test("saving Mis datos uses one native form submission per section", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const stateModel = await readFile(new URL("../state-model.js", import.meta.url), "utf8");
   const diagnosisModal = app.slice(app.indexOf("function renderDiagnosisModal()"), app.indexOf("function renderDiagnosisPlanFields"));
   const bindEvents = app.slice(app.indexOf("function bindEvents()"), app.indexOf("function bindOnboardingFlowV2"));
 
-  assert.ok(app.includes("const DIAGNOSIS_SECTIONS = {"));
-  assert.ok(app.includes('plan: {') && app.includes('balances: {'));
+  assert.ok(stateModel.includes("export const DIAGNOSIS_SECTIONS = {"));
+  assert.ok(stateModel.includes('plan: {') && stateModel.includes('balances: {'));
   // La seccion "Perfil conductual" se elimino: no alimentaba ninguna decision de la
   // app y se mostraba con respuestas que el usuario nunca dio.
   assert.equal(app.includes('behavior: {'), false);
@@ -568,7 +571,8 @@ test("home screen widget shows free money and stays in sync with app state", asy
   assert.ok(syncWidgetFn.includes("bridge.update({ freeMoney, periodLabel })"));
   const saveStateFn = app.slice(app.indexOf("function saveState(options = {})"), app.indexOf("async function initializeCloudSync()"));
   assert.ok(saveStateFn.includes("syncHomeWidget();"));
-  assert.ok(app.includes("render();\ninitializeNativeNotificationActions();"));
+  // \r?\n: core.autocrlf=true checks the file out with CRLF on Windows.
+  assert.match(app, /render\(\);\r?\ninitializeNativeNotificationActions\(\);/);
   assert.ok(app.includes("syncHomeWidget();"));
 
   assert.ok(manifest.includes('android:name=".FreeMoneyWidgetProvider"'));
@@ -631,6 +635,7 @@ test("dinero libre never merges real liquidity into it via a blind live sum; unc
 // explicitly, whether this period's income is already inside the real balance.
 test("fixed income is auto-applied to real liquidity once the period starts, with an undoable banner", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const stateModel = await readFile(new URL("../state-model.js", import.meta.url), "utf8");
 
   assert.ok(app.includes("¿Tu ingreso es fijo o variable?"));
   assert.ok(app.includes("data-onboarding-income-type=\"fixed\""));
@@ -649,8 +654,8 @@ test("fixed income is auto-applied to real liquidity once the period starts, wit
   assert.ok(app.includes('"dismiss-income-banner"'));
 
   // Persisted across reload/sync, and reset to null for brand-new accounts.
-  assert.ok(app.includes("periodIncomeStatus: null"));
-  assert.ok(app.includes("savedState.periodIncomeStatus"));
+  assert.ok(stateModel.includes("periodIncomeStatus: null"));
+  assert.ok(stateModel.includes("savedState.periodIncomeStatus"));
 });
 
 // Regression: getBudgetWindow() treats periodStart as a recurring anchor and rolls it
@@ -865,6 +870,7 @@ test("onboarding controls stay legible in dark mode instead of keeping their lig
 
 test("theme follows the OS when the user never picked one, so data-theme cannot contradict prefers-color-scheme", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const stateModel = await readFile(new URL("../state-model.js", import.meta.url), "utf8");
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
   const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
 
@@ -873,7 +879,7 @@ test("theme follows the OS when the user never picked one, so data-theme cannot 
   assert.ok(styles.includes('html[data-theme="dark"]'));
 
   // A fresh/signed-out state means "follow the system", not a hardcoded light.
-  const defaultState = app.slice(app.indexOf("function createDefaultState"), app.indexOf("function migrateState"));
+  const defaultState = stateModel.slice(stateModel.indexOf("function createDefaultState"), stateModel.indexOf("function migrateState"));
   assert.ok(defaultState.includes('theme: ""'));
   assert.equal(defaultState.includes('theme: "light"'), false);
 
@@ -883,7 +889,7 @@ test("theme follows the OS when the user never picked one, so data-theme cannot 
   assert.ok(themePref.includes('storedThemeChoice() || (systemPrefersDark() ? "dark" : "light")'));
 
   // An explicit choice still wins and still round-trips through migration.
-  const migrate = app.slice(app.indexOf("function migrateState"), app.indexOf("function saveState"));
+  const migrate = stateModel.slice(stateModel.indexOf("function migrateState"));
   assert.ok(migrate.includes('savedState.settings?.theme === "dark" || savedState.settings?.theme === "light"'));
 
   // index.html paints before app.js loads, so it needs the same fallback.
@@ -1129,13 +1135,14 @@ test("static startup fallback retries automatically without manual controls", as
 
 test("money inputs format thousands while preserving numeric calculations", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const stateModel = await readFile(new URL("../state-model.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
 
   assert.ok(app.includes("bindMoneyInputs();"));
   assert.ok(app.includes('input[type="number"][step="1000"], input[data-money-input="true"]'));
   assert.ok(app.includes('input.dataset.moneyInput = "true"'));
   assert.ok(app.includes("formatMoneyInputValue"));
-  assert.ok(app.includes("parseNumberText"));
+  assert.ok(stateModel.includes("parseNumberText"));
   assert.ok(app.includes('new Intl.NumberFormat("es-CO"'));
   assert.ok(styles.includes('.quick-amount input[data-money-input="true"]'));
 });
@@ -1315,10 +1322,26 @@ test("apartar dinero reserves money in plain language without moving real balanc
   assert.ok(app.includes('if (planSheet === "setaside")'));
   const homeView = app.slice(app.indexOf("function renderToday"), app.indexOf("function renderPeriodPredictionCard"));
   assert.ok(homeView.includes('data-action="open-setaside-sheet"'));
+  // Plan's category list used to show both "Apartar dinero" and "Apartar cada semana
+  // o mes" as two buttons side by side with no explanation of when to pick which. Now
+  // it's one "Nueva categoría" entry that opens a chooser sheet asking the actual
+  // question, which then routes to whichever of the two forms fits — neither form's
+  // own behavior (or the Inicio shortcut straight into setaside) changed.
   const planView = app.slice(app.indexOf("function renderBudget(plan)"), app.indexOf("function renderPeriodCloseCard"));
-  assert.ok(planView.includes('data-action="open-setaside-sheet"'));
+  assert.ok(planView.includes('data-action="open-add-category-choice"'));
+  // The recurring path is no longer directly clickable from Plan — only reachable
+  // through the chooser now. The empty-state "Apartar dinero" quick-start CTA still
+  // jumps straight to setaside, unchanged — that's a distinct first-run nudge, not
+  // part of the two-buttons-side-by-side ambiguity that got consolidated.
+  assert.equal(planView.includes('data-action="open-category-sheet"'), false);
+
+  assert.ok(app.includes("function renderAddCategoryChoiceSheet()"));
+  assert.ok(app.includes('planSheet = "add-category-choice";'));
+  assert.ok(app.includes('if (planSheet === "add-category-choice")'));
+  const choiceSheet = app.slice(app.indexOf("function renderAddCategoryChoiceSheet"), app.indexOf("function renderSetAsideSheet"));
   // The recurring path (with its frequency question) must stay reachable alongside it.
-  assert.ok(planView.includes('data-action="open-category-sheet"'));
+  assert.ok(choiceSheet.includes('data-action="open-setaside-sheet"'));
+  assert.ok(choiceSheet.includes('data-action="open-category-sheet"'));
 
   // Asks only how much and what for — deliberately no frequency question, unlike
   // renderBudgetJobForm, because "aparté esto ahora" means once, this period.
@@ -1538,10 +1561,11 @@ test("sheet and modal backdrops close on tap-outside, and clicks inside the shee
   for (const needle of expectedBackdropActions) {
     assert.ok(app.includes(needle), `missing backdrop close wiring: ${needle}`);
   }
-  // The 3 plan-sheet backdrops (setaside/category/extra) share one action.
+  // The 4 plan-sheet backdrops (add-category-choice/setaside/category/extra) share
+  // one action.
   assert.equal(
     app.split('role="presentation" data-action="close-plan-sheet"').length - 1,
-    3
+    4
   );
   // Onboarding is deliberately excluded — it has no cancel concept.
   assert.ok(app.includes('<div class="modal-backdrop onboarding-backdrop" role="presentation">'));
@@ -1579,4 +1603,18 @@ test("drawer visual system keeps menu contrast in mobile themes", async () => {
   assert.match(styles, /Sidebar ghost button dark contrast v14[\s\S]*html\[data-theme="dark"\] \.sidebar \.menu-tools \.btn\.ghost[\s\S]*background: rgba\(255, 255, 255, 0\.07\) !important/);
   assert.match(styles, /Mobile drawer scroll fix v11[\s\S]*\.app-shell\.is-menu-open \.sidebar\s*{[\s\S]*height: 100dvh[\s\S]*touch-action: pan-y/);
   assert.match(styles, /\.app-shell\.is-menu-open \.nav-panel,[\s\S]*\.app-shell\.is-menu-open \.nav-panel\.is-open\s*{[\s\S]*overflow-y: auto !important[\s\S]*padding-bottom: calc\(116px \+ env\(safe-area-inset-bottom, 0px\)\)/);
+});
+
+// Regression: extracting state-model.js out of app.js left it out of the mobile build's
+// file list, so the APK shipped an app.js whose import 404'd and the app never booted.
+// Every local module app.js imports must be copied into www/.
+test("mobile build ships every local module app.js imports", async () => {
+  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  const buildScript = await readFile(new URL("../scripts/build-mobile.mjs", import.meta.url), "utf8");
+  const localImports = [...app.matchAll(/from "\.\/([\w-]+\.js)\?v=/g)].map((match) => match[1]);
+
+  assert.ok(localImports.includes("state-model.js"));
+  for (const file of localImports) {
+    assert.ok(buildScript.includes(`"${file}"`), `${file} is imported by app.js but missing from build-mobile.mjs`);
+  }
 });

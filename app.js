@@ -1,7 +1,6 @@
 import {
   FREE_CATEGORY_ID,
   INCOME_CADENCES,
-  JOB_CADENCES,
   LARGE_PURCHASE_RATIO,
   budgetAmountForJob as getBudgetAmountForJob,
   budgetRingAllocation as getBudgetRingAllocation,
@@ -14,7 +13,39 @@ import {
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictUntilNextPeriod as getPeriodPrediction,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.10";
+} from "./finance-core.js?v=1.1.14";
+import {
+  DEFAULT_REMINDER_TIME,
+  DIAGNOSIS_SECTIONS,
+  JOB_CADENCE_VALUES,
+  LEGACY_TEMPLATE_BUDGET_JOBS,
+  buildMerchantRulesFromTransactions,
+  clamp,
+  cleanDate,
+  cleanText,
+  clearTemplateBudget,
+  createDefaultState,
+  filterMerchantRulesForJobs,
+  isTemplateBudgetJobs,
+  merchantKey,
+  migrateState,
+  normalizeBudgetExtras,
+  normalizeBudgetJobs,
+  normalizeCalendarEvents,
+  normalizeDailyReminder,
+  normalizeEventCategory,
+  normalizeLiquidity,
+  normalizeLocation,
+  normalizeMerchantRules,
+  normalizePayday,
+  normalizePeriodClosures,
+  normalizePredictionStatus,
+  normalizeReminderTime,
+  normalizeTransactions,
+  numberFrom,
+  numberValue,
+  uid
+} from "./state-model.js?v=1.1.14";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -29,7 +60,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.10";
+} from "./sync-client.js?v=1.1.14";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -48,7 +79,6 @@ const PERIOD_CLOSE_NOTICE_DAYS = 5;
 const AUTH_STARTUP_TIMEOUT_MS = 8_000;
 const SESSION_CHECK_MANUAL_DELAY_MS = 3_000;
 const LOCAL_STATE_POLL_DURATION_MS = 1_500;
-const DEFAULT_REMINDER_TIME = "20:00";
 // Declared here, before the synchronous render() call further down (which runs
 // immediately at module init and can reach formatMoney/formatDate on the very first
 // paint), not next to the functions that use them — same TDZ trap documented above for
@@ -63,17 +93,6 @@ const PLAIN_NUMBER_FORMATTER = new Intl.NumberFormat("es-CO", { maximumFractionD
 const moneyFormatterCache = new Map();
 const DAILY_REMINDER_NOTIFICATION_ID = 7301;
 const TEST_REMINDER_NOTIFICATION_ID = 7302;
-// Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
-// usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
-// para limpiarla de instalaciones antiguas que todavia la arrastren (ver migrateState
-// y clearTemplateBudget). No usar ninguno de estos valores como default de nada.
-const LEGACY_TEMPLATE_BUDGET_JOBS = [
-  { id: "gas", name: "Gasolina moto", amount: 30_000, cadence: "weekly" },
-  { id: "dates", name: "Salidas con novia", amount: 45_000, cadence: "monthly" },
-  { id: "gifts", name: "Regalos para novia", amount: 20_000, cadence: "monthly" },
-  { id: "university", name: "Universidad y comida", amount: 25_000, cadence: "monthly" },
-  { id: "flex", name: "Imprevistos", amount: 9_000, cadence: "monthly" }
-];
 const INCOME_TYPES = ["fixed", "variable"];
 const VOLATILITY_VALUES = ["low", "medium", "high"];
 
@@ -83,7 +102,6 @@ const VOLATILITY_VALUES = ["low", "medium", "high"];
 // tres opciones, sin "quincenal": quien cobra cada 15 dias terminaba en "Otro", que
 // guardaba "semester" en silencio y le partia todo el calculo de periodos.
 const INCOME_CADENCE_VALUES = Object.keys(INCOME_CADENCES);
-const JOB_CADENCE_VALUES = Object.keys(JOB_CADENCES);
 // Las que el onboarding no muestra como boton directo y quedan detras de "Otro".
 const SECONDARY_INCOME_CADENCES = ["semester", "yearly"];
 
@@ -96,7 +114,7 @@ const NAV_ITEMS = [
   { id: "progress", label: "Progreso", icon: "06" },
   { id: "profile", label: "Datos", icon: "07" }
 ];
-const APP_VIEWS = new Set([...NAV_ITEMS.map((item) => item.id), "spending", "periodClose"]);
+const APP_VIEWS = new Set([...NAV_ITEMS.map((item) => item.id), "periodClose"]);
 
 const app = document.querySelector("#app");
 let state = loadState();
@@ -223,79 +241,6 @@ window.matchMedia?.("(prefers-color-scheme: dark)")?.addEventListener?.("change"
 });
 window.addEventListener("offline", renderBackground);
 
-function createDefaultState() {
-  const today = todayKey();
-  const now = new Date().toISOString();
-
-  return {
-    activeView: DEFAULT_VIEW,
-    showDiagnosis: false,
-    diagnosisSection: "plan",
-    lastAlert: "Registra cada gasto en menos de un minuto. Usa Editar mi plan para ajustar tus números reales.",
-    updated_at: now,
-    meta: {
-      updatedAt: now,
-      updated_at: now,
-      cloudUpdatedAt: "",
-      cloudUserEmail: "",
-      budgetPreset: ""
-    },
-    profile: {
-      completed: false,
-      name: "Tu plan",
-      currency: "COP",
-      // Un perfil nuevo no sabe nada del usuario todavia. Cadencia y tipo de ingreso
-      // van vacios a proposito: el onboarding no debe preseleccionar una respuesta por
-      // el, y su validacion exige elegir. Antes este bloque describia a una persona
-      // concreta (un estudiante con ingreso semestral de $1.750.000) y esos numeros
-      // aparecian ya escritos en el formulario del primer usuario que abriera la app.
-      incomeAmount: 0,
-      monthlyIncome: 0,
-      semesterIncome: 0,
-      periodStart: monthStartKey(today),
-      semesterStart: monthStartKey(today),
-      incomeCadence: "",
-      incomeType: "",
-      volatility: "medium",
-      committedExpenses: 0,
-      emergencySavings: 0,
-      payday: 0,
-      updated_at: now
-    },
-    settings: {
-      monthlyRaisePct: 8,
-      escalationPct: 50,
-      // Empty means "follow the system". Forcing "light" here made the app fight the
-      // prefers-color-scheme rules on a phone set to dark mode.
-      theme: "",
-      updated_at: now
-    },
-    budgetExtras: [],
-    calendarEvents: [],
-    dailyReminder: {
-      enabled: false,
-      time: DEFAULT_REMINDER_TIME,
-      lastShownDate: "",
-      updated_at: now
-    },
-    liquidity: {
-      account: 0,
-      cash: 0,
-      initialized: false,
-      updated_at: now
-    },
-    periodIncomeStatus: null,
-    periodIncomeApplied: [],
-    budgetJobs: [],
-    transactions: [],
-    cooldowns: [],
-    periodClosures: [],
-    merchantRules: [],
-    checkins: [],
-    wins: []
-  };
-}
-
 function isQuotaExceededError(error) {
   return error instanceof DOMException && (error.name === "QuotaExceededError" || error.code === 22);
 }
@@ -333,64 +278,18 @@ function loadState() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (!saved) {
-      return createDefaultState();
+      return createDefaultState(todayKey(), DEFAULT_VIEW);
     }
-    return migrateState(JSON.parse(saved));
+    return migrateState(JSON.parse(saved), todayKey(), DEFAULT_VIEW);
   } catch {
     const backups = readLocalBackups();
     if (backups[0]?.state) {
-      const restored = migrateState(backups[0].state);
+      const restored = migrateState(backups[0].state, todayKey(), DEFAULT_VIEW);
       restored.lastAlert = "Tu guardado local estaba dañado; lo recuperamos desde tu última copia automática.";
       return restored;
     }
-    return createDefaultState();
+    return createDefaultState(todayKey(), DEFAULT_VIEW);
   }
-}
-
-function migrateState(savedState) {
-  const defaults = createDefaultState();
-  const migrated = {
-    ...defaults,
-    activeView: savedState.activeView || defaults.activeView,
-    showDiagnosis: Boolean(savedState.showDiagnosis),
-    diagnosisSection: DIAGNOSIS_SECTIONS[savedState.diagnosisSection] ? savedState.diagnosisSection : defaults.diagnosisSection,
-    lastAlert: savedState.lastAlert || defaults.lastAlert,
-    updated_at: savedState.updated_at || defaults.updated_at,
-    meta: { ...defaults.meta, ...(savedState.meta || {}) },
-    profile: { ...defaults.profile, ...(savedState.profile || {}) },
-    settings: {
-      monthlyRaisePct: Number(savedState.settings?.monthlyRaisePct ?? defaults.settings.monthlyRaisePct),
-      escalationPct: Number(savedState.settings?.escalationPct ?? defaults.settings.escalationPct),
-      theme:
-        savedState.settings?.theme === "dark" || savedState.settings?.theme === "light"
-          ? savedState.settings.theme
-          : defaults.settings.theme,
-      updated_at: savedState.settings?.updated_at || defaults.settings.updated_at
-    },
-    transactions: normalizeTransactions(savedState.transactions || defaults.transactions),
-    budgetExtras: normalizeBudgetExtras(savedState.budgetExtras || defaults.budgetExtras),
-    calendarEvents: normalizeCalendarEvents(savedState.calendarEvents || defaults.calendarEvents),
-    dailyReminder: normalizeDailyReminder(savedState.dailyReminder || defaults.dailyReminder),
-    liquidity: normalizeLiquidity(savedState.liquidity || defaults.liquidity),
-    periodIncomeStatus: savedState.periodIncomeStatus || null,
-    periodIncomeApplied: Array.isArray(savedState.periodIncomeApplied) ? savedState.periodIncomeApplied : [],
-    cooldowns: savedState.cooldowns || defaults.cooldowns,
-    periodClosures: normalizePeriodClosures(savedState.periodClosures || defaults.periodClosures),
-    merchantRules: normalizeMerchantRules(savedState.merchantRules || defaults.merchantRules, savedState.transactions || defaults.transactions),
-    checkins: savedState.checkins || defaults.checkins,
-    wins: savedState.wins || defaults.wins
-  };
-  migrated.profile.incomeAmount = migrated.profile.incomeAmount ?? migrated.profile.semesterIncome ?? migrated.profile.monthlyIncome ?? defaults.profile.incomeAmount;
-  migrated.profile.periodStart = migrated.profile.periodStart || migrated.profile.semesterStart || defaults.profile.periodStart;
-  migrated.profile.semesterStart = migrated.profile.semesterStart || migrated.profile.periodStart;
-  migrated.profile.payday = normalizePayday(migrated.profile.payday ?? defaults.profile.payday);
-  migrated.budgetJobs = normalizeBudgetJobs(savedState.budgetJobs || defaults.budgetJobs);
-  migrated.merchantRules = filterMerchantRulesForJobs(migrated.merchantRules, migrated.budgetJobs);
-  if (migrated.profile.completed && migrated.meta.budgetPreset !== "student" && isTemplateBudgetJobs(migrated.budgetJobs)) {
-    clearTemplateBudget(migrated);
-    migrated.lastAlert = "Quité las categorías de ejemplo que traía una versión vieja. Crea solo las que de verdad usas.";
-  }
-  return migrated;
 }
 
 function saveState(options = {}) {
@@ -641,7 +540,7 @@ function getCloudPayload() {
 function applyRemoteState(remoteState, remoteUpdatedAt, alert) {
   applyingCloudState = true;
   saveLocalBackup("antes de bajar nube");
-  state = migrateState(remoteState);
+  state = migrateState(remoteState, todayKey(), DEFAULT_VIEW);
   state.showDiagnosis = false;
   pendingExtraAllocation = null;
   editingTransactionId = "";
@@ -745,7 +644,7 @@ function restoreLocalBackup(id) {
     return;
   }
   saveLocalBackup("antes de restaurar una copia local");
-  state = migrateState(backup.state);
+  state = migrateState(backup.state, todayKey(), DEFAULT_VIEW);
   // backup.state carries the cloudUpdatedAt from whenever the backup was taken. Left
   // as-is, the next pushCloudState() would see the real cloud as "changed since our
   // last sync" and immediately re-download it, silently undoing the restore the user
@@ -1486,11 +1385,15 @@ function renderView(plan) {
     periodClose: renderPeriodCloseScreen,
     savings: renderSavings,
     calendar: renderCalendar,
-    spending: renderSpending,
     movements: renderMovements,
     progress: renderProgressView,
     profile: renderProfile
   };
+  // A persisted activeView from an older version (e.g. the removed "spending" screen)
+  // would otherwise call undefined here and blank the whole app on launch.
+  if (!views[state.activeView]) {
+    state.activeView = DEFAULT_VIEW;
+  }
   return views[state.activeView](plan);
 }
 
@@ -1908,15 +1811,12 @@ function renderBudget(plan) {
                 <button class="btn primary" type="button" data-action="open-setaside-sheet">Apartar dinero</button>
               </div>`
         }
-        <button class="add-category-row" type="button" data-action="open-setaside-sheet" ${state.budgetJobs.length >= 10 ? "disabled" : ""}>
-          <span aria-hidden="true">$</span>
-          <strong>Apartar dinero</strong>
-          <small>Una vez, en este periodo · max. ${formatCompactMoney(summary.freeBudget)}</small>
-        </button>
-        <button class="add-category-row" type="button" data-action="open-category-sheet" ${state.budgetJobs.length >= 10 ? "disabled" : ""}>
+        <button class="add-category-row" type="button" data-action="open-add-category-choice" ${state.budgetJobs.length >= 10 ? "disabled" : ""}>
           <span aria-hidden="true">+</span>
-          <strong>Apartar cada semana o mes</strong>
-          <small>Para algo que pagas siempre, como el mercado</small>
+          <div class="add-category-row-text">
+            <strong>Nueva categoría</strong>
+            <small>Una vez o recurrente · max. ${formatCompactMoney(summary.freeBudget)}</small>
+          </div>
         </button>
       </div>
     </section>
@@ -2394,6 +2294,40 @@ function renderBudgetJobForm() {
   `;
 }
 
+// Single entry point for "Nueva categoría" in Plan. Used to be two buttons sitting
+// side by side (setaside vs recurring) with no explanation of when to pick which —
+// this picks for the user in one tap by asking the actual question, then routes to
+// whichever of the two purpose-built forms below fits. Neither form changed: setaside
+// still tops up an existing envelope by name instead of duplicating it, and the
+// recurring form still asks for a cadence. Only the entry UI got consolidated.
+function renderAddCategoryChoiceSheet() {
+  return `
+    <div class="sheet-backdrop" role="presentation" data-action="close-plan-sheet">
+      <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="add-category-choice-title">
+        <div class="sheet-handle"></div>
+        <div class="sheet-heading">
+          <div><p class="eyebrow">Plan</p><h2 id="add-category-choice-title">Nueva categoría</h2></div>
+          <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">x</button>
+        </div>
+        <button class="add-category-row" type="button" data-action="open-setaside-sheet">
+          <span aria-hidden="true">$</span>
+          <div class="add-category-row-text">
+            <strong>Apartar dinero</strong>
+            <small>Una vez, en este periodo — para algo puntual</small>
+          </div>
+        </button>
+        <button class="add-category-row" type="button" data-action="open-category-sheet">
+          <span aria-hidden="true">+</span>
+          <div class="add-category-row-text">
+            <strong>Apartar cada semana o mes</strong>
+            <small>Para algo que pagas siempre, como el mercado</small>
+          </div>
+        </button>
+      </section>
+    </div>
+  `;
+}
+
 // Plain-language front door for reserving money, in the "envelope" mental model people
 // already use ("aparté plata para los remedios"). Deliberately asks only two things —
 // how much, and what for — where renderBudgetJobForm also asks for a frequency: this
@@ -2452,6 +2386,10 @@ function renderSetAsideSheet() {
 }
 
 function renderPlanSheet() {
+  if (planSheet === "add-category-choice") {
+    return renderAddCategoryChoiceSheet();
+  }
+
   if (planSheet === "setaside") {
     return renderSetAsideSheet();
   }
@@ -2996,86 +2934,6 @@ function renderChoicePills(name, options, selected) {
         .join("")}
     </div>
   `;
-}
-
-function renderSpending(plan) {
-  const summary = budgetSummary();
-  const threshold = Math.max(1, summary.income * LARGE_PURCHASE_RATIO);
-
-  return `
-    <section class="content-grid spending-grid">
-      <article class="card wide-card primary-spend-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Nuevo movimiento</p>
-            <h2>Registrar gasto</h2>
-          </div>
-          <span class="metric-badge">Libre ${formatMoney(summary.freeRemaining)}</span>
-        </div>
-        <form class="stacked-form" id="transaction-form">
-          <label>
-            Comercio
-            <input name="merchant" type="text" maxlength="42" placeholder="Ej. Tienda" required>
-          </label>
-          ${renderMerchantRuleSuggestion()}
-          <label>
-            Descripción opcional
-            <input name="description" type="text" maxlength="90" placeholder="Ej. Tanqueada, regalo, almuerzo">
-          </label>
-          <div class="transaction-options-row">
-            <label>
-              Categoría
-              <select name="category" required>
-                <option value="${FREE_CATEGORY_ID}">Libre / sin clasificar</option>
-                ${state.budgetJobs.map((job) => `<option value="${escapeAttr(job.id)}">${escapeHtml(job.name)}</option>`).join("")}
-              </select>
-            </label>
-            <label>
-              Pagado con
-              <select name="source">
-                ${renderLocationOptions("account")}
-              </select>
-            </label>
-          </div>
-          <div class="amount-submit-row">
-            <label>
-              Monto
-              <input name="amount" type="number" min="1000" step="1000" required>
-            </label>
-            <button class="btn primary spend-submit" type="submit">Registrar gasto</button>
-          </div>
-          <label class="check-row">
-            <input name="budgeted" type="checkbox" checked>
-            <span>Ya lo tenía planeado<small>Si NO lo tenías planeado y es un gasto grande, te damos 24 horas antes de registrarlo para pensarlo con calma.</small></span>
-          </label>
-          <label class="check-row">
-            <input name="oneOff" type="checkbox">
-            <span>No fue un gasto de todos los días<small>Actívalo en compras grandes que no se repiten (un viaje, un regalo), para que no afecten el cálculo de cuánto gastas por día normalmente.</small></span>
-          </label>
-        </form>
-      </article>
-
-      <article class="card wide-card">
-        <div class="card-heading">
-          <div>
-            <p class="eyebrow">Gasto por categoría</p>
-            <h2>Lo que va usado</h2>
-          </div>
-          <span class="metric-badge">Compra grande: ${formatMoney(threshold)}</span>
-        </div>
-        ${renderCategoryBars(plan, state.budgetJobs.length + 1)}
-      </article>
-    </section>
-  `;
-}
-
-function renderLocationOptions(selected) {
-  return [
-    ["account", "Cuenta"],
-    ["cash", "Efectivo"]
-  ]
-    .map(([value, label]) => `<option value="${value}" ${selected === value ? "selected" : ""}>${label}</option>`)
-    .join("");
 }
 
 function renderMovements() {
@@ -4038,20 +3896,6 @@ function renderOnboardingModal() {
   `;
 }
 
-const DIAGNOSIS_SECTIONS = {
-  plan: {
-    icon: "plan",
-    title: "Plan básico",
-    subtitle: "Ingreso y frecuencia del periodo",
-    fields: ["name", "incomeCadence", "incomeType", "incomeAmount", "periodStart", "volatility", "committedExpenses", "payday"]
-  },
-  balances: {
-    icon: "wallet",
-    title: "Saldos",
-    subtitle: "Dinero disponible hoy",
-    fields: ["account", "cash", "emergencySavings"]
-  }
-};
 
 function renderDiagnosisModal() {
   if (!state.profile.completed) {
@@ -5123,6 +4967,7 @@ function handleAction(event) {
     "close-expense",
     "show-auth-form",
     "back-auth-options",
+    "open-add-category-choice",
     "open-category-sheet",
     "open-setaside-sheet",
     "open-extra-sheet",
@@ -5188,6 +5033,12 @@ function handleAction(event) {
       authMode = "";
       authNotice = null;
       cloudState.error = "";
+    },
+    "open-add-category-choice": () => {
+      planSheet = "add-category-choice";
+      menuOpen = false;
+      predictionDetailsOpen = false;
+      periodReportOpen = false;
     },
     "open-category-sheet": () => {
       planSheet = "category";
@@ -5481,7 +5332,7 @@ function submitDiagnosisForm(form) {
     };
 
     if (shouldClearTemplateBudget) {
-      clearTemplateBudget();
+      clearTemplateBudget(state);
     }
     successMessage = shouldClearTemplateBudget
       ? "Datos guardados. Quité las categorías de ejemplo; ahora crea las tuyas."
@@ -6149,7 +6000,7 @@ function clearLocalUserState() {
   clearTimeout(dailyReminderTimer);
   localStorage.removeItem(STORAGE_KEY);
   localStorage.removeItem(BACKUP_KEY);
-  state = createDefaultState();
+  state = createDefaultState(todayKey(), DEFAULT_VIEW);
   state.activeView = DEFAULT_VIEW;
   authMode = "";
   menuOpen = false;
@@ -6774,20 +6625,6 @@ function removeTransaction(id) {
 
 function shouldClearTemplateBudgetOnPlanSave() {
   return state.meta?.budgetPreset !== "student" && isTemplateBudgetJobs(state.budgetJobs);
-}
-
-function clearTemplateBudget(target = state) {
-  const templateIds = new Set(LEGACY_TEMPLATE_BUDGET_JOBS.map((job) => job.id));
-  target.budgetJobs = [];
-  target.cooldowns = (target.cooldowns || []).filter((cooldown) => !templateIds.has(cooldown.category));
-  target.merchantRules = (target.merchantRules || []).filter((rule) => !templateIds.has(rule.category));
-  (target.transactions || []).forEach((transaction) => {
-    if (templateIds.has(transaction.category)) {
-      transaction.category = "";
-      transaction.labeled = false;
-    }
-  });
-  target.meta = { ...(target.meta || {}), budgetPreset: "" };
 }
 
 function removeBudgetExtra(id) {
@@ -7662,16 +7499,6 @@ function rememberMerchantRule(transaction) {
   state.merchantRules = state.merchantRules.slice(0, 30);
 }
 
-function merchantKey(value) {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-}
-
 function spendByCategory() {
   return getSpendByCategory(state, todayKey());
 }
@@ -7738,8 +7565,6 @@ function viewFromHash(fallback) {
     eventos: "calendar",
     cierre: "periodClose",
     "cierre-periodo": "periodClose",
-    registrar: "spending",
-    gastos: "spending",
     movimientos: "movements",
     historial: "movements",
     datos: "profile",
@@ -7769,7 +7594,6 @@ function hashFromView(view) {
     periodClose: "cierre",
     savings: "ahorro",
     calendar: "calendario",
-    spending: "registrar",
     movements: "movimientos",
     profile: "datos"
   };
@@ -7864,263 +7688,11 @@ function positionAfterDigitCount(value, digitCount) {
   return value.length;
 }
 
-function parseNumberText(value) {
-  const text = String(value ?? "").trim();
-  if (!text) {
-    return Number.NaN;
-  }
-  const clean = text.replace(/\s/g, "").replace(/[^\d,.-]/g, "");
-  if (!clean || clean === "-" || clean === "." || clean === ",") {
-    return Number.NaN;
-  }
-  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(clean)) {
-    return Number(clean.replace(/\./g, "").replace(",", "."));
-  }
-  if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(clean)) {
-    return Number(clean.replace(/,/g, ""));
-  }
-  return Number(clean.replace(",", "."));
-}
-
-function numberFrom(value) {
-  const number = parseNumberText(value);
-  return Math.max(0, Number.isFinite(number) ? number : 0);
-}
-
-function numberValue(value) {
-  const text = String(value ?? "").trim();
-  if (!text) {
-    return null;
-  }
-  const number = parseNumberText(text);
-  return Number.isFinite(number) ? number : null;
-}
-
-function normalizePayday(value) {
-  const day = Number(value);
-  if (!Number.isFinite(day) || day <= 0) {
-    return 0;
-  }
-  return clamp(day, 1, 28);
-}
-
 // Antes esta funcion tenia un mapa de montos por defecto indexado por los ids de la
 // plantilla "estudiante" (gas, dates, gifts, university, flex). Corria sobre TODAS las
 // categorias en cada migracion, y como uniqueCategoryId() convierte el nombre en slug,
 // una categoria que el usuario llamara "Gas" recibia el id `gas` y podia heredar
 // $30.000 semanales que nunca escribio.
-function normalizeBudgetJobs(jobs) {
-  return jobs.map((job) => ({
-    ...job,
-    amount: Number(job.amount ?? job.budget ?? 0),
-    cadence: JOB_CADENCE_VALUES.includes(job.cadence) ? job.cadence : "monthly",
-    updated_at: job.updated_at || ""
-  }));
-}
-
-function normalizeTransactions(transactions) {
-  return transactions.map((transaction) => ({
-    ...transaction,
-    id: transaction.id || uid("tx"),
-    date: cleanDate(transaction.date, todayKey()),
-    merchant: cleanText(transaction.merchant, "Compra"),
-    description: cleanText(transaction.description, ""),
-    amount: Number(transaction.amount || 0),
-    category: transaction.category || "",
-    labeled: Boolean(transaction.category || transaction.labeled),
-    budgeted: Boolean(transaction.budgeted),
-    oneOff: Boolean(transaction.oneOff || transaction.excludeFromPrediction),
-    source: normalizeLocation(transaction.source),
-    calendarEventId: transaction.calendarEventId || "",
-    updated_at: transaction.updated_at || transaction.createdAt || transaction.date || ""
-  }));
-}
-
-function normalizePeriodClosures(closures) {
-  return closures
-    .map((closure) => ({
-      id: closure.id || `${closure.windowStart || closure.start}:${closure.windowEnd || closure.end}`,
-      windowStart: cleanDate(closure.windowStart || closure.start, ""),
-      windowEnd: cleanDate(closure.windowEnd || closure.end, ""),
-      closedAt: closure.closedAt || closure.updated_at || "",
-      income: Number(closure.income || 0),
-      reserved: Number(closure.reserved || 0),
-      spent: Number(closure.spent || 0),
-      freeRemaining: Number(closure.freeFinal ?? closure.freeRemaining ?? 0),
-      freeFinal: Number(closure.freeFinal ?? closure.freeRemaining ?? 0),
-      projectedEndFree: Number(closure.projectedEndFree || 0),
-      dailyRate: Number(closure.dailyRate || 0),
-      confidence: ["empty", "learning", "normal"].includes(closure.confidence) ? closure.confidence : "normal",
-      categoryOverspent: Number(closure.categoryOverspent || 0),
-      exceededCategories: Array.isArray(closure.exceededCategories)
-        ? closure.exceededCategories
-            .map((category) => ({
-              id: category.id || "",
-              name: cleanText(category.name, "Categoría"),
-              budget: Number(category.budget || 0),
-              spent: Number(category.spent || 0),
-              over: Number(category.over || 0)
-            }))
-            .filter((category) => category.name && category.over > 0)
-        : [],
-      idealPeriodSavings: Number(closure.idealPeriodSavings || 0),
-      possiblePeriodSavings: Number(closure.possiblePeriodSavings || 0),
-      suggestedPeriodSavings: Number(closure.suggestedPeriodSavings || 0),
-      savingsCapacityGap: Number(closure.savingsCapacityGap || 0),
-      adjustments: Array.isArray(closure.adjustments)
-        ? closure.adjustments.map((item) => cleanText(item, "")).filter(Boolean).slice(0, 5)
-        : [],
-      transactionCount: Number(closure.transactionCount || 0),
-      incomeCount: Number(closure.incomeCount || 0),
-      status: normalizePredictionStatus(closure.status)
-    }))
-    .filter((closure) => closure.windowStart && closure.windowEnd)
-    .slice(0, 12);
-}
-
-function normalizePredictionStatus(status) {
-  return ["empty", "learning", "healthy", "tight", "risk", "over_reserved"].includes(status) ? status : "healthy";
-}
-
-function normalizeMerchantRules(rules, transactions = []) {
-  const normalized = rules
-    .map((rule) => {
-      const merchant = cleanText(rule.merchant || rule.name, "");
-      const key = merchantKey(rule.key || merchant);
-      return {
-        id: rule.id || uid("rule"),
-        merchant,
-        key,
-        category: rule.category || "",
-        source: normalizeLocation(rule.source),
-        count: Number(rule.count || 1),
-        lastUsedAt: rule.lastUsedAt || rule.updated_at || "",
-        updated_at: rule.updated_at || rule.lastUsedAt || ""
-      };
-    })
-    .filter((rule) => rule.key.length >= 3 && rule.category);
-
-  const byKey = new Map(normalized.map((rule) => [rule.key, rule]));
-  buildMerchantRulesFromTransactions(transactions).forEach((rule) => {
-    if (!byKey.has(rule.key)) {
-      byKey.set(rule.key, rule);
-    }
-  });
-
-  return [...byKey.values()]
-    .sort((a, b) => String(b.lastUsedAt || b.updated_at || "").localeCompare(String(a.lastUsedAt || a.updated_at || "")) || Number(b.count || 0) - Number(a.count || 0))
-    .slice(0, 30);
-}
-
-function buildMerchantRulesFromTransactions(transactions = []) {
-  const rules = new Map();
-  transactions.forEach((transaction) => {
-    const key = merchantKey(transaction.merchant);
-    const category = transaction.category || "";
-    if (key.length < 3 || !category || category === FREE_CATEGORY_ID) {
-      return;
-    }
-    const existing = rules.get(key);
-    const updatedAt = transaction.updated_at || transaction.createdAt || transaction.date || "";
-    if (!existing) {
-      rules.set(key, {
-        id: uid("rule"),
-        merchant: cleanText(transaction.merchant, "Comercio"),
-        key,
-        category,
-        source: normalizeLocation(transaction.source),
-        count: 1,
-        lastUsedAt: updatedAt,
-        updated_at: updatedAt
-      });
-      return;
-    }
-    existing.count += 1;
-    if (String(updatedAt).localeCompare(String(existing.lastUsedAt || "")) >= 0) {
-      existing.category = category;
-      existing.source = normalizeLocation(transaction.source);
-      existing.lastUsedAt = updatedAt;
-      existing.updated_at = updatedAt;
-    }
-  });
-  return [...rules.values()];
-}
-
-function filterMerchantRulesForJobs(rules, jobs) {
-  const validCategories = new Set((jobs || []).map((job) => job.id));
-  return (rules || []).filter((rule) => validCategories.has(rule.category));
-}
-
-function normalizeCalendarEvents(events) {
-  return events.map((event) => ({
-    id: event.id || uid("event"),
-    title: cleanText(event.title || event.name, "Plan especial"),
-    date: cleanDate(event.date, todayKey()),
-    amount: Number(event.amount || event.estimatedAmount || 0),
-    category: normalizeEventCategory(event.category),
-    notes: cleanText(event.notes || event.description, ""),
-    spent: Boolean(event.spent),
-    transactionId: event.transactionId || "",
-    updated_at: event.updated_at || event.date || ""
-  }));
-}
-
-function normalizeDailyReminder(reminder = {}) {
-  return {
-    enabled: Boolean(reminder.enabled),
-    time: normalizeReminderTime(reminder.time),
-    lastShownDate: cleanDate(reminder.lastShownDate, ""),
-    updated_at: reminder.updated_at || ""
-  };
-}
-
-function isTemplateBudgetJobs(jobs) {
-  return Boolean(jobs?.length) && jobs.every((job) => {
-    const template = LEGACY_TEMPLATE_BUDGET_JOBS.find((item) => item.id === job.id);
-    if (!template) {
-      return false;
-    }
-    const amount = Number(job.amount ?? job.budget ?? 0);
-    const cadence = job.cadence || template.cadence;
-    return cleanText(job.name, "") === template.name && amount === template.amount && cadence === template.cadence;
-  });
-}
-
-function normalizeBudgetExtras(extras) {
-  return extras.map((extra) => ({
-    id: extra.id || uid("extra"),
-    source: cleanText(extra.source || extra.name, "Dinero extra"),
-    amount: Number(extra.amount || 0),
-    date: cleanDate(extra.date, todayKey()),
-    location: normalizeLocation(extra.location),
-    allocation: extra.allocation || null,
-    updated_at: extra.updated_at || extra.date || ""
-  }));
-}
-
-function normalizeLiquidity(liquidity) {
-  return {
-    account: numberFrom(liquidity?.account),
-    cash: numberFrom(liquidity?.cash),
-    initialized: Boolean(liquidity?.initialized),
-    updated_at: liquidity?.updated_at || ""
-  };
-}
-
-function normalizeLocation(value) {
-  return value === "cash" ? "cash" : "account";
-}
-
-function normalizeEventCategory(value) {
-  const category = String(value || "");
-  return category || FREE_CATEGORY_ID;
-}
-
-function normalizeReminderTime(value) {
-  const text = String(value || "").trim();
-  return /^([01]\d|2[0-3]):[0-5]\d$/.test(text) ? text : DEFAULT_REMINDER_TIME;
-}
-
 function locationLabel(location) {
   return normalizeLocation(location) === "cash" ? "Efectivo" : "Cuenta";
 }
@@ -8141,22 +7713,9 @@ function monthStartKey(dateValue = todayKey()) {
   return `${String(dateValue).slice(0, 7)}-01`;
 }
 
-function cleanText(value, fallback) {
-  const text = String(value || "").trim().replace(/\s+/g, " ");
-  return text || fallback;
-}
-
-function cleanDate(value, fallback) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) ? String(value) : fallback;
-}
-
 function capitalize(value) {
   const text = String(value || "");
   return text ? `${text.charAt(0).toUpperCase()}${text.slice(1)}` : "";
-}
-
-function uid(prefix) {
-  return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 function hoursFromNow(hours) {
@@ -8237,10 +7796,6 @@ function formatCompactMoney(value) {
     return formatMoney(amount);
   }
   return `$${COMPACT_MONEY_FORMATTER.format(amount / 1000)}k`;
-}
-
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, Number(value) || 0));
 }
 
 function escapeHtml(value) {

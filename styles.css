@@ -642,43 +642,10 @@ a {
   background: var(--amber-2);
 }
 
-.primary-spend-card {
-  border-color: rgba(21, 111, 105, 0.26);
-}
-
-.spend-submit {
-  min-height: 48px;
-  font-size: 1.02rem;
-}
-
-.transaction-options-row,
-.amount-submit-row {
-  display: grid;
-  gap: 12px;
-}
-
-.transaction-options-row {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.amount-submit-row {
-  grid-template-columns: minmax(0, 1fr) minmax(138px, auto);
-  align-items: end;
-}
-
-.amount-submit-row .btn {
-  width: auto;
-}
-
 .content-grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 16px;
-}
-
-.spending-grid {
-  grid-template-columns: repeat(2, minmax(320px, 1fr));
-  align-items: start;
 }
 
 .card {
@@ -728,11 +695,6 @@ a {
   grid-column: span 4;
 }
 
-.spending-grid .card,
-.spending-grid .wide-card {
-  grid-column: auto;
-}
-
 .wide-card,
 .split-card,
 .today-grid .ritual-card {
@@ -768,35 +730,6 @@ a {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-}
-
-.spending-grid .card-heading {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 12px;
-}
-
-.spending-grid .metric-badge {
-  min-width: 0;
-  max-width: 100%;
-  justify-self: end;
-  text-align: right;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.primary-spend-card .metric-badge {
-  white-space: nowrap;
-}
-
-.spending-grid .card:not(.primary-spend-card) .card-heading {
-  grid-template-columns: 1fr;
-}
-
-.spending-grid .card:not(.primary-spend-card) .metric-badge {
-  justify-self: start;
-  text-align: left;
 }
 
 .card h2 {
@@ -1544,14 +1477,6 @@ label {
     grid-column: span 6;
   }
 
-  .spending-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .spending-grid .card,
-  .spending-grid .wide-card {
-    grid-column: auto;
-  }
 }
 
 @media (max-width: 760px) {
@@ -1590,14 +1515,9 @@ label {
     grid-template-columns: 1fr;
   }
 
-  .spending-grid {
-    grid-template-columns: 1fr;
-  }
-
   .today-grid .card,
   .budget-grid .card,
   .savings-grid .card,
-  .spending-grid .card,
   .movements-grid .card,
   .profile-grid .card,
   .wide-card,
@@ -1654,15 +1574,6 @@ label {
     flex-direction: column;
   }
 
-  .spending-grid .card-heading {
-    grid-template-columns: 1fr;
-  }
-
-  .spending-grid .metric-badge {
-    justify-self: start;
-    text-align: left;
-  }
-
   .metric-badge {
     max-width: 100%;
     white-space: normal;
@@ -1682,10 +1593,6 @@ label {
   .snackbar {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .amount-submit-row .btn {
-    width: auto;
   }
 
   .modal-backdrop {
@@ -3156,7 +3063,11 @@ p {
 
 .add-category-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  /* Was 3 columns (icon | strong | small) with strong squeezed into whatever the
+     auto-sized small column left over — a short label like "Nueva categoría" still
+     wrapped and visually overlapped small whenever the row wasn't very wide. strong
+     and small now stack in their own column instead of competing side by side. */
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   width: 100%;
@@ -3170,6 +3081,12 @@ p {
 
 .add-category-row > span {
   font-size: 1.1rem;
+}
+
+.add-category-row-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
 
 .add-category-row strong {
