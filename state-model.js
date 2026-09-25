@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.18";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.19";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion

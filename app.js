@@ -14,7 +14,7 @@ import {
   predictUntilNextPeriod as getPeriodPrediction,
   resolvePeriodIncome,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.18";
+} from "./finance-core.js?v=1.1.19";
 import {
   DEFAULT_REMINDER_TIME,
   DIAGNOSIS_SECTIONS,
@@ -49,7 +49,7 @@ import {
   decidePushSync,
   hasMeaningfulLocalData,
   uid
-} from "./state-model.js?v=1.1.18";
+} from "./state-model.js?v=1.1.19";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -64,7 +64,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.18";
+} from "./sync-client.js?v=1.1.19";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -2241,7 +2241,7 @@ function renderBudgetJobForm() {
       <div class="conversion-box" data-category-conversion>
         <span>Conversión automática</span>
         <strong>Escribe un monto para ver su valor en este periodo.</strong>
-        <small>Disponible para reservar: ${formatMoney(summary.freeBudget)}</small>
+        <small>Disponible para reservar: ${formatMoney(summary.freeRemaining)}</small>
       </div>
       <div class="limit-warning" data-category-limit-warning hidden>
         <span aria-hidden="true">!</span>

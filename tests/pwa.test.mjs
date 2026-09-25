@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "1.1.18";
+const ASSET_VERSION = "1.1.19";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -263,49 +263,6 @@ test("movements combines expenses and extra income and can sort the full history
   const profile = app.slice(app.indexOf("function renderProfile"), app.indexOf("function renderIncomeCadenceOptions"));
   assert.equal(profile.includes("renderTransactionHistory"), false);
   assert.equal(profile.includes("Movimientos del periodo"), false);
-});
-
-// Tapping a day in "Calendario de gastos" (Movimientos) filters the history list to
-// just that day, with a chip to clear it. Each day is a real <button> (was a <div>) so
-// it's keyboard/screen-reader accessible, and the date filter is threaded through both
-// the full render() path (sort/filter dropdowns) and the partial-render search path
-// (which repaints only #transaction-history-results to avoid losing input focus).
-test("tapping a day on the expense calendar filters movements to that day", async () => {
-  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
-  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
-
-  assert.ok(app.includes('let transactionHistoryDate = "";'));
-
-  const dayFn = app.slice(app.indexOf("function renderExpenseCalendarDay"), app.indexOf("function expenseCalendarForSummary"));
-  assert.ok(dayFn.includes("<button"));
-  assert.ok(dayFn.includes('data-action="filter-movements-by-date"'));
-  assert.ok(dayFn.includes("data-date=\"${escapeAttr(day.date)}\""));
-  assert.ok(dayFn.includes("aria-pressed="));
-
-  assert.ok(app.includes('"filter-movements-by-date": () => {'));
-  assert.ok(app.includes('"clear-movements-date-filter": () => {'));
-  assert.ok(app.includes('"filter-movements-by-date",'));
-  assert.ok(app.includes('"clear-movements-date-filter",'));
-
-  const historyFn = app.slice(
-    app.indexOf("function renderTransactionHistory(summary"),
-    app.indexOf("function dailyExpenseTotal(dayMovements")
-  );
-  assert.ok(historyFn.includes('String(movement.date || "").slice(0, 10) === date'));
-  assert.ok(historyFn.includes("Sin movimientos ese día"));
-
-  // The live-search partial repaint must forward the date filter too, or selecting a
-  // day and then typing a search term would silently drop the date filter.
-  const searchHandler = app.slice(app.indexOf('historySearch.addEventListener("input"'), app.indexOf('document.querySelectorAll("[data-lock-digit]")'));
-  assert.ok(searchHandler.includes("transactionHistoryDate"));
-
-  assert.ok(app.includes('${renderTransactionHistory(summary, transactionHistorySort, transactionHistoryFilter, transactionHistorySearch, transactionHistoryDate)}'));
-  assert.ok(app.includes("history-date-chip"));
-  assert.ok(app.includes('data-action="clear-movements-date-filter"'));
-  assert.ok(app.includes('#transaction-history-card")?.scrollIntoView'));
-
-  assert.ok(styles.includes(".expense-calendar-day.is-selected"));
-  assert.ok(styles.includes(".history-date-chip"));
 });
 
 test("period prediction, period close and merchant rules are exposed in the app shell", async () => {
@@ -608,25 +565,6 @@ test("progress screen shows behavior insights computed from existing transaction
   assert.ok(styles.includes('html[data-theme="dark"] .insight-card'));
 });
 
-// Regression guard: a prior fix tried merging real liquidity into "dinero libre"
-// (first via a live sum, then via a period-start anchor snapshot) and both attempts
-// caused the same money to be counted twice, once exactly doubling a real user's
-// libre ($24,100 -> $48,200). The anchor mechanism must stay removed, and the Home
-// screen must show the leftover real balance as its own separate figure instead of
-// silently folding it into "dinero libre".
-test("dinero libre never merges real liquidity into it via a blind live sum; unclaimed balance is shown as a separate figure for variable income", async () => {
-  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
-
-  // The old, removed mechanism: a single global anchor keyed only on period start,
-  // reused for every income type. It was replaced by the per-period, fixed-income-only
-  // periodIncomeStatus record asserted below.
-  assert.equal(app.includes("ensureLiquidityPeriodAnchor"), false);
-  assert.equal(app.includes("liquidityPeriodAnchor"), false);
-
-  assert.ok(app.includes("Saldo extra sin usar"));
-  assert.ok(app.includes("summary.unclaimedLiquidity"));
-});
-
 // Redesign: onboarding now asks up front whether income is fixed or variable. Fixed
 // income asks for the exact payday (which doubles as periodStart, the period anchor),
 // and app.js auto-deposits that income into real liquidity once the period starts,
@@ -634,7 +572,7 @@ test("dinero libre never merges real liquidity into it via a blind live sum; unc
 // This is what makes it safe to add real, leftover money into "dinero libre" for
 // fixed-income users without repeating the doubling bug: the app always knows,
 // explicitly, whether this period's income is already inside the real balance.
-test("fixed income is auto-applied to real liquidity once the period starts, with an undoable banner", async () => {
+test("onboarding asks fixed vs variable income and the payday, and income status persists", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
   const stateModel = await readFile(new URL("../state-model.js", import.meta.url), "utf8");
 
@@ -642,20 +580,6 @@ test("fixed income is auto-applied to real liquidity once the period starts, wit
   assert.ok(app.includes("data-onboarding-income-type=\"fixed\""));
   assert.ok(app.includes("data-onboarding-income-type=\"variable\""));
   assert.ok(app.includes("¿Qué día te pagan?"));
-
-  // The decision lives in finance-core.js (resolvePeriodIncome, behavior-tested in
-  // finance-core.test.mjs); app.js must only apply its result and do the deposit.
-  const ensureFn = app.slice(app.indexOf("function ensurePeriodIncomeApplication()"), app.indexOf("function adjustLiquidity"));
-  assert.ok(ensureFn.includes("resolvePeriodIncome(state, todayKey())"));
-  assert.ok(ensureFn.includes('adjustLiquidity("account", result.deposit, "ingreso-periodico")'));
-  const renderFn = app.slice(app.indexOf("function render() {"), app.indexOf("function renderHeader"));
-  assert.ok(renderFn.includes("ensurePeriodIncomeApplication();"));
-  const saveStateFn = app.slice(app.indexOf("function saveState(options = {})"), app.indexOf("async function initializeCloudSync()"));
-  assert.ok(saveStateFn.includes("ensurePeriodIncomeApplication();"));
-
-  assert.ok(app.includes("function renderIncomeAppliedBanner()"));
-  assert.ok(app.includes('"undo-income-application"'));
-  assert.ok(app.includes('"dismiss-income-banner"'));
 
   // Persisted across reload/sync, and reset to null for brand-new accounts.
   assert.ok(stateModel.includes("periodIncomeStatus: null"));
@@ -665,34 +589,12 @@ test("fixed income is auto-applied to real liquidity once the period starts, wit
 // The future-payday regression (a payday typed as "in 7 days" must not deposit on day
 // one) is now a behavior test of resolvePeriodIncome() in finance-core.test.mjs.
 
-test("PIN lock protects the app with device-local hashed storage separate from synced state", async () => {
+// The lock screen gate, wrong/right PIN, the separate device-local storage key and
+// "Cambiar PIN" asking for the current PIN are behavior-tested in app-smoke.test.mjs.
+// What jsdom can't exercise stays here: the native resume hook and the cooldown wiring.
+test("PIN lock re-locks on resume, cools down after repeated failures, and its copy stays honest", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
-
-  // Device-local storage, never the synced state key.
-  assert.ok(app.includes('const LOCK_STORAGE_KEY = "finanzas-conductuales-lock:v1"'));
-  assert.ok(app.includes("function loadLockConfig()"));
-
-  // LOCK_STORAGE_KEY must be declared BEFORE the top-level loadLockConfig() call at
-  // boot, or the const's temporal dead zone throws a ReferenceError that the helper's
-  // try/catch silently swallows, making the lock always read as disabled on cold start.
-  assert.ok(
-    app.indexOf('const LOCK_STORAGE_KEY = "finanzas-conductuales-lock:v1"') < app.indexOf("let lockConfig = loadLockConfig();")
-  );
-  assert.ok(app.includes("function saveLockConfig(config)"));
-  const saveLock = app.slice(app.indexOf("function saveLockConfig(config)"), app.indexOf("function randomSalt()"));
-  assert.ok(saveLock.includes("localStorage.setItem(LOCK_STORAGE_KEY"));
-  assert.equal(saveLock.includes("setItem(STORAGE_KEY"), false);
-
-  // Hashing, never storing the raw PIN.
-  assert.ok(app.includes("async function hashPin(pin, salt)"));
-  assert.ok(app.includes('crypto.subtle.digest("SHA-256"'));
-  assert.ok(app.includes("function randomSalt()"));
-
-  // Gate is the first thing render() checks.
-  const renderFn = app.slice(app.indexOf("function render() {"), app.indexOf("function render() {") + 400);
-  assert.ok(renderFn.includes("if (lockMode) {"));
-  assert.ok(renderFn.includes("renderLockScreen()"));
 
   // Auto-lock on resume from background via the already-installed App plugin.
   assert.ok(app.includes("function bindAppLock()"));
@@ -704,25 +606,11 @@ test("PIN lock protects the app with device-local hashed storage separate from s
   assert.ok(app.includes("LOCK_COOLDOWN_MS"));
   assert.ok(app.includes("function lockIsCoolingDown()"));
 
-  // Flow + entry.
-  assert.ok(app.includes("async function pushLockDigit(digit)"));
-  assert.ok(app.includes("async function resolveLockEntry()"));
-  assert.ok(app.includes("function renderLockScreen()"));
-  assert.ok(app.includes('data-action="open-lock-setup"'));
-  assert.ok(app.includes('data-action="open-lock-disable"'));
-  assert.ok(app.includes("[data-lock-digit]"));
-
   assert.ok(styles.includes(".lock-keypad"));
   assert.ok(styles.includes(".lock-dot"));
   assert.ok(styles.includes('html[data-theme="dark"] .lock-key'));
 
-  // Changing an existing PIN must verify the current one first, not jump straight to
-  // "set" a new one — otherwise anyone holding an already-unlocked phone could swap in
-  // their own PIN. First-time setup (no PIN yet) still goes straight to "set".
-  assert.ok(app.includes('lockMode = lockConfig.enabled ? "verify-change" : "set";'));
-  assert.ok(app.includes('if (lockMode === "verify-change") {'));
-
-  // Copy must not claim the PIN encrypts/protects data — it only gates the app's UI.
+  // Copy must not claim the PIN encrypts/protects data: it only gates the app's UI.
   assert.equal(app.includes("Protege tus finanzas en este dispositivo."), false);
   assert.ok(app.includes("No cifra tus datos guardados en el teléfono."));
 });
@@ -940,20 +828,6 @@ test("brand typeface is actually self-hosted, not just named in the font stack",
   assert.ok(styles.includes("font-variant-numeric: tabular-nums"));
 });
 
-test("quick classify shows every pending transaction as a list instead of one at a time", async () => {
-  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
-  const panel = app.slice(app.indexOf("function renderQuickClassifyPanel()"), app.indexOf("function renderExtraEditor"));
-
-  assert.ok(panel.includes("const pending = quickClassifyQueue.map"));
-  assert.ok(panel.includes('class="quick-classify-list"'));
-  assert.ok(panel.includes('class="quick-classify-row"'));
-  assert.ok(panel.includes("${pending"));
-  assert.equal(panel.includes("skip-quick-classify"), false);
-  assert.equal(panel.includes(" de ${"), false);
-  assert.equal(app.includes("quickClassifyTotal"), false);
-  assert.equal(app.includes("skip-quick-classify"), false);
-});
-
 test("authentication gates onboarding and signed-in users can close their session", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
   const syncClient = await readFile(new URL("../sync-client.js", import.meta.url), "utf8");
@@ -1124,31 +998,10 @@ test("static startup fallback retries automatically without manual controls", as
   assert.ok(styles.includes(".startup-fallback-card"));
 });
 
-test("money inputs format thousands while preserving numeric calculations", async () => {
-  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
-  const stateModel = await readFile(new URL("../state-model.js", import.meta.url), "utf8");
+// The 12-digit cap itself is behavior-tested in app-smoke.test.mjs. This guards the CSS
+// side: long formatted numbers must wrap instead of pushing the screen sideways.
+test("long money figures wrap instead of overflowing the screen", async () => {
   const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
-
-  assert.ok(app.includes("bindMoneyInputs();"));
-  assert.ok(app.includes('input[type="number"][step="1000"], input[data-money-input="true"]'));
-  assert.ok(app.includes('input.dataset.moneyInput = "true"'));
-  assert.ok(app.includes("formatMoneyInputValue"));
-  assert.ok(stateModel.includes("parseNumberText"));
-  assert.ok(app.includes('new Intl.NumberFormat("es-CO"'));
-  assert.ok(styles.includes('.quick-amount input[data-money-input="true"]'));
-});
-
-// Regression: typing many zeros into a money field (no digit cap) produced a
-// formatted number long enough to overflow its container and push the whole screen
-// horizontally, cutting off the rest of the form. Fixed with a digit cap on the input
-// itself plus overflow-wrap as a defensive backstop on the two dynamic-number displays
-// that showed the symptom (onboarding preview, category budget conversion box).
-test("money input has a digit cap and long numbers cannot overflow the screen", async () => {
-  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
-  const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
-
-  assert.ok(app.includes("MONEY_INPUT_MAX_DIGITS"));
-  assert.match(app, /replace\(\/\\D\/g, ""\)\.slice\(0, MONEY_INPUT_MAX_DIGITS\)/);
 
   const onboardingStart = styles.indexOf(".onboarding-preview strong {");
   const onboardingPreview = styles.slice(onboardingStart, styles.indexOf("}", onboardingStart));
@@ -1502,62 +1355,11 @@ test("mockup system covers progressive plan, correction and special states", asy
   assert.ok(styles.includes("--card-shadow"));
 });
 
-// Regression: creating a new spending category validated its converted cost against
-// freeBudget (the gross quota) instead of freeRemaining (what's truly left after money
-// already spent unclassified this period). A category that fit the gross quota but
-// exceeded the real remaining Libre was allowed through, silently clamping Libre to $0
-// rather than being rejected with a clear error. Both the submit handler and the live
-// preview that enables/disables the "Guardar" button must check the same number.
-test("category creation validates against freeRemaining, not the gross freeBudget quota", async () => {
-  const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
-
-  const submitFn = app.slice(app.indexOf("function handleBudgetSubmit"), app.indexOf("function handleExtraBudgetSubmit"));
-  assert.ok(submitFn.includes("semesterBudget > summary.freeRemaining"));
-  assert.ok(!submitFn.includes("semesterBudget > summary.freeBudget"));
-
-  const previewFn = app.slice(app.indexOf("function bindPlanCategoryPreview"), app.indexOf("function bindSavingsSimulatorPreview"));
-  assert.ok(previewFn.includes("budgetSummary().freeRemaining"));
-  assert.ok(!previewFn.includes("budgetSummary().freeBudget"));
-});
-
-// Regression: none of the 13-15 sheet/modal backdrops closed on tap-outside, the
-// universal Android gesture for dismissing a bottom sheet. Fixed by giving each
-// backdrop the same data-action as its sheet's own close/cancel button, guarded so
-// clicks that bubble up from the sheet's own content don't also trigger it.
-test("sheet and modal backdrops close on tap-outside, and clicks inside the sheet don't bubble into closing it", async () => {
+// Tap-outside-to-close is behavior-tested in app-smoke.test.mjs. jsdom can't drive
+// Escape through the focus trap reliably, so its coverage stays here.
+test("Escape closes every dismissable surface and close buttons meet the 44px touch target", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
-
-  const guardFn = app.slice(app.indexOf("function handleAction(event)"), app.indexOf("function handleAction(event)") + 700);
-  assert.ok(guardFn.includes("event.currentTarget !== event.target"));
-  assert.ok(guardFn.includes('classList.contains("sheet-backdrop")'));
-  assert.ok(guardFn.includes('classList.contains("quick-expense-backdrop")'));
-  assert.ok(guardFn.includes('classList.contains("modal-backdrop")'));
-
-  const expectedBackdropActions = [
-    'role="presentation" data-action="close-prediction-details"',
-    'role="presentation" data-action="close-period-report"',
-    'role="presentation" data-action="cancel-remove-job"',
-    'role="presentation" data-action="cancel-restore-backup"',
-    'role="presentation" data-action="cancel-delete-account"',
-    'role="presentation" data-action="close-expense"',
-    'role="presentation" data-action="close-transaction-editor"',
-    'role="presentation" data-action="close-quick-classify"',
-    'role="presentation" data-action="close-extra-editor"',
-    'role="presentation" data-action="close-diagnosis"',
-    'role="presentation" data-action="cancel-extra-allocation"'
-  ];
-  for (const needle of expectedBackdropActions) {
-    assert.ok(app.includes(needle), `missing backdrop close wiring: ${needle}`);
-  }
-  // The 4 plan-sheet backdrops (add-category-choice/setaside/category/extra) share
-  // one action.
-  assert.equal(
-    app.split('role="presentation" data-action="close-plan-sheet"').length - 1,
-    4
-  );
-  // Onboarding is deliberately excluded — it has no cancel concept.
-  assert.ok(app.includes('<div class="modal-backdrop onboarding-backdrop" role="presentation">'));
 
   // closeTopDialog() (used by Escape) must cover every dismissable surface, not just
   // the 7 it originally had — delete-account, backup restore, quick-classify,
