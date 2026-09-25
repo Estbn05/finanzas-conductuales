@@ -10,6 +10,7 @@ import {
   extraIncomeForPeriod,
   getEmergencyTarget,
   isLargeUnbudgetedPurchase,
+  freeShareOfBudget,
   predictUntilNextPeriod,
   resolvePeriodIncome
 } from "../finance-core.js";
@@ -911,4 +912,11 @@ test("resolvePeriodIncome does not mutate the state it is given", () => {
   resolvePeriodIncome(state, "2026-06-10", NOW);
 
   assert.equal(JSON.stringify(state), snapshot);
+});
+
+test("the 'sigue libre' share never passes 100% even when real money exceeds the budget", () => {
+  assert.equal(freeShareOfBudget({ income: 2_000_000, freeRemaining: 2_500_000 }), 100);
+  assert.equal(freeShareOfBudget({ income: 2_000_000, freeRemaining: 500_000 }), 25);
+  assert.equal(freeShareOfBudget({ income: 2_000_000, freeRemaining: 0 }), 0);
+  assert.equal(freeShareOfBudget({ income: 0, freeRemaining: 0 }), 0);
 });

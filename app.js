@@ -8,13 +8,14 @@ import {
   calculatePlan as calculateFinancePlan,
   categoryStatus as getCategoryStatus,
   findLoggedIncome,
+  freeShareOfBudget,
   getPeriodIncome,
   getMonthlyIncome,
   monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictUntilNextPeriod as getPeriodPrediction,
   resolvePeriodIncome,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.19";
+} from "./finance-core.js?v=1.1.20";
 import {
   DEFAULT_REMINDER_TIME,
   DIAGNOSIS_SECTIONS,
@@ -49,7 +50,7 @@ import {
   decidePushSync,
   hasMeaningfulLocalData,
   uid
-} from "./state-model.js?v=1.1.19";
+} from "./state-model.js?v=1.1.20";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -64,7 +65,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.19";
+} from "./sync-client.js?v=1.1.20";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -1386,7 +1387,7 @@ function renderToday(plan) {
               <button class="btn primary" type="button" data-action="open-setaside-sheet">Apartar dinero</button>
             </div>`
       }
-      <div class="home-period-note">Presupuesto ${formatMoney(homeSummary.income)} · ${Math.round((homeSummary.freeRemaining / Math.max(1, homeSummary.income)) * 100)}% sigue libre</div>
+      <div class="home-period-note">Presupuesto ${formatMoney(homeSummary.income)} · ${freeShareOfBudget(homeSummary)}% sigue libre</div>
     </section>
   `;
 

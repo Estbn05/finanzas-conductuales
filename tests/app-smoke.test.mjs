@@ -355,6 +355,8 @@ test("fixed income is deposited once on payday, can be undone, and is not re-dep
     // The deposit happens on render and is persisted with the next save, so check the UI.
     assert.match(first.text(), /Cuenta\s*\$\s?2\.500\.000/);
     assert.match(first.text(), /Se sumó automáticamente/);
+    // Real balance (2.5M) now exceeds the period budget (2M): the note must cap at 100%.
+    assert.match(first.text(), /100% sigue libre/);
 
     await first.click('[data-action="undo-income-application"]');
     afterUndo = first.saved();

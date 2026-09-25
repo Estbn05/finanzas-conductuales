@@ -526,3 +526,13 @@ export function resolvePeriodIncome(state, today, nowIso = new Date().toISOStrin
     deposit: amount
   };
 }
+
+// Share of this period's budget that is still free, for the "N% sigue libre" note.
+// For fixed income with a real balance on file, "libre" is the real balance minus
+// reserves, which can exceed the period budget (money carried over from before) —
+// that still means none of the budget is used, so it caps at 100% instead of "125%".
+export function freeShareOfBudget(summary) {
+  const income = Math.max(1, Number(summary?.income || 0));
+  const share = Math.round((Number(summary?.freeRemaining || 0) / income) * 100);
+  return Math.min(100, Math.max(0, share));
+}
