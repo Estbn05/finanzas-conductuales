@@ -1,4 +1,5 @@
-import { copyFile, cp, mkdir, rm } from "node:fs/promises";
+import { copyFile, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { transform } from "esbuild";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -38,4 +39,18 @@ for (const entry of runtimeEntries) {
   await copyFile(source, target);
 }
 
-console.log(`Mobile web assets copied to ${outputDir}`);
+// Minified inside the APK only; the source files stay readable. Transform, not bundle:
+// every module keeps its own file and its "?v=" import URLs, exactly as in the source.
+const minifiable = { "app.js": "js", "finance-core.js": "js", "state-model.js": "js", "sync-client.js": "js", "styles.css": "css" };
+let before = 0;
+let after = 0;
+for (const [file, loader] of Object.entries(minifiable)) {
+  const target = join(outputDir, file);
+  const code = await readFile(target, "utf8");
+  const result = await transform(code, { loader, minify: true, format: loader === "js" ? "esm" : undefined, target: "es2020", legalComments: "none" });
+  await writeFile(target, result.code);
+  before += code.length;
+  after += result.code.length;
+}
+
+console.log(`Mobile web assets copied to ${outputDir} (minified ${Math.round(before / 1024)} KB -> ${Math.round(after / 1024)} KB)`);

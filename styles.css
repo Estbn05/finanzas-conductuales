@@ -7872,3 +7872,42 @@ html[data-theme="dark"] .conversion-box strong {
     white-space: nowrap;
   }
 }
+
+.date-caption {
+  display: block;
+  margin-top: 4px;
+  color: var(--ds-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+/* Account actions: a plain card each. Signing out keeps the data in the cloud, so it is a
+   neutral button; only deleting the account, which cannot be undone, is red. The old
+   translucent pink over the dark theme's background read as a muddy brown-grey. */
+.sign-out-section {
+  border: 1px solid var(--ds-line);
+  background: var(--ds-surface);
+}
+
+.sign-out-section.is-destructive {
+  border-color: rgb(var(--rgb-red) / 0.35);
+}
+
+.sign-out-section .btn.danger {
+  border-color: rgb(var(--rgb-red) / 0.5);
+  color: var(--ds-danger);
+  background: transparent;
+}
+
+/* The "+" / "$" on "Nueva categoría" and "Apartar dinero" had no size of its own and
+   stretched into a thin clipped strip. Same rounded square as the other row icons. */
+.add-category-row > span {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  color: var(--ds-primary-strong);
+  background: var(--ds-primary-soft);
+  font-weight: 800;
+}

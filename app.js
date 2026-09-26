@@ -18,7 +18,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.51";
+} from "./finance-core.js?v=1.1.52";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -64,7 +64,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.51";
+} from "./state-model.js?v=1.1.52";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -80,7 +80,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.51";
+} from "./sync-client.js?v=1.1.52";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -1754,11 +1754,15 @@ function renderPeriodPredictionCard(summary = budgetSummary()) {
         <span>${predictionCopy(prediction, endDate)}</span>
         <button class="text-link prediction-detail-link" type="button" data-action="open-prediction-details">Cómo se calculó</button>
       </div>
-      <div class="prediction-number">
-        <span>${predictionAmountLabel(prediction)}</span>
-        <strong>${formatMoney(amount)}</strong>
-        <small>${statusLabel}</small>
-      </div>
+      ${
+        predictionAmountLabel(prediction) === "Libre hoy"
+          ? ""
+          : `<div class="prediction-number">
+              <span>${predictionAmountLabel(prediction)}</span>
+              <strong>${formatMoney(amount)}</strong>
+              <small>${statusLabel}</small>
+            </div>`
+      }
     </article>
   `;
 }
@@ -1917,7 +1921,7 @@ function predictionAmountLabel(prediction) {
     return "Por ajustar";
   }
   if (prediction.status === "risk") {
-    return "Podrian faltar";
+    return "Podrían faltar";
   }
   if (prediction.status === "healthy" || prediction.status === "tight") {
     return "Llegarías con";
@@ -3916,10 +3920,10 @@ function renderProfile(plan) {
             </article>`
           : `<article class="sign-out-section">
               <div><strong>${escapeHtml(cloudState.email)}</strong><span>Tus datos se borrarán de este teléfono. Siguen en tu cuenta.</span></div>
-              <button class="btn danger" type="button" data-action="cloud-sign-out">Cerrar sesión</button>
+              <button class="btn ghost" type="button" data-action="cloud-sign-out">Cerrar sesión</button>
             </article>
 
-            <article class="sign-out-section">
+            <article class="sign-out-section is-destructive">
               <div><strong>Eliminar cuenta y datos</strong><span>Borra tu presupuesto, movimientos y ahorro guardados en la nube. No se puede deshacer.</span></div>
               <button class="btn danger" type="button" data-action="open-delete-account">Eliminar cuenta</button>
             </article>`
@@ -4469,6 +4473,9 @@ function renderDiagnosisFieldError(name) {
 }
 
 function categoryStatusLabel(ratio) {
+  if (ratio <= 0) {
+    return "Sin gastos todavía";
+  }
   return ratio > 100 ? "Excedida" : ratio > 90 ? "Crítica" : ratio > 65 ? "Atención" : "Saludable";
 }
 
@@ -4490,7 +4497,7 @@ function renderCategoryBars(plan, limit) {
               <div class="bar ${category.band}" aria-label="${escapeAttr(category.name)}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(clamp(category.ratio, 0, 100))}" aria-valuetext="${Math.round(category.ratio)} por ciento usado">
                 <span style="width:${clamp(category.ratio, 0, 120)}%"></span>
               </div>
-              <span class="category-status">${categoryStatusLabel(category.ratio)} · ${Math.round(clamp(category.ratio, 0, 999))}%</span>
+              <span class="category-status">${categoryStatusLabel(category.ratio)}${category.ratio > 0 ? ` · ${Math.round(clamp(category.ratio, 0, 999))}%` : ""}</span>
             </div>
           `
         )
@@ -4533,6 +4540,7 @@ function renderProgress(value, label) {
 
 function bindEvents() {
   bindMoneyInputs();
+  bindDateCaptions();
   animateBudgetRingCharts();
 
   document.querySelectorAll("[data-view]").forEach((button) => {
@@ -8134,6 +8142,38 @@ function hashFromView(view) {
     profile: "datos"
   };
   return hashes[view] || view;
+}
+
+// Native date and time pickers follow the PHONE's language, so on an English phone the
+// app showed "09/25/2026" and "8:00 PM" next to its own "25 de sept". The field cannot be
+// reformatted, so the chosen value is repeated below it in the app's format.
+function dateCaptionText(input) {
+  const value = input.value;
+  if (!value) return "";
+  if (input.type === "date") {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return "";
+    const label = capitalize(MOVEMENT_DAY_FORMATTER.format(new Date(`${value}T12:00:00`)));
+    return value.slice(0, 4) === todayKey().slice(0, 4) ? label : `${label} de ${value.slice(0, 4)}`;
+  }
+  const match = /^(\d{2}):(\d{2})/.exec(value);
+  return match ? `A las ${Number(match[1])}:${match[2]}` : "";
+}
+
+function bindDateCaptions(root = document) {
+  root?.querySelectorAll('input[type="date"], input[type="time"]').forEach((input) => {
+    if (input.dataset.dateCaptionBound === "true") return;
+    input.dataset.dateCaptionBound = "true";
+    const caption = document.createElement("small");
+    caption.className = "date-caption";
+    caption.setAttribute("aria-hidden", "true");
+    input.after(caption);
+    const update = () => {
+      caption.textContent = dateCaptionText(input);
+    };
+    input.addEventListener("input", update);
+    input.addEventListener("change", update);
+    update();
+  });
 }
 
 function bindMoneyInputs(root = document) {
