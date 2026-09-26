@@ -545,6 +545,40 @@ test("card: undoing a card expense lowers what you owe", async () => {
   }
 });
 
+// Regression: Inicio showed the free money from the real balance while Plan, the Libre
+// row and "reservables" showed income minus reservations: two different "libres" on
+// screen at once. The period's income is already settled here, so no deposit muddies it.
+function fixedIncomeState() {
+  const monthStart = `${todayKey().slice(0, 8)}01`;
+  const base = returningUserState();
+  return {
+    ...base,
+    profile: { ...base.profile, incomeType: "fixed" },
+    budgetJobs: [{ id: "mercado", name: "Mercado", amount: 100_000, cadence: "period" }],
+    periodIncomeStatus: { windowStart: monthStart, applied: true, rejected: false, bannerDismissed: true, amount: 0, location: "account" },
+    periodIncomeApplied: [{ windowStart: monthStart, windowEnd: "9999-12-31", status: "applied", amount: 0 }]
+  };
+}
+
+test("there is one 'libre': Inicio, the Libre row and Plan all show the same free money", async () => {
+  const ui = await bootApp({ savedState: fixedIncomeState() });
+  try {
+    // 1.500.000 in the account minus the 100.000 reserved.
+    assert.match(ui.text(), /Tu dinero libre[\s\S]*1\.400\.000/);
+    const libreRow = [...ui.window.document.querySelectorAll("*")].find(
+      (node) => node.children.length === 0 && node.textContent.trim() === "Libre / sin clasificar"
+    );
+    assert.ok(libreRow, "no Libre row on Inicio");
+    assert.doesNotMatch(ui.text(), /1\.900\.000/, "income minus reservations leaked onto Inicio");
+
+    await ui.click('[data-view="budget"]');
+    assert.match(ui.text(), /1\.400\.000 libres para reservar/);
+    assert.doesNotMatch(ui.text(), /1\.900\.000 reservables|\d+% libre/);
+  } finally {
+    ui.close();
+  }
+});
+
 // The boot code (render(), initializeCloudSync()) runs synchronously at module init, so
 // a module-level const/let declared below it is in its temporal dead zone for any boot
 // path that reaches it — this crashed the app three separate times. The smoke tests

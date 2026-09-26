@@ -1785,10 +1785,10 @@ function renderBudget(plan) {
           [
             { key: "reserved", label: "Reservado", ratio: reservedRatio, amountLabel: formatCompactMoney(ring.reserved), color: "var(--ds-plum, #6b5a8d)" },
             { key: "spent", label: "Gastado", ratio: spentRatio, amountLabel: formatCompactMoney(ring.spent), color: "var(--ds-amber)" },
-            { key: "free", label: "Libre", ratio: freeRatio, amountLabel: formatCompactMoney(ring.free), color: "#69d5b5" }
+            { key: "free", label: "Sin reservar", ratio: freeRatio, amountLabel: formatCompactMoney(ring.free), color: "#69d5b5" }
           ],
           formatMoney(summary.income),
-          `${Math.round(freeRatio)}% libre`
+          `${Math.round(freeRatio)}% sin reservar`
         )}
         ${ring.outside > 0 ? `<p class="inline-warning">Gastos fuera del presupuesto: ${formatMoney(ring.outside)}.</p>` : ""}
       </article>
@@ -1811,7 +1811,7 @@ function renderBudget(plan) {
 
       <div class="section-heading">
         <h2>Categorías <span>(${state.budgetJobs.length} de 10)</span></h2>
-        <span>${formatMoney(summary.freeBudget)} reservables</span>
+        <span>${formatMoney(summary.freeRemaining)} libres para reservar</span>
       </div>
 
       <div class="plan-category-list">
@@ -1829,7 +1829,7 @@ function renderBudget(plan) {
           <span aria-hidden="true">+</span>
           <div class="add-category-row-text">
             <strong>Nueva categoría</strong>
-            <small>Una vez o recurrente · max. ${formatCompactMoney(summary.freeBudget)}</small>
+            <small>Una vez o recurrente · máx. ${formatCompactMoney(summary.freeRemaining)}</small>
           </div>
         </button>
       </div>
@@ -2020,7 +2020,11 @@ function periodCloseReport(plan = calculatePlan(), summary = budgetSummary()) {
     }))
     .filter((category) => category.over > 0)
     .sort((a, b) => b.over - a.over);
-  const freeFinal = Math.round(summary.freeBudget - summary.freeImpactSpent);
+  // Same "libre" as Inicio. Variable income keeps the unclamped figure so a period that
+  // ended over budget still shows how far over it went.
+  const freeFinal = Math.round(
+    summary.usesLiquidityBasedFree ? summary.freeRemaining : summary.freeBudget - summary.freeImpactSpent
+  );
   const possibleSavings = Math.max(0, Number(plan.projectedPeriodSavings || 0));
   const suggestedSavings = Math.max(0, Number(plan.idealPeriodSavings || 0));
   const savingsGap = Math.max(0, Number(plan.savingsCapacityGap || 0));
@@ -6633,7 +6637,7 @@ function movementsCsvRows() {
     who: transaction.merchant,
     category: categoryName(transaction.category || FREE_CATEGORY_ID),
     amount: -Math.abs(Number(transaction.amount || 0)),
-    paidWith: transaction.source === "cash" ? "Efectivo" : "Cuenta",
+    paidWith: locationLabel(transaction.source),
     note: transaction.description || ""
   }));
   const incomeRows = (state.budgetExtras || []).map((extra) => ({
@@ -7466,18 +7470,29 @@ function movementsForSummary(summary = budgetSummary()) {
 
 function categoryStatus() {
   const summary = budgetSummary();
-  const freeRatio = summary.freeBudget ? (summary.freeSpent / summary.freeBudget) * 100 : summary.freeSpent > 0 ? 120 : 0;
+  const freeCap = freeCapForPeriod(summary);
+  const freeRatio = freeCap ? (summary.freeSpent / freeCap) * 100 : summary.freeSpent > 0 ? 120 : 0;
   return [
     ...getCategoryStatus(state, todayKey()),
     {
       id: FREE_CATEGORY_ID,
       name: "Libre / sin clasificar",
-      budget: summary.freeBudget,
+      budget: freeCap,
       spent: summary.freeSpent,
       ratio: freeRatio,
       band: freeRatio > 90 ? "danger" : freeRatio > 65 ? "warning" : "good"
     }
   ];
+}
+
+// There is ONE "dinero libre": summary.freeRemaining, the hero on Inicio. For fixed income
+// it comes from the real balance, while freeBudget is the period's income minus
+// reservations, and the two differ as soon as the balance and the income differ. Showing
+// freeBudget anywhere labeled "libre" put two different "libres" on screen (Inicio
+// $1.700.000, Plan $1.900.000). The Libre row's cap is what was free before this period's
+// free spending, measured the same way as the hero.
+function freeCapForPeriod(summary = budgetSummary()) {
+  return summary.usesLiquidityBasedFree ? summary.freeSpent + summary.freeRemaining : summary.freeBudget;
 }
 
 function categoryName(categoryId) {
