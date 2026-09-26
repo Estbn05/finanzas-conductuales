@@ -9943,3 +9943,35 @@ html[data-theme="dark"] .btn.primary:disabled,
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+
+/* Status bar strip: targeting Android 15 draws the app edge to edge, so scrolled content
+   ran under the clock and battery on every screen. Capacitor injects the real inset as
+   --safe-area-inset-top; this keeps that band painted with the page background. */
+body::after {
+  content: "";
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 1000;
+  height: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  background: var(--ds-bg);
+  pointer-events: none;
+}
+
+/* Dark theme progress tracks: the empty part was a light cream, so a category at 0% looked
+   completely used up. */
+html[data-theme="dark"] .bar,
+html[data-theme="dark"] .progress-track {
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Room for the status bar strip above: at the top of a screen the title started under it. */
+.main-panel {
+  padding-top: calc(22px + var(--safe-area-inset-top, env(safe-area-inset-top, 0px)));
+}
+
+/* Same for the drawer: its header (app name and close button) sat under the strip. */
+.sidebar-head {
+  margin-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+}

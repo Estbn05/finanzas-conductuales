@@ -632,6 +632,28 @@ test("apartar dinero reserves for this period only, and expires with it", async 
   }
 });
 
+// Regression: render() kept the window's scroll offset, so switching sections landed
+// mid-page with the title out of sight.
+test("switching sections goes back to the top, staying in one does not", async () => {
+  const scrolls = [];
+  const ui = await bootApp({
+    savedState: returningUserState(),
+    beforeBoot(window) {
+      window.scrollTo = (...args) => scrolls.push(args);
+    }
+  });
+  try {
+    await ui.click('[data-view="budget"]');
+    assert.equal(scrolls.length, 1);
+    await ui.click('[data-view="budget"]');
+    assert.equal(scrolls.length, 1, "re-selecting the same section should not jump");
+    await ui.click('[data-view="movements"]');
+    assert.equal(scrolls.length, 2);
+  } finally {
+    ui.close();
+  }
+});
+
 // The boot code (render(), initializeCloudSync()) runs synchronously at module init, so
 // a module-level const/let declared below it is in its temporal dead zone for any boot
 // path that reaches it — this crashed the app three separate times. The smoke tests

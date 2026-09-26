@@ -18,7 +18,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.27";
+} from "./finance-core.js?v=1.1.30";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -59,7 +59,7 @@ import {
   decidePushSync,
   hasMeaningfulLocalData,
   uid
-} from "./state-model.js?v=1.1.27";
+} from "./state-model.js?v=1.1.30";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -74,7 +74,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.27";
+} from "./sync-client.js?v=1.1.30";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -190,6 +190,8 @@ let transactionHistoryDate = "";
 let snackbar = null;
 let snackbarTimer;
 let nativeNotificationPermission = "";
+// Last style sent to Android for the status bar icons (see syncSystemBarsStyle).
+let systemBarsStyle = "";
 let planSheet = "";
 let pendingJobRemovalId = "";
 let pendingBackupRestoreId = "";
@@ -268,6 +270,7 @@ window.addEventListener("hashchange", () => {
   const nextView = viewFromHash(state.activeView || DEFAULT_VIEW);
   let shouldRender = false;
   if (nextView !== state.activeView) {
+    scrollToTop();
     state.activeView = nextView;
     menuOpen = false;
     saveState({ sync: false, touch: false });
@@ -928,7 +931,23 @@ function applyThemePreference() {
   document.documentElement.dataset.theme = theme;
   app.dataset.theme = theme;
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#101412" : "#0b6f5b");
+  syncSystemBarsStyle(theme);
   return theme;
+}
+
+// Android follows the SYSTEM theme for the status bar icons, not the app's: with the app
+// on "Claro" and the phone in dark mode the clock came out white on the cream strip.
+// "DARK" means a dark background, so light icons.
+function syncSystemBarsStyle(theme) {
+  const style = theme === "dark" ? "DARK" : "LIGHT";
+  const systemBars = window.Capacitor?.Plugins?.SystemBars;
+  if (style === systemBarsStyle || !systemBars?.setStyle) {
+    return;
+  }
+  systemBarsStyle = style;
+  systemBars.setStyle({ style }).catch(() => {
+    systemBarsStyle = "";
+  });
 }
 
 function renderBottomNavigation() {
@@ -7635,11 +7654,24 @@ function activateView(view) {
   if (!APP_VIEWS.has(view)) {
     return;
   }
+  if (view !== state.activeView) {
+    scrollToTop();
+  }
   state.activeView = view;
   menuOpen = false;
   const nextHash = hashFromView(view);
   if (window.location.hash.replace("#", "") !== nextHash) {
     window.location.hash = nextHash;
+  }
+}
+
+// The page scrolls on window and render() keeps that offset, so switching sections used
+// to land mid-page (Plan and Ahorro opened with their titles scrolled out of sight).
+function scrollToTop() {
+  try {
+    window.scrollTo(0, 0);
+  } catch {
+    // Not available (jsdom); nothing to reset.
   }
 }
 
