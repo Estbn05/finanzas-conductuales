@@ -893,7 +893,7 @@ test("authentication gates onboarding and signed-in users can close their sessio
   assert.ok(app.includes("Entiende tu dinero antes de gastarlo"));
   assert.ok(app.includes("Dinero libre visible"));
   assert.ok(app.includes("Plan por categorías"));
-  assert.ok(app.includes("Sincronización segura"));
+  assert.ok(app.includes("Copia en la nube"));
   assert.ok(app.includes('let authMode = ""'));
   assert.ok(app.includes('data-action="show-auth-form"'));
   assert.ok(app.includes('data-action="back-auth-options"'));

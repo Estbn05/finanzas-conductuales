@@ -8221,3 +8221,119 @@ html[data-theme="dark"] .money-math > * + * {
     animation-duration: 1ms;
   }
 }
+
+/* Access landing. Each benefit is an icon beside its title and one line. */
+.auth-benefits article {
+  grid-template-columns: 36px minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 2px;
+  align-items: center;
+}
+
+.auth-benefit-icon {
+  display: grid;
+  grid-row: span 2;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: var(--ds-primary-strong);
+  background: var(--ds-primary-soft);
+}
+
+.auth-benefit-icon .ui-icon {
+  width: 19px;
+  height: 19px;
+}
+
+/* On a phone the whole landing fits one screen: below the status bar, the access card
+   at the bottom and the free height shared out between the blocks. A phone too short
+   for it still scrolls instead of cutting anything. */
+@media (max-width: 760px) {
+  .auth-gate:not(.auth-gate-focused) {
+    display: flex;
+    flex-direction: column;
+    padding: calc(14px + var(--safe-area-inset-top, env(safe-area-inset-top, 0px))) 16px
+      calc(14px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .auth-landing {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: clamp(12px, 2.5svh, 24px);
+  }
+
+  .auth-hero {
+    gap: clamp(10px, 2svh, 18px);
+    padding: 0;
+  }
+
+  .auth-brand h1 {
+    font-size: clamp(1.6rem, 8vw, 2.3rem);
+    line-height: 1.12;
+  }
+
+  .auth-lead {
+    font-size: 1rem;
+    line-height: 1.45;
+  }
+
+  .auth-benefits {
+    gap: 0;
+    overflow: hidden;
+    border: 1px solid var(--ds-line);
+    border-radius: var(--ds-radius-md);
+  }
+
+  .auth-benefits article {
+    padding: 10px 12px;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .auth-benefits article + article {
+    border-top: 1px solid var(--ds-line);
+  }
+
+  .auth-benefits span:not(.auth-benefit-icon) {
+    font-size: 0.86rem;
+    line-height: 1.35;
+  }
+
+  /* The buttons say what "Elige cómo entrar" says. */
+  .auth-choice-head {
+    display: none;
+  }
+
+  .auth-choice-card {
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .auth-local-choice {
+    margin-top: 2px;
+  }
+
+  .auth-local-choice small {
+    font-size: 0.8rem;
+    line-height: 1.35;
+  }
+
+  .auth-privacy {
+    margin-top: 0;
+    font-size: 0.85rem;
+  }
+}
+
+/* Short phones: the benefit titles alone. */
+@media (max-width: 760px) and (max-height: 640px) {
+  .auth-benefits span:not(.auth-benefit-icon) {
+    display: none;
+  }
+
+  .auth-benefit-icon {
+    grid-row: auto;
+  }
+}

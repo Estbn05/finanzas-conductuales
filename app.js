@@ -18,7 +18,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.60";
+} from "./finance-core.js?v=1.1.61";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -64,7 +64,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.60";
+} from "./state-model.js?v=1.1.61";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -80,7 +80,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.60";
+} from "./sync-client.js?v=1.1.61";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -1795,28 +1795,29 @@ function renderAuthGate() {
               <h1 id="auth-title">Entiende tu dinero antes de gastarlo</h1>
             </div>
           </div>
-          <p class="auth-lead">
-            Una app para registrar gastos, ver cuánto dinero queda libre y separar categorías del periodo sin convertir cada compra en culpa.
-          </p>
+          <p class="auth-lead">Registra tus gastos y mira cuánto te queda libre, sin culpa.</p>
           <div class="auth-benefits" aria-label="Para qué sirve la app">
             <article>
+              <span class="auth-benefit-icon" aria-hidden="true">${renderIcon("wallet")}</span>
               <strong>Dinero libre visible</strong>
-              <span>El inicio muestra lo disponible después de reservas, categorías y gastos reales.</span>
+              <span>Lo disponible después de reservas y gastos reales.</span>
             </article>
             <article>
+              <span class="auth-benefit-icon" aria-hidden="true">${renderIcon("tag")}</span>
               <strong>Plan por categorías</strong>
-              <span>Define límites para gasolina, salidas, universidad o cualquier categoría que quieras cuidar.</span>
+              <span>Límites para lo que quieras cuidar.</span>
             </article>
             <article>
-              <strong>Sincronización segura</strong>
-              <span>Tu cuenta guarda una copia en la nube y conserva una copia local para el día a día.</span>
+              <span class="auth-benefit-icon" aria-hidden="true">${renderIcon("lock")}</span>
+              <strong>Copia en la nube</strong>
+              <span>Tus datos en tu cuenta y en tu teléfono.</span>
             </article>
           </div>
         </div>
 
         <div class="auth-actions" aria-label="Acceso a la aplicación">
           <article class="auth-card auth-choice-card">
-            <div>
+            <div class="auth-choice-head">
               <p class="eyebrow">Acceso</p>
               <h2>Elige cómo entrar</h2>
             </div>
