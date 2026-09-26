@@ -377,8 +377,10 @@ export function normalizeBudgetExtras(extras, today) {
 
 export function normalizeLiquidity(liquidity) {
   return {
-    account: numberFrom(liquidity?.account),
-    cash: numberFrom(liquidity?.cash),
+    // numberValue, not numberFrom: an overdraft is a real balance the app must keep, not
+    // something to round up to zero on the next load.
+    account: numberValue(liquidity?.account) ?? 0,
+    cash: numberValue(liquidity?.cash) ?? 0,
     initialized: Boolean(liquidity?.initialized),
     updated_at: liquidity?.updated_at || ""
   };

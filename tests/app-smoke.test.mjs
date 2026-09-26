@@ -438,6 +438,57 @@ test("extra money: 'Dejar todo libre' adds it all to free money without separati
   }
 });
 
+// The app records what already happened. Refusing an expense larger than the balance
+// (overdraft, cash borrowed, a stale balance) pushed users to fake the amount or give up.
+const NEGATIVE_100K = /-\s?\$\s?100\.000|\$\s?-\s?100\.000/;
+
+test("an expense larger than the balance is recorded and the balance goes negative, with a plain notice", async () => {
+  const ui = await bootApp({ savedState: returningUserState() });
+  let saved;
+  try {
+    await ui.click('[data-action="open-expense"]');
+    const form = ui.$("#transaction-form");
+    await ui.type(form.elements.namedItem("amount"), "1600000");
+    form.requestSubmit();
+    await settle(ui.window);
+
+    saved = ui.saved();
+    assert.equal(saved.transactions.length, 1, "the expense was refused");
+    assert.equal(saved.liquidity.account, -100_000);
+    const snackbar = ui.$(".snackbar");
+    assert.match(snackbar.textContent, /Cuenta quedó en/);
+    assert.ok(!snackbar.classList.contains("error"), "an overdraft is information, not an error");
+  } finally {
+    ui.close();
+  }
+
+  const relaunched = await bootApp({ savedState: saved });
+  try {
+    assert.equal(relaunched.saved().liquidity.account, -100_000, "reloading rounded the overdraft up to zero");
+    assert.match(relaunched.text(), NEGATIVE_100K);
+  } finally {
+    relaunched.close();
+  }
+});
+
+test("editing balances keeps a negative account negative instead of flipping its sign", async () => {
+  const ui = await bootApp({
+    savedState: returningUserState({ liquidity: { account: -100_000, cash: 20_000, initialized: true } })
+  });
+  try {
+    await ui.click('[data-view="profile"]');
+    await ui.click('[data-action="open-diagnosis"][data-section="balances"]');
+    const form = ui.$("#diagnosis-form");
+    assert.equal(form.elements.namedItem("account").value, "-100.000");
+    form.requestSubmit();
+    await settle(ui.window);
+    assert.equal(ui.saved().liquidity.account, -100_000);
+    assert.equal(ui.saved().liquidity.cash, 20_000);
+  } finally {
+    ui.close();
+  }
+});
+
 // The boot code (render(), initializeCloudSync()) runs synchronously at module init, so
 // a module-level const/let declared below it is in its temporal dead zone for any boot
 // path that reaches it — this crashed the app three separate times. The smoke tests

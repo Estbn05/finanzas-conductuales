@@ -4029,12 +4029,12 @@ function renderDiagnosisBalancesFields() {
   return `
     <label>
       Dinero en cuenta
-      <input name="account" type="number" min="0" step="1000" value="${available.account}" required ${diagnosisInvalidAttr("account")}>
+      <input name="account" type="number" step="1000" value="${available.account}" data-allow-negative="true" required ${diagnosisInvalidAttr("account")}>
       ${renderDiagnosisFieldError("account")}
     </label>
     <label>
       Dinero en físico
-      <input name="cash" type="number" min="0" step="1000" value="${available.cash}" required ${diagnosisInvalidAttr("cash")}>
+      <input name="cash" type="number" step="1000" value="${available.cash}" data-allow-negative="true" required ${diagnosisInvalidAttr("cash")}>
       ${renderDiagnosisFieldError("cash")}
     </label>
     <small class="balance-hint" data-liquidity-match-hint></small>
@@ -4692,7 +4692,7 @@ function bindDiagnosisPreview(form) {
     }
     const data = new FormData(form);
     const incomeAmount = numberFrom(data.get("incomeAmount"));
-    const total = numberFrom(data.get("account")) + numberFrom(data.get("cash"));
+    const total = (numberValue(data.get("account")) ?? 0) + (numberValue(data.get("cash")) ?? 0);
     const requireMatch = shouldRequireOpeningBalanceMatch();
     if (!requireMatch) {
       hint.textContent = `Saldo real actual: ${formatMoney(total)}. Puede ser distinto del presupuesto base si ya registraste gastos o dinero extra.`;
@@ -5330,8 +5330,8 @@ function submitDiagnosisForm(form) {
       updated_at: new Date().toISOString()
     };
     state.liquidity = {
-      account: numberFrom(data.get("account")),
-      cash: numberFrom(data.get("cash")),
+      account: numberValue(data.get("account")) ?? 0,
+      cash: numberValue(data.get("cash")) ?? 0,
       initialized: true,
       updated_at: new Date().toISOString()
     };
@@ -5362,8 +5362,9 @@ function validateDiagnosisForm(form) {
     ["incomeAmount", "El presupuesto por periodo debe ser mayor que cero.", 1],
     ["committedExpenses", "Los gastos comprometidos no pueden estar vacios.", 0],
     ["emergencySavings", "El ahorro actual para la simulación no puede estar vacio.", 0],
-    ["account", "El dinero en cuenta no puede estar vacio.", 0],
-    ["cash", "El dinero en físico no puede estar vacio.", 0]
+    // Balances may be negative (an overdraft); they only have to be filled in.
+    ["account", "El dinero en cuenta no puede estar vacío.", -Infinity],
+    ["cash", "El dinero en físico no puede estar vacío.", -Infinity]
   ];
 
   if (activeFields.has("name") && !cleanText(data.get("name"), "")) {
@@ -5572,7 +5573,7 @@ function handleTransactionSubmit(event) {
   const source = normalizeLocation(data.get("source"));
   const calendarEventId = cleanText(data.get("calendarEventId"), "");
   const threshold = plan.expenses * LARGE_PURCHASE_RATIO;
-  const transactionError = validateTransactionDraft({ amount, category, source });
+  const transactionError = validateTransactionDraft({ amount, category });
 
   if (transactionError) {
     state.lastAlert = transactionError;
@@ -5598,8 +5599,9 @@ function handleTransactionSubmit(event) {
     if (calendarEventId) {
       markCalendarEventSpent(calendarEventId, transaction.id);
     }
-    state.lastAlert = createSpendAlert(category);
-    showUndoSnackbar(transaction.id);
+    const overdraft = overdraftNotice(source);
+    state.lastAlert = overdraft || createSpendAlert(category);
+    showUndoSnackbar(transaction.id, overdraft);
   }
 
   closeQuickExpense();
@@ -5622,11 +5624,6 @@ function handleTransactionEditSubmit(event) {
   const nextOneOff = data.get("oneOff") === "on";
   const currentSource = normalizeLocation(transaction.source);
   if (nextSource !== currentSource) {
-    const available = liquiditySummary()[nextSource];
-    if (Number(transaction.amount || 0) > available) {
-      showNoticeSnackbar(`${locationLabel(nextSource)} solo tiene ${formatMoney(available)} disponible.`, { kind: "error" });
-      return;
-    }
     if (state.liquidity?.initialized) {
       adjustLiquidity(currentSource, Number(transaction.amount || 0), "refund");
       adjustLiquidity(nextSource, -Number(transaction.amount || 0), "expense");
@@ -5638,7 +5635,11 @@ function handleTransactionEditSubmit(event) {
   transaction.oneOff = nextOneOff;
   transaction.updated_at = new Date().toISOString();
   rememberMerchantRule(transaction);
-  state.lastAlert = `${transaction.merchant} quedó reclasificado.`;
+  const overdraft = nextSource !== currentSource ? overdraftNotice(nextSource) : "";
+  state.lastAlert = overdraft || `${transaction.merchant} quedó reclasificado.`;
+  if (overdraft) {
+    showNoticeSnackbar(overdraft, { renderNow: false });
+  }
   editingTransactionId = "";
   saveState();
   render();
@@ -5673,7 +5674,7 @@ function handleExtraEditSubmit(event) {
   render();
 }
 
-function validateTransactionDraft({ amount, category, source }) {
+function validateTransactionDraft({ amount, category }) {
   if (amount <= 0) {
     return "El monto del gasto debe ser mayor que cero.";
   }
@@ -5683,12 +5684,22 @@ function validateTransactionDraft({ amount, category, source }) {
     return "Elige una categoría válida para clasificar el gasto.";
   }
 
-  const available = liquiditySummary()[normalizeLocation(source)];
-  if (amount > available) {
-    return `${locationLabel(source)} solo tiene ${formatMoney(available)} disponible. Elige otra fuente o actualiza tus datos.`;
-  }
-
+  // No balance check: this records something that already happened. An overdraft, cash
+  // borrowed from a friend or a stale balance are all real, and refusing the expense only
+  // pushed the user to fake the amount or give up. It is recorded, and overdraftNotice()
+  // says where the balance ended up.
   return "";
+}
+
+// A negative balance is useful information ("te pasaste"), not an error: plain wording,
+// no red, and a direct way to fix it if the balance on file was simply out of date.
+function overdraftNotice(source) {
+  const liquidity = normalizeLiquidity(state.liquidity);
+  const key = normalizeLocation(source);
+  if (!liquidity.initialized || liquidity[key] >= 0) {
+    return "";
+  }
+  return `${locationLabel(key)} quedó en ${formatMoney(liquidity[key])}. Si no cuadra, corrige el saldo en Datos.`;
 }
 
 function handleSmartSubmit(event) {
@@ -6658,11 +6669,6 @@ function unlockCooldown(id) {
   if (!cooldown || new Date(cooldown.unlockAt).getTime() > Date.now()) {
     return;
   }
-  const available = liquiditySummary()[normalizeLocation(cooldown.source)];
-  if (Number(cooldown.amount || 0) > available) {
-    showNoticeSnackbar(`${locationLabel(cooldown.source)} solo tiene ${formatMoney(available)} disponible. Actualiza tus datos antes de registrarla.`, { kind: "error", renderNow: false });
-    return;
-  }
   addTransaction({
     merchant: cooldown.merchant,
     description: cooldown.description || "",
@@ -6672,7 +6678,11 @@ function unlockCooldown(id) {
     source: cooldown.source
   });
   state.cooldowns = state.cooldowns.filter((item) => item.id !== id);
-  state.lastAlert = createSpendAlert(cooldown.category);
+  const overdraft = overdraftNotice(cooldown.source);
+  state.lastAlert = overdraft || createSpendAlert(cooldown.category);
+  if (overdraft) {
+    showNoticeSnackbar(overdraft, { renderNow: false });
+  }
 }
 
 function addTransaction({ merchant, description = "", amount, category, budgeted, oneOff = false, source = "account", calendarEventId = "" }) {
@@ -6834,10 +6844,10 @@ function announce(message, kind = "") {
   }, 50);
 }
 
-function showUndoSnackbar(transactionId) {
+function showUndoSnackbar(transactionId, note = "") {
   clearTimeout(snackbarTimer);
   snackbar = {
-    message: "Gasto registrado. ¿Deshacer?",
+    message: note ? `Gasto registrado. ${note}` : "Gasto registrado. ¿Deshacer?",
     action: "undo",
     kind: "",
     transactionId
@@ -7285,7 +7295,7 @@ function adjustLiquidity(location, delta, reason) {
   }
 
   const liquidity = normalizeLiquidity(state.liquidity);
-  liquidity[key] = Math.max(0, liquidity[key] + amount);
+  liquidity[key] += amount;
   liquidity.initialized = true;
   liquidity.updated_at = new Date().toISOString();
   state.liquidity = liquidity;
@@ -7509,7 +7519,7 @@ function bindMoneyInputs(root = document) {
     } catch {
       // Some older browsers do not allow changing input type after creation.
     }
-    input.value = formatMoneyInputValue(input.value);
+    input.value = formatMoneyInputValue(input.value, input.dataset.allowNegative === "true");
     input.addEventListener("input", () => formatMoneyInput(input));
   });
 }
@@ -7540,7 +7550,7 @@ function bindPasswordToggles(root = document) {
 function formatMoneyInput(input) {
   const cursor = input.selectionStart ?? input.value.length;
   const digitCountBeforeCursor = input.value.slice(0, cursor).replace(/\D/g, "").length;
-  const formatted = formatMoneyInputValue(input.value);
+  const formatted = formatMoneyInputValue(input.value, input.dataset.allowNegative === "true");
   input.value = formatted;
   const nextCursor = positionAfterDigitCount(formatted, digitCountBeforeCursor);
   try {
@@ -7551,12 +7561,16 @@ function formatMoneyInput(input) {
   }
 }
 
-function formatMoneyInputValue(value) {
-  const digits = String(value ?? "").replace(/\D/g, "").slice(0, MONEY_INPUT_MAX_DIGITS);
+// Stripping every non-digit also stripped a minus sign, so a -50.000 balance showed as
+// 50.000 and saved back positive. Only fields that may hold an overdraft keep the sign.
+function formatMoneyInputValue(value, allowNegative = false) {
+  const text = String(value ?? "");
+  const sign = allowNegative && text.trim().startsWith("-") ? "-" : "";
+  const digits = text.replace(/\D/g, "").slice(0, MONEY_INPUT_MAX_DIGITS);
   if (!digits) {
-    return "";
+    return sign;
   }
-  return PLAIN_NUMBER_FORMATTER.format(Number(digits));
+  return sign + PLAIN_NUMBER_FORMATTER.format(Number(digits));
 }
 
 function positionAfterDigitCount(value, digitCount) {
