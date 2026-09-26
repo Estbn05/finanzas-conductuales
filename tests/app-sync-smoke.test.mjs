@@ -167,3 +167,18 @@ test("'Olvidé mi PIN' unlocks with the account password and turns the lock off"
     ui.close();
   }
 });
+
+
+// Regression: signing in from "Usar sin cuenta" with nothing entered yet raised the
+// "your edits were replaced" banner though there was nothing to lose.
+test("a download over a device with no real data stays quiet", async () => {
+  reset();
+  cloud.remote = { app_state: returningUserState(), updated_at: new Date(Date.now() + 60_000).toISOString() };
+  const empty = { meta: { localOnly: true, cloudUpdatedAt: "" }, updated_at: new Date().toISOString(), profile: { completed: false } };
+  const ui = await bootSignedIn({ savedState: empty });
+  try {
+    assert.doesNotMatch(ui.text(), /Trajimos cambios de otro dispositivo/);
+  } finally {
+    ui.close();
+  }
+});

@@ -10044,3 +10044,54 @@ html .nav-item.is-primary .nav-number {
 .lock-forgot-card > .btn.ghost {
   margin-top: 8px;
 }
+
+/* "Usar sin cuenta" and the privacy link on the access screens. */
+.auth-local-choice {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  text-align: center;
+}
+
+.auth-local-choice small {
+  color: var(--ds-muted);
+}
+
+.auth-privacy {
+  margin-top: 12px;
+  color: var(--ds-muted);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.auth-privacy a {
+  color: var(--ds-primary-strong);
+  font-weight: 700;
+}
+
+.local-only-section {
+  display: grid;
+  gap: 12px;
+}
+
+.local-only-section span {
+  display: block;
+  margin-top: 4px;
+  color: var(--ds-muted);
+}
+
+/* Two actions do not fit beside the text on a phone: they go on their own row. */
+.cloud-conflict-banner {
+  flex-wrap: wrap;
+}
+
+.cloud-conflict-banner > div:not(.cloud-conflict-actions) {
+  flex: 1 1 calc(100% - 40px);
+}
+
+.sync-problem-banner .cloud-conflict-actions {
+  display: flex;
+  flex: 1 1 100%;
+  gap: 8px;
+  justify-content: flex-end;
+}

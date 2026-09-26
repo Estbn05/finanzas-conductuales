@@ -18,7 +18,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.36";
+} from "./finance-core.js?v=1.1.39";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -60,7 +60,7 @@ import {
   hasMeaningfulLocalData,
   hasUnsyncedLocalEdits,
   uid
-} from "./state-model.js?v=1.1.36";
+} from "./state-model.js?v=1.1.39";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -75,7 +75,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.36";
+} from "./sync-client.js?v=1.1.39";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -198,6 +198,9 @@ let movementsPeriodOffset = 0;
 let cloudConflictNotice = false;
 // "Olvidé mi PIN": the account password is being checked.
 let lockForgotBusy = false;
+// A local-only user asked to create an account / sign in from inside the app.
+let accountRequested = false;
+const PRIVACY_POLICY_URL = "https://estbn05.github.io/finanzas-conductuales/privacy-policy.html";
 let planSheet = "";
 let pendingJobRemovalId = "";
 let pendingBackupRestoreId = "";
@@ -462,7 +465,7 @@ async function pullCloudAfterLogin() {
     const decision = decideLoginSync(state, remote);
 
     if (decision === "download") {
-      const lostLocalEdits = hasUnsyncedLocalEdits(state);
+      const lostLocalEdits = hasMeaningfulLocalData(state) && hasUnsyncedLocalEdits(state);
       applyRemoteState(remote.app_state, remote.updated_at, "Nube sincronizada automáticamente.");
       cloudConflictNotice = lostLocalEdits;
     } else if (decision === "in-sync") {
@@ -517,7 +520,7 @@ async function pushCloudState() {
   try {
     const remote = await loadCloudState();
     if (decidePushSync(state, remote) === "download") {
-      const lostLocalEdits = hasUnsyncedLocalEdits(state);
+      const lostLocalEdits = hasMeaningfulLocalData(state) && hasUnsyncedLocalEdits(state);
       applyRemoteState(remote.app_state, remote.updated_at, "La nube tenía cambios más recientes. Descargué esa versión.");
       cloudConflictNotice = lostLocalEdits;
       cloudState.status = "synced";
@@ -671,7 +674,9 @@ function friendlyCloudError(error) {
 function renderCloudStatusChange() {
   // Perder la sesion si manda: dejar un formulario abierto sobre una sesion muerta es
   // peor que perderlo, porque al guardarlo fallaria igual.
-  if (shouldShowAuthGate()) {
+  // The "Comprobando tu sesión" screen has nothing to lose, but hasOpenUserInput() counts
+  // a pending onboarding as open input and would leave a local-only user stuck on it.
+  if (shouldShowAuthGate() || document.querySelector(".session-check")) {
     render();
     return;
   }
@@ -849,7 +854,11 @@ function render() {
         <div class="menu-tools">
           ${renderSyncStatusLine()}
           <button class="btn primary" type="button" data-action="open-diagnosis">Editar mi plan</button>
-          <button class="btn ghost" type="button" data-action="cloud-sign-out">Cerrar sesión</button>
+          ${
+            isLocalOnly()
+              ? `<button class="btn ghost" type="button" data-action="request-account">Crear cuenta</button>`
+              : `<button class="btn ghost" type="button" data-action="cloud-sign-out">Cerrar sesión</button>`
+          }
         </div>
       </div>
     </aside>
@@ -1050,6 +1059,9 @@ function currentSyncStatus() {
 // asks for clear sync states without filling the main screen with technical indicators.
 // Tone is spelled out in words and an icon, never color alone.
 function renderSyncStatusLine() {
+  if (isLocalOnly()) {
+    return `<p class="sync-status sync-status--offline"><span class="sync-status-icon" aria-hidden="true">•</span><span>Solo en este teléfono</span></p>`;
+  }
   const status = currentSyncStatus();
   if (!status) {
     return "";
@@ -1096,8 +1108,10 @@ function renderCloudConflictBanner() {
         <strong>Trajimos cambios de otro dispositivo</strong>
         <span>Lo que habías hecho aquí sin subir quedó guardado en Datos, en Copias locales.</span>
       </div>
-      <button class="btn ghost" type="button" data-action="open-local-backups">Ver copias</button>
-      <button class="btn ghost" type="button" data-action="dismiss-cloud-conflict">Entendido</button>
+      <div class="cloud-conflict-actions">
+        <button class="btn ghost" type="button" data-action="open-local-backups">Ver copias</button>
+        <button class="btn ghost" type="button" data-action="dismiss-cloud-conflict">Entendido</button>
+      </div>
     </div>
   `;
 }
@@ -1135,7 +1149,41 @@ function shouldShowAuthGate() {
   // confirming the session — not an actual sign-out — and showing the login wall would
   // lock the user out of their own local data over a network hiccup. Let them in;
   // renderConnectionBanner() and cloudState.error already surface that sync is stuck.
+  if (accountRequested) {
+    return true;
+  }
+  // "Usar sin cuenta": the app works entirely on this phone until they choose to sign up.
+  if (isLocalOnly()) {
+    return false;
+  }
   return !hasMeaningfulLocalData(state);
+}
+
+function isLocalOnly() {
+  return Boolean(state.meta?.localOnly) && !cloudState.signedIn;
+}
+
+function startLocalOnly() {
+  state.meta = { ...(state.meta || {}), localOnly: true };
+  accountRequested = false;
+  authMode = "";
+  authNotice = null;
+  cloudState.error = "";
+  saveState({ sync: false });
+}
+
+function renderLocalOnlyChoice() {
+  const staying = Boolean(state.meta?.localOnly);
+  return `
+    <div class="auth-local-choice">
+      <button class="btn ghost" type="button" data-action="use-without-account">${staying ? "Seguir sin cuenta" : "Usar sin cuenta"}</button>
+      <small>Tus datos quedan solo en este teléfono. Puedes crear una cuenta después para tener copia en la nube.</small>
+    </div>
+  `;
+}
+
+function renderPrivacyLink(prefix = "") {
+  return `<p class="auth-privacy">${prefix}<a href="${PRIVACY_POLICY_URL}" target="_blank" rel="noopener">Política de privacidad</a></p>`;
 }
 
 function profileNeedsOnboarding() {
@@ -1196,8 +1244,9 @@ function renderAuthGate() {
         <section class="auth-screen">
           <div class="auth-screen-copy">
             <h1>Acceso no disponible</h1>
-            <p class="auth-screen-lead">La autenticación no está disponible. Revisa la configuración de Supabase y vuelve a cargar la aplicación.</p>
+            <p class="auth-screen-lead">No pudimos conectar con el servicio de cuentas. Puedes usar la app sin cuenta mientras tanto.</p>
           </div>
+          ${renderLocalOnlyChoice()}
         </section>
       </main>
     `;
@@ -1289,10 +1338,11 @@ function renderAuthGate() {
               ${isSignIn ? "Iniciar sesión" : "Registrarse"}
             </button>
           </form>
+          ${isSignIn ? "" : renderPrivacyLink("Al registrarte aceptas la ")}
           <p class="auth-switch">
-            ${isSignIn ? "No tienes cuenta?" : "Ya tienes cuenta?"}
+            ${isSignIn ? "¿No tienes cuenta?" : "¿Ya tienes cuenta?"}
             <button class="auth-switch-link" type="button" data-action="show-auth-form" data-auth-mode="${isSignIn ? "signup" : "signin"}">
-              ${isSignIn ? "Registrate" : "Inicia sesión"}
+              ${isSignIn ? "Regístrate" : "Inicia sesión"}
             </button>
           </p>
         </section>
@@ -1341,6 +1391,8 @@ function renderAuthGate() {
               <button class="btn primary" type="button" data-action="show-auth-form" data-auth-mode="signin">Iniciar sesión</button>
               <button class="btn secondary" type="button" data-action="show-auth-form" data-auth-mode="signup">Registrarse</button>
             </div>
+            ${renderLocalOnlyChoice()}
+            ${renderPrivacyLink()}
           </article>
         </div>
       </section>
@@ -3668,15 +3720,23 @@ function renderProfile(plan) {
         }
       </article>
 
-      <article class="sign-out-section">
-        <div><strong>${escapeHtml(cloudState.email)}</strong><span>La copia local se retirará de este dispositivo.</span></div>
-        <button class="btn danger" type="button" data-action="cloud-sign-out">Cerrar sesión</button>
-      </article>
+      ${
+        isLocalOnly()
+          ? `<article class="data-section local-only-section">
+              <div><strong>Sin cuenta</strong><span>Tus datos están solo en este teléfono. Si lo pierdes o borras la app, se pierden. Con una cuenta tienes copia en la nube.</span></div>
+              <button class="btn primary" type="button" data-action="request-account">Crear cuenta o iniciar sesión</button>
+            </article>`
+          : `<article class="sign-out-section">
+              <div><strong>${escapeHtml(cloudState.email)}</strong><span>Tus datos se borrarán de este teléfono. Siguen en tu cuenta.</span></div>
+              <button class="btn danger" type="button" data-action="cloud-sign-out">Cerrar sesión</button>
+            </article>
 
-      <article class="sign-out-section">
-        <div><strong>Eliminar cuenta y datos</strong><span>Borra tu presupuesto, movimientos y ahorro guardados en la nube. No se puede deshacer.</span></div>
-        <button class="btn danger" type="button" data-action="open-delete-account">Eliminar cuenta</button>
-      </article>
+            <article class="sign-out-section">
+              <div><strong>Eliminar cuenta y datos</strong><span>Borra tu presupuesto, movimientos y ahorro guardados en la nube. No se puede deshacer.</span></div>
+              <button class="btn danger" type="button" data-action="open-delete-account">Eliminar cuenta</button>
+            </article>`
+      }
+      ${renderPrivacyLink()}
     </section>
   `;
 }
@@ -4065,6 +4125,11 @@ function renderOnboardingModal() {
             <button class="btn ghost onboarding-skip" type="button" data-onboarding-skip hidden>Saltarme esto por ahora</button>
           </div>
         </form>
+        ${
+          isLocalOnly()
+            ? `<p class="auth-privacy">¿Ya tienes cuenta? <button class="auth-switch-link" type="button" data-action="request-account" data-auth-mode="signin">Inicia sesión</button></p>`
+            : ""
+        }
       </section>
     </div>
   `;
@@ -5128,6 +5193,7 @@ function handleAction(event) {
     "close-expense",
     "show-auth-form",
     "back-auth-options",
+    "request-account",
     "open-add-category-choice",
     "open-category-sheet",
     "open-setaside-sheet",
@@ -5208,6 +5274,14 @@ function handleAction(event) {
     },
     "back-auth-options": () => {
       authMode = "";
+      authNotice = null;
+      cloudState.error = "";
+    },
+    "use-without-account": () => startLocalOnly(),
+    "request-account": () => {
+      accountRequested = true;
+      menuOpen = false;
+      authMode = event.currentTarget.dataset.authMode === "signin" ? "signin" : "";
       authNotice = null;
       cloudState.error = "";
     },
@@ -6116,6 +6190,8 @@ async function handleCloudLoginSubmit(event) {
 
     applyCloudSession(session);
     cloudState.sessionReady = true;
+    accountRequested = false;
+    state.meta = { ...(state.meta || {}), localOnly: false };
     authEmailDraft = "";
     authNotice = null;
     resetQuickExpenseAfterLogin();
