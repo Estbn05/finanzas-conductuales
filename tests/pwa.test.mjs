@@ -188,7 +188,6 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(styles.includes("html[data-theme=\"dark\"] .sidebar .menu-tools .btn.ghost"));
   assert.ok(styles.includes("Distribution brand mark v18"));
   assert.ok(styles.includes(".brand-ring-free"));
-  assert.ok(styles.includes("--ds-bg: #f6f1e7"));
   assert.ok(styles.includes("--ds-bg: #f7f4ee"));
   assert.ok(styles.includes(":focus-visible"));
   assert.ok(styles.includes("@media (prefers-reduced-motion: reduce)"));
@@ -197,7 +196,6 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(styles.includes("grid-template-columns: repeat(5"));
   assert.ok(styles.includes(".money-context"));
   assert.ok(styles.includes(".category-card-bar"));
-  assert.ok(styles.includes("@media (prefers-color-scheme: dark)"));
 });
 
 test("movements combines expenses and extra income and can sort the full history", async () => {
@@ -775,8 +773,9 @@ test("theme follows the OS when the user never picked one, so data-theme cannot 
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
   const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
 
-  // The stylesheet themes itself through BOTH mechanisms, so they must always agree.
-  assert.ok(styles.includes("@media (prefers-color-scheme: dark)"));
+  // The stylesheet themes itself ONLY through data-theme; following the system is the
+  // job of index.html/app.js, which resolve it into data-theme (see theme-tokens.test.mjs).
+  assert.equal(styles.includes("@media (prefers-color-scheme"), false);
   assert.ok(styles.includes('html[data-theme="dark"]'));
 
   // A fresh/signed-out state means "follow the system", not a hardcoded light.
@@ -1254,10 +1253,7 @@ test("every form keeps readable controls in Android PWA themes", async () => {
   // repainted alongside `small`/`b` or the button's own title is the hardest part to read.
   assert.match(styles, /\.plan-action:first-child strong \{[\s\S]{0,300}color: #052a22 !important;/);
 
-  assert.ok(styles.includes("--field-bg: #ffffff"));
-  assert.ok(styles.includes("--field-bg: #1d2421"));
-  assert.ok(styles.includes("--field-text: #101614"));
-  assert.ok(styles.includes("--field-text: #e8f5ee"));
+  // Field colors per theme and their contrast are checked in theme-tokens.test.mjs.
   assert.match(styles, /input:not\(\[type="checkbox"\]\)[\s\S]*select,[\s\S]*textarea\s*{/);
   assert.ok(styles.includes("-webkit-text-fill-color: var(--field-text) !important"));
   assert.ok(styles.includes('input[type="date"]::-webkit-datetime-edit'));
