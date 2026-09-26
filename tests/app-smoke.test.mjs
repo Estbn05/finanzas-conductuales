@@ -739,6 +739,21 @@ test("savings figures are per period on Ahorro and Datos, and agree", async () =
   }
 });
 
+// Without a cloud account there is nothing to prove who the owner is: say so plainly
+// instead of leaving a forgotten PIN as a dead end.
+test("'Olvidé mi PIN' without an account explains the only way back in", async () => {
+  const ui = await bootLocked("2468");
+  try {
+    await ui.click("[data-lock-forgot]");
+    assert.match(ui.text(), /Sin una cuenta no hay forma de comprobar que eres tú/);
+    assert.equal(ui.$("#lock-forgot-form"), null);
+    await ui.click("[data-lock-forgot-back]");
+    assert.ok(ui.$("[data-lock-digit]"), "back should return to the keypad");
+  } finally {
+    ui.close();
+  }
+});
+
 // The boot code (render(), initializeCloudSync()) runs synchronously at module init, so
 // a module-level const/let declared below it is in its temporal dead zone for any boot
 // path that reaches it — this crashed the app three separate times. The smoke tests

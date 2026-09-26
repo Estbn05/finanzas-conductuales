@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.35";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.36";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
@@ -555,6 +555,13 @@ function timestampValue(value) {
 // adelante, un cambio local recién hecho parecía "más viejo" y un pull lo borraba.
 export function remoteChangedSinceLastSync(localState, remote) {
   return timestampValue(remote?.updated_at) > timestampValue(localState?.meta?.cloudUpdatedAt);
+}
+
+// True when this device was edited after its last successful sync. If the cloud version
+// is downloaded now, those edits are replaced (they survive only in a local backup), so
+// the user has to be told.
+export function hasUnsyncedLocalEdits(localState) {
+  return timestampValue(localState?.updated_at) > timestampValue(localState?.meta?.cloudUpdatedAt);
 }
 
 // What to do right after sign-in / app start, given the local state and the cloud row

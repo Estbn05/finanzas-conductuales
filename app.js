@@ -18,7 +18,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.35";
+} from "./finance-core.js?v=1.1.36";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -58,8 +58,9 @@ import {
   describeSyncStatus,
   decidePushSync,
   hasMeaningfulLocalData,
+  hasUnsyncedLocalEdits,
   uid
-} from "./state-model.js?v=1.1.35";
+} from "./state-model.js?v=1.1.36";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -74,7 +75,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.35";
+} from "./sync-client.js?v=1.1.36";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -193,6 +194,10 @@ let nativeNotificationPermission = "";
 let systemBarsStyle = "";
 // 0 = the current period in Movimientos, -1 the one before, and so on.
 let movementsPeriodOffset = 0;
+// Set when a download from the cloud replaced edits this device had not uploaded yet.
+let cloudConflictNotice = false;
+// "Olvidé mi PIN": the account password is being checked.
+let lockForgotBusy = false;
 let planSheet = "";
 let pendingJobRemovalId = "";
 let pendingBackupRestoreId = "";
@@ -457,7 +462,9 @@ async function pullCloudAfterLogin() {
     const decision = decideLoginSync(state, remote);
 
     if (decision === "download") {
+      const lostLocalEdits = hasUnsyncedLocalEdits(state);
       applyRemoteState(remote.app_state, remote.updated_at, "Nube sincronizada automáticamente.");
+      cloudConflictNotice = lostLocalEdits;
     } else if (decision === "in-sync") {
       markCloudSynced(remote.updated_at || new Date().toISOString());
       state.lastAlert = "Nube al día.";
@@ -510,7 +517,9 @@ async function pushCloudState() {
   try {
     const remote = await loadCloudState();
     if (decidePushSync(state, remote) === "download") {
+      const lostLocalEdits = hasUnsyncedLocalEdits(state);
       applyRemoteState(remote.app_state, remote.updated_at, "La nube tenía cambios más recientes. Descargué esa versión.");
+      cloudConflictNotice = lostLocalEdits;
       cloudState.status = "synced";
       renderCloudStatusChange();
       return;
@@ -847,6 +856,7 @@ function render() {
     <main class="main-panel">
       ${renderConnectionBanner()}
       ${renderSyncProblemBanner()}
+      ${renderCloudConflictBanner()}
       ${state.activeView === "today" ? renderHeader(plan) : ""}
       ${renderView(plan)}
     </main>
@@ -1068,6 +1078,26 @@ function renderSyncProblemBanner() {
         <span>${escapeHtml(status.detail)}</span>
       </div>
       <button class="btn ghost" type="button" data-action="retry-cloud-sync">Reintentar</button>
+    </div>
+  `;
+}
+
+// The whole state syncs as one piece, so when another device saved first its version wins
+// and this device's unsynced edits are replaced. They are kept as a local backup (see
+// applyRemoteState); this says so, instead of the edits just vanishing.
+function renderCloudConflictBanner() {
+  if (!cloudConflictNotice) {
+    return "";
+  }
+  return `
+    <div class="sync-problem-banner cloud-conflict-banner" role="status">
+      <span class="sync-problem-icon" aria-hidden="true">!</span>
+      <div>
+        <strong>Trajimos cambios de otro dispositivo</strong>
+        <span>Lo que habías hecho aquí sin subir quedó guardado en Datos, en Copias locales.</span>
+      </div>
+      <button class="btn ghost" type="button" data-action="open-local-backups">Ver copias</button>
+      <button class="btn ghost" type="button" data-action="dismiss-cloud-conflict">Entendido</button>
     </div>
   `;
 }
@@ -4422,6 +4452,18 @@ function bindEvents() {
       render();
     });
   }
+  document.querySelector("[data-lock-forgot]")?.addEventListener("click", () => {
+    lockMode = "forgot";
+    lockDigits = "";
+    lockError = "";
+    render();
+  });
+  document.querySelector("[data-lock-forgot-back]")?.addEventListener("click", () => {
+    lockMode = "unlock";
+    lockError = "";
+    render();
+  });
+  document.querySelector("#lock-forgot-form")?.addEventListener("submit", handleLockForgotSubmit);
   const lockBiometric = document.querySelector("[data-lock-biometric]");
   if (lockBiometric) {
     lockBiometric.addEventListener("click", () => tryBiometricUnlock());
@@ -5081,6 +5123,7 @@ function handleAction(event) {
     "filter-movements-by-date",
     "movements-prev-period",
     "movements-next-period",
+    "dismiss-cloud-conflict",
     "clear-movements-date-filter",
     "close-expense",
     "show-auth-form",
@@ -5142,6 +5185,13 @@ function handleAction(event) {
     },
     "clear-movements-date-filter": () => {
       transactionHistoryDate = "";
+    },
+    "open-local-backups": () => {
+      cloudConflictNotice = false;
+      activateView("profile");
+    },
+    "dismiss-cloud-conflict": () => {
+      cloudConflictNotice = false;
     },
     "movements-prev-period": () => {
       movementsPeriodOffset -= 1;
@@ -6625,7 +6675,69 @@ async function resolveLockEntry() {
   render();
 }
 
+function lockAccountEmail() {
+  return cloudState.configured ? cloudState.email || state.meta?.cloudUserEmail || "" : "";
+}
+
+// A forgotten PIN used to have no way out but clearing the app's data in Android settings,
+// losing anything not yet in the cloud. The account password proves it is the owner.
+function renderLockForgot() {
+  const email = lockAccountEmail();
+  return `
+    <div class="lock-screen" role="dialog" aria-modal="true" aria-labelledby="lock-forgot-title">
+      <section class="lock-card lock-forgot-card">
+        <span class="lock-icon" aria-hidden="true">${renderIcon("lock")}</span>
+        <h2 id="lock-forgot-title">Olvidé mi PIN</h2>
+        ${
+          email
+            ? `<p>Escribe la contraseña de ${escapeHtml(email)} y quitamos el bloqueo. Después puedes crear un PIN nuevo en Datos.</p>
+              <form id="lock-forgot-form" class="lock-forgot-form">
+                <label>
+                  Contraseña de tu cuenta
+                  <input name="password" type="password" autocomplete="current-password" required>
+                </label>
+                ${lockError ? `<p class="lock-error" role="alert">${escapeHtml(lockError)}</p>` : ""}
+                <button class="btn primary" type="submit" ${lockForgotBusy ? "disabled" : ""}>${lockForgotBusy ? "Verificando…" : "Quitar bloqueo"}</button>
+              </form>`
+            : `<p>Sin una cuenta no hay forma de comprobar que eres tú. Para volver a entrar, borra los datos de la app desde los ajustes de Android; se perderá lo que tengas en este teléfono.</p>`
+        }
+        <button class="btn ghost" type="button" data-lock-forgot-back>Volver</button>
+      </section>
+    </div>
+  `;
+}
+
+async function handleLockForgotSubmit(event) {
+  event.preventDefault();
+  const password = String(new FormData(event.currentTarget).get("password") || "");
+  const email = lockAccountEmail();
+  if (!password || !email || lockForgotBusy) {
+    return;
+  }
+  lockForgotBusy = true;
+  lockError = "";
+  render();
+  try {
+    await signInToCloud(email, password);
+    lockConfig = { enabled: false, hash: "", salt: "", biometric: false, failedAttempts: 0, lockUntil: 0 };
+    saveLockConfig(lockConfig);
+    lockMode = "";
+    lockDigits = "";
+    showNoticeSnackbar("Quitamos el bloqueo. Si quieres, crea un PIN nuevo en Datos.", { renderNow: false });
+  } catch (error) {
+    lockError = /invalid|credentials/i.test(String(error?.message || ""))
+      ? "Esa contraseña no coincide con tu cuenta."
+      : friendlyCloudError(error);
+  } finally {
+    lockForgotBusy = false;
+    render();
+  }
+}
+
 function renderLockScreen() {
+  if (lockMode === "forgot") {
+    return renderLockForgot();
+  }
   const titles = {
     unlock: "Ingresa tu PIN",
     set: "Crea un PIN de 4 dígitos",
@@ -6667,6 +6779,7 @@ function renderLockScreen() {
             ? `<button class="btn ghost lock-biometric-btn" type="button" data-lock-biometric ${cooling ? "disabled" : ""}>Usar huella</button>`
             : ""
         }
+        ${lockMode === "unlock" ? `<button class="lock-forgot-link" type="button" data-lock-forgot>Olvidé mi PIN</button>` : ""}
       </section>
     </div>
   `;

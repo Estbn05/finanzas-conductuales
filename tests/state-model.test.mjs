@@ -4,6 +4,7 @@ import {
   decideLoginSync,
   decidePushSync,
   hasMeaningfulLocalData,
+  hasUnsyncedLocalEdits,
   isPlaceholderMerchant,
   merchantKey,
   csvField,
@@ -207,4 +208,12 @@ test("what is owed on the card is never negative; account and cash may be", () =
   assert.equal(liquidity.cash, 5_000);
   assert.equal(liquidity.credit, 0);
   assert.equal(normalizeLiquidity({}).credit, 0);
+});
+
+test("unsynced local edits are the ones made after the last successful sync", () => {
+  const meta = { cloudUpdatedAt: "2026-06-10T10:00:00.000Z" };
+  assert.equal(hasUnsyncedLocalEdits({ updated_at: "2026-06-10T10:05:00.000Z", meta }), true);
+  assert.equal(hasUnsyncedLocalEdits({ updated_at: "2026-06-10T09:59:00.000Z", meta }), false);
+  assert.equal(hasUnsyncedLocalEdits({ updated_at: "2026-06-10T10:05:00.000Z", meta: {} }), true);
+  assert.equal(hasUnsyncedLocalEdits({ meta }), false);
 });

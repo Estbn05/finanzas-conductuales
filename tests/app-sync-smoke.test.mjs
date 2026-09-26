@@ -3,7 +3,7 @@
 // its client) once per process, so these boots need a mocked Supabase from the first one.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bootApp, returningUserState } from "./helpers/boot-app.mjs";
+import { bootApp, returningUserState, settle } from "./helpers/boot-app.mjs";
 
 const USER = { id: "user-smoke", email: "smoke@example.com" };
 const SESSION = {
@@ -24,7 +24,11 @@ const cloud = {
     setSession: async () => ({ data: { session: SESSION }, error: null }),
     getUser: async () => ({ data: { user: USER }, error: null }),
     onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
-    signOut: async () => ({ error: null })
+    signOut: async () => ({ error: null }),
+    signInWithPassword: async ({ password }) =>
+      password === "correcta"
+        ? { data: { session: SESSION }, error: null }
+        : { data: { session: null }, error: { message: "Invalid login credentials" } }
   },
   from() {
     return {
@@ -47,9 +51,10 @@ const cloud = {
   }
 };
 
-function bootSignedIn() {
+function bootSignedIn({ savedState = returningUserState(), lockConfig } = {}) {
   return bootApp({
-    savedState: returningUserState(),
+    savedState,
+    lockConfig,
     syncConfig: { supabaseUrl: "https://example.supabase.co", supabaseAnonKey: "smoke-key" },
     beforeBoot(window) {
       window.supabase = { createClient: () => cloud, processLock: async (_name, _timeout, callback) => callback() };
@@ -96,6 +101,68 @@ test("a failed cloud save shows a banner that reassures and offers a working ret
     assert.equal(ui.$(".sync-problem-banner"), null, "the banner stayed after a successful retry");
     assert.match(ui.$(".sync-status").textContent, /Guardado en la nube/);
     assert.equal(cloud.saves, 1);
+  } finally {
+    ui.close();
+  }
+});
+
+// Regression: the whole state syncs as one piece, so when another device saved first
+// this device's unsynced edits were replaced without a word.
+test("downloading another device's version over unsynced local edits says so", async () => {
+  reset();
+  const remoteState = returningUserState({ transactions: [{ id: "otro", merchant: "Desde el otro teléfono", amount: 5_000, date: "2026-01-01" }] });
+  cloud.remote = { app_state: remoteState, updated_at: new Date(Date.now() + 60_000).toISOString() };
+  const local = returningUserState({
+    updated_at: new Date().toISOString(),
+    meta: { cloudUpdatedAt: new Date(Date.now() - 3_600_000).toISOString() }
+  });
+  const ui = await bootSignedIn({ savedState: local });
+  try {
+    assert.match(ui.text(), /Trajimos cambios de otro dispositivo/);
+    await ui.click('[data-action="dismiss-cloud-conflict"]');
+    assert.doesNotMatch(ui.text(), /Trajimos cambios de otro dispositivo/);
+  } finally {
+    ui.close();
+  }
+});
+
+test("a download with nothing unsynced locally stays quiet", async () => {
+  reset();
+  cloud.remote = { app_state: returningUserState(), updated_at: new Date(Date.now() + 60_000).toISOString() };
+  const synced = new Date().toISOString();
+  const ui = await bootSignedIn({ savedState: returningUserState({ updated_at: synced, meta: { cloudUpdatedAt: synced } }) });
+  try {
+    assert.doesNotMatch(ui.text(), /Trajimos cambios de otro dispositivo/);
+  } finally {
+    ui.close();
+  }
+});
+
+// A forgotten PIN used to leave only "clear the app's data" as a way back in.
+test("'Olvidé mi PIN' unlocks with the account password and turns the lock off", async () => {
+  reset();
+  const lockConfig = { enabled: true, hash: "no-match", salt: "s", biometric: false, failedAttempts: 0, lockUntil: 0 };
+  const ui = await bootSignedIn({
+    savedState: returningUserState({ meta: { cloudUserEmail: USER.email } }),
+    lockConfig
+  });
+  try {
+    await ui.click("[data-lock-forgot]");
+    let form = ui.$("#lock-forgot-form");
+    assert.ok(form, "no password form for an account holder");
+    form.elements.namedItem("password").value = "mala";
+    form.requestSubmit();
+    await settle(ui.window);
+    assert.match(ui.text(), /no coincide con tu cuenta/);
+
+    form = ui.$("#lock-forgot-form");
+    form.elements.namedItem("password").value = "correcta";
+    form.requestSubmit();
+    await settle(ui.window);
+    assert.equal(ui.$(".lock-screen"), null, "still locked after the right password");
+    assert.match(ui.text(), /Tu dinero libre/);
+    const stored = JSON.parse(ui.window.localStorage.getItem("finanzas-conductuales-lock:v1"));
+    assert.equal(stored.enabled, false);
   } finally {
     ui.close();
   }

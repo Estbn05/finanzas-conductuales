@@ -10020,3 +10020,27 @@ html .nav-item.is-primary .nav-number {
 .period-close-auto-note {
   color: var(--ds-muted);
 }
+
+/* "Olvidé mi PIN" on the lock screen. */
+.lock-forgot-link {
+  min-height: 44px;
+  margin-top: 8px;
+  border: 0;
+  color: var(--ds-primary-strong);
+  background: none;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.lock-forgot-form {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+}
+
+.lock-forgot-card > .btn.ghost {
+  margin-top: 8px;
+}
