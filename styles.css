@@ -1171,7 +1171,7 @@ label {
   background: transparent;
   gap: 3px;
   border-radius: 8px;
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
   min-height: 58px;
   font-weight: 750;
   color: var(--ds-muted) !important;
@@ -1549,7 +1549,7 @@ p {
   padding: 5px 9px;
   color: var(--muted);
   background: var(--soft);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 650;
   white-space: nowrap;
 }
@@ -1592,7 +1592,7 @@ p {
 .money-context {
   width: 100%;
   color: var(--muted);
-  font-size: 0.73rem;
+  font-size: 0.75rem;
 }
 
 .money-caption {
@@ -1603,7 +1603,7 @@ p {
 .money-help {
   margin: 6px 0 0;
   color: var(--muted);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   line-height: 1.45;
 }
 
@@ -1641,7 +1641,7 @@ p {
 .category-numbers {
   flex: 0 0 auto;
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1720,7 +1720,7 @@ p {
 }
 
 .connection-banner span {
-  font-size: 0.68rem;
+  font-size: 0.75rem;
 }
 
 .connection-dot {
@@ -1748,7 +1748,7 @@ p {
   border-radius: 8px;
   color: var(--coral);
   background: var(--coral-2);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
 }
 
 .plan-action {
@@ -1778,7 +1778,7 @@ p {
 .plan-action small,
 .extra-inline-summary {
   color: var(--muted);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
 }
 
 .plan-action b {
@@ -1815,7 +1815,7 @@ p {
 .section-heading h2 span,
 .section-heading > span {
   color: var(--muted);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-weight: 500;
 }
 
@@ -1846,7 +1846,7 @@ p {
 .category-card-top span,
 .category-card-foot {
   color: var(--muted);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
 }
 
 .category-menu-btn {
@@ -1925,7 +1925,7 @@ p {
 
 .add-category-row small {
   color: var(--muted);
-  font-size: 0.65rem;
+  font-size: 0.75rem;
 }
 
 /* Bottom sheets and forms */
@@ -1978,13 +1978,13 @@ p {
   display: grid;
   gap: 6px;
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 600;
 }
 
 .sheet-label {
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
 }
 
 .sheet-form input:not([type="range"]),
@@ -2018,7 +2018,7 @@ p {
 
 .conversion-box span,
 .conversion-box small {
-  font-size: 0.66rem;
+  font-size: 0.75rem;
 }
 
 .conversion-box strong {
@@ -2050,7 +2050,7 @@ p {
 
 .limit-warning p {
   margin: 0;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
 }
 
 .extra-badge {
@@ -2060,7 +2060,7 @@ p {
   padding: 4px 9px;
   color: var(--amber);
   background: var(--amber-2);
-  font-size: 0.67rem;
+  font-size: 0.75rem;
   font-weight: 650;
 }
 
@@ -2073,7 +2073,7 @@ p {
 .extra-suggestion-card > span,
 .extra-suggestion-card p {
   margin: 0;
-  font-size: 0.69rem;
+  font-size: 0.75rem;
 }
 
 .extra-suggestion-card strong {
@@ -2128,7 +2128,7 @@ input[type="range"] {
 }
 
 .destructive-consequence span {
-  font-size: 0.68rem;
+  font-size: 0.75rem;
 }
 
 /* Savings */
@@ -2144,7 +2144,7 @@ input[type="range"] {
   padding: 4px 8px;
   color: var(--teal-dark);
   background: var(--teal-2);
-  font-size: 0.64rem;
+  font-size: 0.75rem;
   font-weight: 650;
 }
 
@@ -2156,7 +2156,7 @@ input[type="range"] {
 
 .savings-hero > span {
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
 }
 
 .savings-fit {
@@ -2165,7 +2165,7 @@ input[type="range"] {
   border-radius: 8px;
   padding: 8px 9px;
   color: var(--teal-dark);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   border-color: rgb(var(--rgb-white) / 0.12);
   background: rgb(var(--rgb-white) / 0.08);
 }
@@ -2197,7 +2197,7 @@ input[type="range"] {
 .calculation-accordion summary small,
 .calculation-body p {
   color: var(--muted);
-  font-size: 0.67rem;
+  font-size: 0.75rem;
 }
 
 .calculation-accordion summary b {
@@ -2230,7 +2230,7 @@ input[type="range"] {
   background: rgb(var(--rgb-ink) / 0.05);
   border-radius: 8px;
   padding: 8px 9px;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
 }
 
 .raise-simulator,
@@ -2264,7 +2264,7 @@ input[type="range"] {
 }
 
 .simulator-result span {
-  font-size: 0.67rem;
+  font-size: 0.75rem;
 }
 
 .simulator-form {
@@ -2281,7 +2281,7 @@ input[type="range"] {
   display: flex;
   justify-content: space-between;
   color: var(--muted);
-  font-size: 0.69rem;
+  font-size: 0.75rem;
 }
 
 .simulator-form output {
@@ -2292,7 +2292,7 @@ input[type="range"] {
 .reference-fund p {
   margin: 0;
   color: var(--muted);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   line-height: 1.45;
 }
 
@@ -2308,7 +2308,7 @@ input[type="range"] {
 .expense-calendar-weekdays,
 .expense-calendar-day small {
   color: var(--muted);
-  font-size: 0.65rem;
+  font-size: 0.75rem;
 }
 
 .expense-calendar-stats span {
@@ -2348,12 +2348,12 @@ input[type="range"] {
 }
 
 .expense-calendar-day span {
-  font-size: 0.66rem;
+  font-size: 0.75rem;
   font-weight: 800;
 }
 
 .expense-calendar-day strong {
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 850;
   text-align: right;
 }
@@ -2479,7 +2479,7 @@ input[type="range"] {
 
 .editor-amount span {
   color: var(--muted);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-weight: 500;
 }
 
@@ -2501,7 +2501,7 @@ input[type="range"] {
   border-radius: 9px;
   color: var(--muted);
   background: rgba(213, 235, 229, 0.38);
-  font-size: 0.65rem;
+  font-size: 0.75rem;
 }
 
 .extra-edit-allocation strong {
@@ -2533,14 +2533,14 @@ input[type="range"] {
 
 .data-section-heading small {
   color: var(--muted);
-  font-size: 0.65rem;
+  font-size: 0.75rem;
 }
 
 .data-section-heading button {
   border: 0;
   color: var(--teal);
   background: transparent;
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-weight: 650;
 }
 
@@ -2559,20 +2559,20 @@ input[type="range"] {
 
 .data-metrics span {
   color: var(--muted);
-  font-size: 0.61rem;
+  font-size: 0.75rem;
 }
 
 .data-metrics strong {
   overflow-wrap: anywhere;
   color: var(--ink);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 650;
 }
 
 .data-note {
   margin: 0;
   color: var(--muted);
-  font-size: 0.65rem;
+  font-size: 0.75rem;
 }
 
 .sign-out-section div {
@@ -2586,7 +2586,7 @@ input[type="range"] {
 
 .sign-out-section span {
   color: var(--muted);
-  font-size: 0.65rem;
+  font-size: 0.75rem;
 }
 
 /* Onboarding */
@@ -2650,7 +2650,7 @@ input[type="range"] {
   padding: 4px 9px;
   color: var(--teal-dark);
   background: var(--teal-2);
-  font-size: 0.67rem;
+  font-size: 0.75rem;
   font-weight: 650;
 }
 
@@ -2672,7 +2672,7 @@ input[type="range"] {
   display: grid;
   gap: 5px;
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 600;
 }
 
@@ -2699,7 +2699,7 @@ input[type="range"] {
 }
 
 .onboarding-preview span {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
 }
 
 .onboarding-preview strong {
@@ -2716,7 +2716,7 @@ input[type="range"] {
 .onboarding-note,
 .balance-hint {
   color: var(--muted);
-  font-size: 0.67rem;
+  font-size: 0.75rem;
   line-height: 1.45;
 }
 
@@ -2752,7 +2752,7 @@ input[type="range"] {
 
 .category-preview small {
   color: var(--teal-dark);
-  font-size: 0.65rem;
+  font-size: 0.75rem;
 }
 
 .onboarding-actions {
@@ -2926,13 +2926,13 @@ input[type="range"] {
   
 
   .data-metrics strong {
-    font-size: 0.66rem;
+    font-size: 0.75rem;
   }
 
   
 
   .bottom-nav-item {
-    font-size: 0.55rem;
+    font-size: 0.6875rem;
   }
 }
 
@@ -2967,7 +2967,7 @@ input[type="range"] {
 }
 
 .calendar-summary-grid span {
-  font-size: 0.62rem;
+  font-size: 0.75rem;
 }
 
 .calendar-summary-grid strong {
@@ -3055,7 +3055,7 @@ input[type="range"] {
 }
 
 .toggle-row small {
-  font-size: 0.66rem;
+  font-size: 0.75rem;
   line-height: 1.35;
 }
 
@@ -3101,7 +3101,7 @@ input[type="range"] {
 }
 
 .event-date-box span {
-  font-size: 0.58rem;
+  font-size: 0.75rem;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -3136,13 +3136,13 @@ input[type="range"] {
   padding: 3px 7px;
   color: var(--muted);
   background: var(--soft);
-  font-size: 0.6rem;
+  font-size: 0.75rem;
   font-weight: 650;
 }
 
 .event-copy small {
   overflow-wrap: anywhere;
-  font-size: 0.66rem;
+  font-size: 0.75rem;
   line-height: 1.35;
 }
 
@@ -3159,7 +3159,7 @@ input[type="range"] {
 }
 
 .event-amount small {
-  font-size: 0.61rem;
+  font-size: 0.75rem;
 }
 
 .event-actions {
@@ -3941,7 +3941,7 @@ select[data-invalid="true"] {
   border: 1px solid var(--line);
   flex: 1;
   min-width: max-content;
-  font-size: 0.74rem;
+  font-size: 0.75rem;
   min-height: 42px;
   border-color: var(--ds-line);
   border-radius: 999px;
@@ -3967,7 +3967,7 @@ select[data-invalid="true"] {
   gap: 3px;
   padding: 12px 14px;
   color: var(--ds-muted);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
 }
 
 .expense-impact-preview strong {
@@ -4069,7 +4069,7 @@ select[data-invalid="true"] {
   align-items: center;
   margin: 0 0 14px;
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   grid-template-columns: auto minmax(0, 1fr);
   gap: var(--ds-space-3);
 }
@@ -4139,7 +4139,7 @@ select[data-invalid="true"] {
 .history-sort select {
   border: 1px solid var(--line);
   padding: 7px 34px 7px 9px;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   min-height: 48px;
   border-radius: 16px;
 }
@@ -4151,7 +4151,7 @@ select[data-invalid="true"] {
 
 .movement-day-heading {
   color: var(--muted);
-  font-size: 0.67rem;
+  font-size: 0.75rem;
   text-transform: capitalize;
   display: flex;
   align-items: baseline;
@@ -4205,7 +4205,7 @@ select[data-invalid="true"] {
 .movement-copy small,
 .movement-amount small {
   color: var(--ds-muted);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
 }
 
 .movement-amount strong {
@@ -4264,7 +4264,7 @@ select[data-invalid="true"] {
   place-items: center;
   color: var(--teal-dark);
   background: var(--teal-2);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 750;
   width: 42px;
   height: 42px;
@@ -4326,7 +4326,7 @@ select[data-invalid="true"] {
   border: 1px solid transparent;
   color: var(--muted);
   background: transparent;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   border-radius: 13px;
 }
 
@@ -4344,7 +4344,7 @@ select[data-invalid="true"] {
   padding: 6px 11px;
   color: var(--muted);
   background: var(--soft);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   min-height: 38px;
 }
 
@@ -4737,7 +4737,7 @@ html[data-theme="dark"] .income-applied-banner {
 }
 
 .category-bars .category-status {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 700;
   color: var(--ds-muted);
 }
@@ -4893,18 +4893,18 @@ html[data-theme="dark"] .local-backup-row + .local-backup-row {
 }
 
 .budget-ring-label-name {
-  font-size: 11px;
+  font-size: 0.75rem;
   font-weight: 700;
 }
 
 .budget-ring-label-amount {
-  font-size: 10px;
+  font-size: 0.75rem;
   font-weight: 500;
   fill: var(--ds-muted);
 }
 
 .budget-ring-center-eyebrow {
-  font-size: 9px;
+  font-size: 0.75rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   fill: var(--ds-muted);
@@ -4917,7 +4917,7 @@ html[data-theme="dark"] .local-backup-row + .local-backup-row {
 }
 
 .budget-ring-center-free {
-  font-size: 11px;
+  font-size: 0.75rem;
   font-weight: 700;
   fill: var(--ds-primary-strong);
 }
@@ -5070,7 +5070,7 @@ html[data-theme="dark"] .classify-banner {
 .quick-classify-row-head span {
   flex: none;
   color: var(--ds-muted);
-  font-size: 0.74rem;
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -5381,7 +5381,7 @@ textarea,
 
 .theme-switcher > span {
   color: var(--ds-muted);
-  font-size: 0.74rem;
+  font-size: 0.75rem;
   font-weight: 850;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -5889,7 +5889,7 @@ html[data-theme="dark"] .reminder-panel .metric-badge.danger,
 .merchant-rules-heading span,
 .merchant-rule-chip span {
   color: var(--ds-muted);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   line-height: 1.45;
 }
 
@@ -5909,7 +5909,7 @@ html[data-theme="dark"] .reminder-panel .metric-badge.danger,
 
 .prediction-number > span {
   color: var(--ds-muted);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-weight: 760;
   text-transform: uppercase;
 }
@@ -5922,7 +5922,7 @@ html[data-theme="dark"] .reminder-panel .metric-badge.danger,
   color: var(--ds-primary-strong);
   background: transparent;
   font: inherit;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 820;
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -5951,7 +5951,7 @@ html[data-theme="dark"] .reminder-panel .metric-badge.danger,
 .formula-list p,
 .prediction-detail-grid span {
   color: var(--ds-muted);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   line-height: 1.45;
 }
 
@@ -5998,7 +5998,7 @@ html[data-theme="dark"] .reminder-panel .metric-badge.danger,
   padding-left: 9px;
   color: var(--ds-ink);
   font-family: inherit;
-  font-size: 0.73rem;
+  font-size: 0.75rem;
   font-weight: 800;
 }
 
@@ -6126,7 +6126,7 @@ html[data-theme="dark"] .reminder-panel .metric-badge.danger,
 
 .period-close-metrics span {
   color: var(--ds-muted);
-  font-size: 0.66rem;
+  font-size: 0.75rem;
 }
 
 .period-close-metrics strong {
@@ -6168,7 +6168,7 @@ html[data-theme="dark"] .reminder-panel .metric-badge.danger,
 .period-close-row small,
 .savings-compare span {
   color: var(--ds-muted);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 760;
 }
 
@@ -6307,7 +6307,7 @@ html[data-theme="dark"] .reminder-panel .metric-badge.danger,
   padding: 10px 12px;
   color: var(--ds-muted);
   background: var(--ds-primary-soft);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
 }
 
 .merchant-rule-suggestion[hidden] {
@@ -6468,7 +6468,7 @@ html[data-theme="dark"] .merchant-rule-suggestion,
 
 .progress-hero > div > span {
   color: var(--ds-muted);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 760;
 }
 
@@ -6532,7 +6532,7 @@ html[data-theme="dark"] .merchant-rule-suggestion,
 
 .progress-row-status {
   color: var(--ds-muted);
-  font-size: 0.65rem;
+  font-size: 0.75rem;
   font-weight: 650;
 }
 
@@ -6541,7 +6541,7 @@ html[data-theme="dark"] .merchant-rule-suggestion,
   flex-wrap: wrap;
   gap: 4px 10px;
   color: var(--ds-muted);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
 }
 
 html[data-theme="dark"] .progress-hero,
@@ -7029,7 +7029,7 @@ html[data-theme="dark"] .lock-dot.filled,
 
 .eyebrow {
   margin: 0;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   text-transform: uppercase;
   color: var(--ds-primary-strong);
   letter-spacing: 0.085em;
@@ -7129,7 +7129,7 @@ html[data-theme="dark"] .category-bars,
   border-radius: 50%;
   background: var(--ds-danger);
   color: #fff;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 800;
 }
 
@@ -7543,7 +7543,7 @@ html[data-theme="dark"] .btn.primary:disabled,
   height: 18px;
   flex: none;
   border-radius: 50%;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 800;
   color: var(--ds-primary-strong);
   background: var(--ds-primary-soft);
@@ -7839,4 +7839,36 @@ html[data-theme="dark"] .category-card-bar {
    automática", "Debes ahora"). */
 html[data-theme="dark"] .conversion-box strong {
   color: var(--ds-amber);
+}
+
+/* Close buttons draw an icon instead of a lowercase "x". */
+.icon-btn .ui-icon,
+.drawer-close .ui-icon,
+.history-date-chip button .ui-icon {
+  width: 20px;
+  height: 20px;
+}
+
+
+/* Calendar day amounts ("$22k") broke onto two lines in narrow cells. */
+.expense-calendar-day strong {
+  white-space: nowrap;
+  letter-spacing: -0.02em;
+}
+
+/* On narrow phones three money boxes side by side cut "$ 1.215.667" mid-number: the
+   money figure takes its own row. */
+@media (max-width: 420px) {
+  .period-close-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .period-close-metrics div:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .period-close-metrics strong {
+    overflow-wrap: normal;
+    white-space: nowrap;
+  }
 }

@@ -1,20 +1,20 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CACHE_NAME = `${CACHE_PREFIX}1.1.50`;
+const CACHE_NAME = `${CACHE_PREFIX}1.1.51`;
 const APP_SHELL = [
   "./",
   "index.html",
-  "styles.css?v=1.1.50",
-  "app.js?v=1.1.50",
-  "finance-core.js?v=1.1.50",
-  "state-model.js?v=1.1.50",
-  "sync-client.js?v=1.1.50",
-  "sync-config.js?v=1.1.50",
-  "vendor/supabase-2.108.1.min.js?v=1.1.50",
-  "manifest.webmanifest?v=1.1.50",
-  "assets/icon.svg?v=1.1.50",
-  "assets/icon-192.png?v=1.1.50",
-  "assets/icon-512.png?v=1.1.50",
-  "assets/apple-touch-icon.png?v=1.1.50",
+  "styles.css?v=1.1.51",
+  "app.js?v=1.1.51",
+  "finance-core.js?v=1.1.51",
+  "state-model.js?v=1.1.51",
+  "sync-client.js?v=1.1.51",
+  "sync-config.js?v=1.1.51",
+  "vendor/supabase-2.108.1.min.js?v=1.1.51",
+  "manifest.webmanifest?v=1.1.51",
+  "assets/icon.svg?v=1.1.51",
+  "assets/icon-192.png?v=1.1.51",
+  "assets/icon-512.png?v=1.1.51",
+  "assets/apple-touch-icon.png?v=1.1.51",
   // Requested by styles.css without a version query, so cache that exact URL.
   "assets/fonts/manrope-latin-var.woff2"
 ];

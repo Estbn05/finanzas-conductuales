@@ -18,7 +18,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.50";
+} from "./finance-core.js?v=1.1.51";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -64,7 +64,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.50";
+} from "./state-model.js?v=1.1.51";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -80,7 +80,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.50";
+} from "./sync-client.js?v=1.1.51";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -95,6 +95,10 @@ const CLOUD_BASE_KEY = "finanzas-conductuales:cloud-base:v1";
 const BACKUP_DB_NAME = "finanzas-conductuales";
 const BACKUP_STORE = "backups";
 const BACKUP_LIMIT = 3;
+// Categories: kept few so the plan stays readable. Learned merchant shortcuts: the
+// least recently used are forgotten beyond this many.
+const MAX_CATEGORIES = 10;
+const MAX_MERCHANT_RULES = 30;
 // In-memory list the UI reads synchronously; IndexedDB is its durable copy.
 let localBackups = [];
 // Set when the main save could not be read at startup and must be restored from a
@@ -1015,7 +1019,7 @@ function render() {
             <small>${capitalize(budgetSummary().cadenceLabel)} · ${formatMoney(budgetSummary().freeRemaining)} libre</small>
           </span>
         </a>
-        <button class="drawer-close" type="button" data-action="close-menu" aria-label="Cerrar menú">x</button>
+        <button class="drawer-close" type="button" data-action="close-menu" aria-label="Cerrar menú">${renderIcon("close")}</button>
       </div>
       <div class="nav-panel is-open" id="main-menu">
         <nav class="nav-list" aria-label="Secciones principales">
@@ -1234,6 +1238,7 @@ function renderIcon(name) {
     search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.8-4.8"/>',
     // Two stacked cards: the single-card shape is already the "account" icon.
     card: '<rect x="2.5" y="8" width="15" height="11" rx="2"/><path d="M2.5 11.5h15"/><path d="M6.5 8V6.5A1.5 1.5 0 0 1 8 5h12a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 16h-2.5"/>',
+    close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
     lock: '<rect x="5" y="10.5" width="14" height="9.5" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/><circle cx="12" cy="15" r="1.4" fill="currentColor" stroke="none"/>',
     eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>',
     "eye-off": '<path d="M3 3l18 18"/><path d="M10.6 5.7A9.9 9.9 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a15.6 15.6 0 0 1-3.4 4.2M6.6 6.6C4 8.3 2.5 12 2.5 12S6 18.5 12 18.5a9.6 9.6 0 0 0 3.4-.6"/><path d="M9.9 10a3 3 0 0 0 4.2 4.2"/>'
@@ -1792,7 +1797,7 @@ function renderPredictionDetailsModal() {
             <p class="eyebrow">Predicción hasta el próximo periodo</p>
             <h2 id="prediction-detail-title">Cómo se calculó</h2>
           </div>
-          <button class="icon-btn muted" type="button" data-action="close-prediction-details" aria-label="Cerrar">x</button>
+          <button class="icon-btn muted" type="button" data-action="close-prediction-details" aria-label="Cerrar">${renderIcon("close")}</button>
         </div>
         <div class="calculation-outcome ${prediction.status}">
           <strong>${predictionOutcomeText(prediction)}</strong>
@@ -2114,7 +2119,7 @@ function renderBudget(plan) {
       </div>
 
       <div class="section-heading">
-        <h2>Categorías <span>(${state.budgetJobs.length} de 10)</span></h2>
+        <h2>Categorías <span>(${state.budgetJobs.length} de ${MAX_CATEGORIES})</span></h2>
         <span>${formatMoney(summary.freeRemaining)} libres para reservar</span>
       </div>
 
@@ -2129,7 +2134,7 @@ function renderBudget(plan) {
                 <button class="btn primary" type="button" data-action="open-setaside-sheet">Apartar dinero</button>
               </div>`
         }
-        <button class="add-category-row" type="button" data-action="open-add-category-choice" ${state.budgetJobs.length >= 10 ? "disabled" : ""}>
+        <button class="add-category-row" type="button" data-action="open-add-category-choice" ${state.budgetJobs.length >= MAX_CATEGORIES ? "disabled" : ""}>
           <span aria-hidden="true">+</span>
           <div class="add-category-row-text">
             <strong>Nueva categoría</strong>
@@ -2292,7 +2297,7 @@ function renderPeriodReportModal(plan = calculatePlan()) {
             <p class="eyebrow">Reporte del periodo</p>
             <h2 id="period-report-title">Resumen completo</h2>
           </div>
-          <button class="icon-btn muted" type="button" data-action="close-period-report" aria-label="Cerrar">x</button>
+          <button class="icon-btn muted" type="button" data-action="close-period-report" aria-label="Cerrar">${renderIcon("close")}</button>
         </div>
         <textarea id="period-report-output" class="period-report-output" readonly>${escapeHtml(content)}</textarea>
         <div class="period-report-actions">
@@ -2624,7 +2629,7 @@ function renderAddCategoryChoiceSheet() {
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
           <div><p class="eyebrow">Plan</p><h2 id="add-category-choice-title">Nueva categoría</h2></div>
-          <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">x</button>
+          <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">${renderIcon("close")}</button>
         </div>
         <button class="add-category-row" type="button" data-action="open-setaside-sheet">
           <span aria-hidden="true">$</span>
@@ -2665,7 +2670,7 @@ function renderCreditPaymentSheet() {
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
           <div><p class="eyebrow">Tarjeta</p><h2 id="credit-sheet-title">Registrar pago</h2></div>
-          <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">x</button>
+          <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">${renderIcon("close")}</button>
         </div>
         <p class="setaside-note">Esto no es un gasto nuevo: ya lo registraste cuando usaste la tarjeta. Aquí solo bajas lo que debes y sale de tu cuenta o efectivo, así que tu total real no cambia.</p>
         <form class="sheet-form" id="credit-payment-form">
@@ -2700,7 +2705,7 @@ function renderSetAsideSheet() {
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
           <div><p class="eyebrow">Tu plata</p><h2 id="setaside-sheet-title">Apartar dinero</h2></div>
-          <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">x</button>
+          <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">${renderIcon("close")}</button>
         </div>
         <p class="setaside-note">Guardas esta plata para algo, y deja de contar como libre. Tu cuenta y tu efectivo siguen igual: aquí no se mueve dinero de verdad.</p>
         <form class="sheet-form setaside-form" id="setaside-form">
@@ -2763,7 +2768,7 @@ function renderPlanSheet() {
           <div class="sheet-handle"></div>
           <div class="sheet-heading">
             <div><p class="eyebrow">Plan</p><h2 id="category-sheet-title">Apartar cada semana o mes</h2></div>
-            <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">x</button>
+            <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">${renderIcon("close")}</button>
           </div>
           ${renderBudgetJobForm()}
         </section>
@@ -2782,7 +2787,7 @@ function renderPlanSheet() {
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
           <div><span class="extra-badge">Dinero extra</span><h2 id="extra-sheet-title">¿De dónde viene?</h2></div>
-          <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">x</button>
+          <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">${renderIcon("close")}</button>
         </div>
         <form class="sheet-form" id="extra-budget-form">
           <label>Origen<input name="source" type="text" maxlength="36" placeholder="Ej. Bono trabajo" required></label>
@@ -2795,17 +2800,22 @@ function renderPlanSheet() {
               { value: "cash", label: "Efectivo" }
             ], "account")}
           </div>
-          <div class="extra-suggestion-card" aria-live="polite">
-            <span>Una sugerencia antes de sumarlo</span>
-            <strong data-extra-savings>${formatMoney(0)}</strong>
-            <p>para ${escapeHtml(target.label)}. Los <b data-extra-free>${formatMoney(0)}</b> restantes quedan libres. No mueve dinero de tu cuenta.</p>
-          </div>
-          <label>
-            <span>Porcentaje para ${escapeHtml(target.label)} <output data-extra-percent>20%</output></span>
-            <input name="savingsPercent" type="range" min="0" max="100" step="5" value="20" data-extra-range>
-          </label>
-          <button class="btn primary" type="submit" name="intent" value="split">Sumar dinero extra</button>
-          <button class="btn ghost" type="submit" name="intent" value="all-free">Dejar todo libre</button>
+          ${
+            canSeparateSavings()
+              ? `<div class="extra-suggestion-card" aria-live="polite">
+                  <span>Una sugerencia antes de sumarlo</span>
+                  <strong data-extra-savings>${formatMoney(0)}</strong>
+                  <p>para ${escapeHtml(target.label)}. Los <b data-extra-free>${formatMoney(0)}</b> restantes quedan libres. No mueve dinero de tu cuenta.</p>
+                </div>
+                <label>
+                  <span>Porcentaje para ${escapeHtml(target.label)} <output data-extra-percent>20%</output></span>
+                  <input name="savingsPercent" type="range" min="0" max="100" step="5" value="20" data-extra-range>
+                </label>
+                <button class="btn primary" type="submit" name="intent" value="split">Sumar dinero extra</button>
+                <button class="btn ghost" type="submit" name="intent" value="all-free">Dejar todo libre</button>`
+              : `<p class="data-note extra-limit-note">Ya tienes ${MAX_CATEGORIES} categorías, así que todo queda libre. Para separar una parte como ahorro, quita una categoría o crea una llamada "Ahorro" en su lugar.</p>
+                <button class="btn primary" type="submit" name="intent" value="all-free">Sumar dinero extra</button>`
+          }
         </form>
       </section>
     </div>
@@ -2852,7 +2862,7 @@ function renderBudgetJob(job) {
         </div>
         <button class="category-menu-btn" type="button" data-action="request-remove-job" data-id="${escapeAttr(job.id)}" aria-label="Eliminar ${escapeAttr(job.name)}">&middot;&middot;&middot;</button>
       </div>
-      <div class="category-card-bar ${band}" aria-label="${Math.round(ratio)} por ciento usado">
+      <div class="category-card-bar ${band}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(clamp(ratio, 0, 100))}" aria-valuetext="${Math.round(ratio)} por ciento usado">
         <span style="width:${clamp(ratio, 0, 120)}%"></span>
       </div>
       <div class="category-card-foot">
@@ -3129,7 +3139,7 @@ function renderFinancialEvent(event) {
             ? `<button class="btn ghost" type="button" data-action="reopen-calendar-event" data-id="${escapeAttr(event.id)}">Reabrir</button>`
             : `<button class="btn secondary" type="button" data-action="register-calendar-event" data-id="${escapeAttr(event.id)}">Registrar gasto</button>`
         }
-        <button class="icon-btn muted" type="button" data-action="remove-calendar-event" data-id="${escapeAttr(event.id)}" aria-label="Eliminar ${escapeAttr(event.title)}">x</button>
+        <button class="icon-btn muted" type="button" data-action="remove-calendar-event" data-id="${escapeAttr(event.id)}" aria-label="Eliminar ${escapeAttr(event.title)}">${renderIcon("close")}</button>
       </div>
     </article>
   `;
@@ -3248,10 +3258,12 @@ function merchantRuleSuggestionMarkup(rule) {
 }
 
 function renderMerchantRulesPanel() {
-  const rules = activeMerchantRules().slice(0, 4);
+  const allRules = activeMerchantRules();
+  const rules = allRules.slice(0, 4);
   if (!rules.length) {
     return "";
   }
+  const hidden = allRules.length - rules.length;
 
   return `
     <article class="merchant-rules-panel">
@@ -3265,11 +3277,12 @@ function renderMerchantRulesPanel() {
       <div class="merchant-rule-list">
         ${rules.map((rule) => `
           <div class="merchant-rule-chip">
-            <span><strong>${escapeHtml(rule.merchant)}</strong> -> ${escapeHtml(categoryName(rule.category))} · ${locationLabel(rule.source)}</span>
-            <button class="icon-btn muted" type="button" data-action="remove-merchant-rule" data-id="${escapeAttr(rule.id)}" aria-label="Quitar regla de ${escapeAttr(rule.merchant)}">x</button>
+            <span><strong>${escapeHtml(rule.merchant)}</strong> → ${escapeHtml(categoryName(rule.category))} · ${locationLabel(rule.source)}</span>
+            <button class="icon-btn muted" type="button" data-action="remove-merchant-rule" data-id="${escapeAttr(rule.id)}" aria-label="Quitar regla de ${escapeAttr(rule.merchant)}">${renderIcon("close")}</button>
           </div>
         `).join("")}
       </div>
+      <p class="data-note">${hidden > 0 ? `Se muestran los 4 más recientes de ${allRules.length}. ` : ""}Recordamos hasta ${MAX_MERCHANT_RULES} comercios; los que no usas hace más tiempo se olvidan solos. Para cambiar uno, clasifica su próximo gasto en otra categoría.</p>
     </article>
   `;
 }
@@ -3386,7 +3399,7 @@ function renderMovements() {
           transactionHistoryDate
             ? `<p class="history-date-chip">
                 <span>Mostrando ${movementDayLabel(transactionHistoryDate)}</span>
-                <button type="button" data-action="clear-movements-date-filter" aria-label="Quitar filtro de fecha">&times;</button>
+                <button type="button" data-action="clear-movements-date-filter" aria-label="Quitar filtro de fecha">${renderIcon("close")}</button>
               </p>`
             : ""
         }
@@ -3660,7 +3673,7 @@ function renderTransactionEditor() {
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
           <div><p class="eyebrow">Corregir movimiento</p><h2 id="transaction-editor-title">${escapeHtml(transaction.merchant)}</h2></div>
-          <button class="icon-btn muted" type="button" data-action="close-transaction-editor" aria-label="Cerrar">x</button>
+          <button class="icon-btn muted" type="button" data-action="close-transaction-editor" aria-label="Cerrar">${renderIcon("close")}</button>
         </div>
         <div class="editor-amount">${formatMoney(transaction.amount)}<span>${formatDate(transaction.date)}</span></div>
         <form class="sheet-form" id="transaction-edit-form">
@@ -3702,7 +3715,7 @@ function renderQuickClassifyPanel() {
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
           <div><p class="eyebrow">Clasificar pendientes</p><h2 id="quick-classify-title">${pending.length} ${pending.length === 1 ? "movimiento sin categoría" : "movimientos sin categoría"}</h2></div>
-          <button class="icon-btn muted" type="button" data-action="close-quick-classify" aria-label="Cerrar">x</button>
+          <button class="icon-btn muted" type="button" data-action="close-quick-classify" aria-label="Cerrar">${renderIcon("close")}</button>
         </div>
         <div class="quick-classify-list">
           ${pending
@@ -3749,7 +3762,7 @@ function renderExtraEditor() {
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
           <div><p class="eyebrow">Corregir ingreso</p><h2 id="extra-editor-title">${escapeHtml(extra.source)}</h2></div>
-          <button class="icon-btn muted" type="button" data-action="close-extra-editor" aria-label="Cerrar">x</button>
+          <button class="icon-btn muted" type="button" data-action="close-extra-editor" aria-label="Cerrar">${renderIcon("close")}</button>
         </div>
         <div class="editor-amount income-editor-amount">+${formatMoney(extra.amount)}<span>${formatDate(extra.date)}</span></div>
         <form class="sheet-form" id="extra-edit-form">
@@ -3998,7 +4011,7 @@ function renderProgressView() {
                   <div><strong>${period}</strong><span class="progress-row-status">${periodStatusLabel(closure.status)}</span></div>
                   <strong class="${closure.freeFinal < 0 ? "negative" : ""}">${formatMoney(closure.freeFinal)}</strong>
                 </div>
-                <div class="bar ${band}" aria-label="${Math.round(ratio)} por ciento del ingreso gastado">
+                <div class="bar ${band}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(clamp(ratio, 0, 100))}" aria-valuetext="${Math.round(ratio)} por ciento del ingreso gastado">
                   <span style="width:${ratio}%"></span>
                 </div>
                 <div class="progress-row-meta">
@@ -4331,7 +4344,7 @@ function renderDiagnosisModal() {
             <p class="eyebrow">Personalizar plan</p>
             <h2 id="diagnosis-title">${escapeHtml(section.title)}</h2>
           </div>
-          <button class="icon-btn" type="button" data-action="close-diagnosis" aria-label="Cerrar">x</button>
+          <button class="icon-btn" type="button" data-action="close-diagnosis" aria-label="Cerrar">${renderIcon("close")}</button>
         </div>
         ${diagnosisValidation.message ? `<p class="form-error diagnosis-error" role="alert" aria-live="assertive">${escapeHtml(diagnosisValidation.message)}</p>` : ""}
         <form id="diagnosis-form" class="diagnosis-form" data-diagnosis-section="${sectionKey}" novalidate>
@@ -4474,7 +4487,7 @@ function renderCategoryBars(plan, limit) {
                 <strong>${escapeHtml(category.name)}</strong>
                 <span class="category-numbers">${formatMoney(category.spent)} / ${formatMoney(category.budget)}</span>
               </div>
-              <div class="bar ${category.band}" aria-label="${Math.round(category.ratio)} por ciento usado">
+              <div class="bar ${category.band}" aria-label="${escapeAttr(category.name)}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(clamp(category.ratio, 0, 100))}" aria-valuetext="${Math.round(category.ratio)} por ciento usado">
                 <span style="width:${clamp(category.ratio, 0, 120)}%"></span>
               </div>
               <span class="category-status">${categoryStatusLabel(category.ratio)} · ${Math.round(clamp(category.ratio, 0, 999))}%</span>
@@ -4511,7 +4524,7 @@ function renderProgress(value, label) {
         <span>${label}</span>
         <strong>${Math.round(safeValue)}%</strong>
       </div>
-      <div class="progress-track">
+      <div class="progress-track" role="progressbar" aria-label="${escapeAttr(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(safeValue)}">
         <span style="width:${safeValue}%"></span>
       </div>
     </div>
@@ -5900,7 +5913,7 @@ function showDiagnosisValidation(validation) {
 function handleBudgetSubmit(event) {
   event.preventDefault();
   const data = new FormData(event.currentTarget);
-  if (state.budgetJobs.length >= 10) {
+  if (state.budgetJobs.length >= MAX_CATEGORIES) {
     state.lastAlert = "Mantengamos máximo 10 categorías para que el plan siga claro.";
     showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
     saveState();
@@ -5976,7 +5989,7 @@ function handleExtraBudgetSubmit(event) {
 }
 
 function applyExtraIncome(draft, rawPercent) {
-  const percent = clamp(Number(rawPercent || 0), 0, 100);
+  const percent = canSeparateSavings() ? clamp(Number(rawPercent || 0), 0, 100) : 0;
   const savingsAmount = Math.round(Number(draft.amount || 0) * percent / 100);
   const freeAmount = Number(draft.amount || 0) - savingsAmount;
   const now = new Date().toISOString();
@@ -7325,6 +7338,12 @@ function setAsideForThisPeriod(job, name, amount, updatedAt) {
   return created;
 }
 
+// The savings share of extra money goes to the savings category, created if missing, but
+// never past the category limit: that used to leave the plan at "11 de 10".
+function canSeparateSavings() {
+  return Boolean(savingsAllocationTarget().job) || state.budgetJobs.length < MAX_CATEGORIES;
+}
+
 function applySavingsAllocation(amount, updatedAt) {
   if (amount <= 0) {
     return null;
@@ -7372,7 +7391,7 @@ function handleSetAsideSubmit(event) {
   }
 
   const target = setAsideTarget(name);
-  if (!target.job && state.budgetJobs.length >= 10) {
+  if (!target.job && state.budgetJobs.length >= MAX_CATEGORIES) {
     failWith("Mantengamos máximo 10 categorías para que el plan siga claro.");
     return;
   }
@@ -8013,7 +8032,7 @@ function rememberMerchantRule(transaction) {
   } else {
     state.merchantRules.unshift(next);
   }
-  state.merchantRules = state.merchantRules.slice(0, 30);
+  state.merchantRules = state.merchantRules.slice(0, MAX_MERCHANT_RULES);
 }
 
 function spendByCategory() {

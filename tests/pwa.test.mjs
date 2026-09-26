@@ -1217,7 +1217,7 @@ test("apartar dinero reserves money in plain language without moving real balanc
   const submit = app.slice(app.indexOf("function handleSetAsideSubmit"), app.indexOf("function reduceSavingsAllocation"));
   assert.ok(submit.includes("amount > summary.freeRemaining"));
   assert.ok(submit.includes("setAsideForThisPeriod("));
-  assert.ok(submit.includes("state.budgetJobs.length >= 10"));
+  assert.ok(submit.includes("state.budgetJobs.length >= MAX_CATEGORIES"));
 
   // Picking a suggestion chip runs through a direct listener rather than data-action:
   // handleAction re-renders the view, which would rebuild the uncontrolled inputs and
