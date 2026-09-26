@@ -1287,7 +1287,9 @@ test("behavioral finance, silent sync, undo and automatic backups remain availab
   assert.ok(app.includes('decidePushSync(state, remote) === "download"'));
   assert.ok(app.includes("BACKUP_KEY"));
   assert.ok(app.includes("saveLocalBackup"));
-  assert.ok(app.includes("function menuAlertText()"));
+  // The last alert used to stay pinned in the menu for hours, out of context, and was
+  // re-announced to screen readers on every render. The snackbar says it once, in time.
+  assert.equal(app.includes('class="menu-notice"'), false);
   assert.equal(app.includes("function renderCloudStatus()"), false);
   assert.equal(app.includes("Cuenta y nube"), false);
   assert.equal(app.includes("function renderAccountPanel()"), false);

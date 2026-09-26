@@ -9975,3 +9975,17 @@ html[data-theme="dark"] .progress-track {
 .sidebar-head {
   margin-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
 }
+
+/* Light theme: the drawer's close button kept the near-white colors of the old dark-only
+   drawer, so it was invisible on cream. */
+html:not([data-theme="dark"]) .drawer-close {
+  border-color: var(--ds-line-strong);
+  color: var(--ds-ink);
+  background: var(--ds-surface-strong);
+}
+
+/* The "+" on the menu's "Registrar gasto" was light mint on the light mint button. */
+html .nav-item.is-primary .nav-number {
+  color: #063229 !important;
+  background: rgba(255, 255, 255, 0.55) !important;
+}

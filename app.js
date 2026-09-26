@@ -18,7 +18,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.30";
+} from "./finance-core.js?v=1.1.31";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -59,7 +59,7 @@ import {
   decidePushSync,
   hasMeaningfulLocalData,
   uid
-} from "./state-model.js?v=1.1.30";
+} from "./state-model.js?v=1.1.31";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -74,7 +74,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.30";
+} from "./sync-client.js?v=1.1.31";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -115,7 +115,6 @@ const moneyFormatterCache = new Map();
 // recientes, descargué esa versión" — means the user's local data just got
 // overwritten, and must always reach the sidebar. A previous version silenced any
 // message matching /nube|sincron/i, which swallowed that overwrite warning too.
-const SILENT_ALERTS = new Set(["Nube al día.", "Primera copia subida a la nube."]);
 
 const SMALL_EXPENSE_THRESHOLD = 15000;
 const WEEKDAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
@@ -839,7 +838,6 @@ function render() {
           ${renderSyncStatusLine()}
           <button class="btn primary" type="button" data-action="open-diagnosis">Editar mi plan</button>
           <button class="btn ghost" type="button" data-action="cloud-sign-out">Cerrar sesión</button>
-          ${menuAlertText() ? `<div class="menu-notice" role="status">${escapeHtml(menuAlertText())}</div>` : ""}
         </div>
       </div>
     </aside>
@@ -1406,11 +1404,6 @@ function periodExtraSourceLabel(summary = budgetSummary()) {
     .join(" · ");
   const hiddenCount = extras.length - 2;
   return hiddenCount > 0 ? `${labels} · +${hiddenCount} más` : labels;
-}
-
-function menuAlertText() {
-  const alert = String(state.lastAlert || "");
-  return SILENT_ALERTS.has(alert) ? "" : alert;
 }
 
 function renderView(plan) {
