@@ -8031,12 +8031,12 @@ html[data-theme="dark"] .money-math > * + * {
   font-size: 1rem;
 }
 
-.money-math-reserved > summary {
+.money-math-details > summary {
   cursor: pointer;
   list-style: none;
 }
 
-.money-math-reserved > summary::-webkit-details-marker {
+.money-math-details > summary::-webkit-details-marker {
   display: none;
 }
 
@@ -8048,11 +8048,11 @@ html[data-theme="dark"] .money-math > * + * {
   transition: transform 160ms ease;
 }
 
-.money-math-reserved[open] .money-math-chevron {
+.money-math-details[open] .money-math-chevron {
   transform: rotate(90deg);
 }
 
-.money-reserved-list {
+.money-detail-list {
   display: grid;
   gap: 8px;
   margin: 0;
@@ -8060,7 +8060,7 @@ html[data-theme="dark"] .money-math > * + * {
   list-style: none;
 }
 
-.money-reserved-list li {
+.money-detail-list li {
   display: flex;
   justify-content: space-between;
   gap: 10px;
@@ -8068,13 +8068,13 @@ html[data-theme="dark"] .money-math > * + * {
   font-size: 0.8rem;
 }
 
-.money-reserved-list li span:last-child {
+.money-detail-list li span:last-child {
   color: var(--ds-muted);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
-.money-reserved-note,
+.money-detail-note,
 .money-math-note {
   margin: 0;
   color: var(--ds-muted);
@@ -8082,7 +8082,7 @@ html[data-theme="dark"] .money-math > * + * {
   line-height: 1.4;
 }
 
-.money-reserved-note {
+.money-detail-note {
   padding: 8px 14px 12px 60px;
 }
 
@@ -8105,4 +8105,12 @@ html[data-theme="dark"] .money-math > * + * {
    both lines, not on the first line's baseline. */
 .money-math-row .money-location-text {
   align-items: center;
+}
+
+.money-detail-list {
+  padding-bottom: 12px;
+}
+
+.money-detail-note {
+  padding-top: 0;
 }

@@ -18,7 +18,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.57";
+} from "./finance-core.js?v=1.1.58";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -64,7 +64,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.57";
+} from "./state-model.js?v=1.1.58";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -80,7 +80,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.57";
+} from "./sync-client.js?v=1.1.58";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -268,8 +268,8 @@ const TOUR_STEPS = [
     text: "Ahorro, gastos planeados y Datos: tus saldos, el PIN, las copias y los ajustes. Desde Datos puedes volver a ver esta guía."
   }
 ];
-// The "Reservado en categorías" breakdown on Inicio is open.
-let moneyReservedOpen = false;
+// Which of Inicio's money rows are open ("have", "reserved", "budget").
+let moneyDetailsOpen = {};
 let planSheet = "";
 let pendingJobRemovalId = "";
 let pendingBackupRestoreId = "";
@@ -1833,122 +1833,109 @@ function renderHeader(plan) {
 // to bottom, instead of showing the result next to the ingredients and hiding the piece
 // that joins them (what is still reserved) behind a "why" link nobody remembers to open.
 
-function moneyMathRow(icon, label, amount, extra = "", modifier = "") {
+function moneyMathRow(icon, label, amount) {
   return `
-    <div class="money-location-row money-math-row ${modifier}">
+    <div class="money-location-row money-math-row">
       <span class="money-location-icon" aria-hidden="true">${renderIcon(icon)}</span>
-      <span class="money-location-text">
-        <span>${label}${extra ? `<small>${extra}</small>` : ""}</span>
-        <strong>${amount}</strong>
-      </span>
+      <span class="money-location-text"><span>${label}</span><strong>${amount}</strong></span>
     </div>
   `;
 }
 
-// "− Reservado en categorías": opens to show what each peso is reserved for.
-// `mode` "remaining": what is still left to spend in each category (fixed income, where
-// libre comes from the real balance). "budget": each category's full reserve (variable
-// income, where libre comes from the period's budget).
-function renderReservedBreakdown(mode) {
-  const categories = categoryStatus().filter((category) => category.id !== FREE_CATEGORY_ID);
-  const rows = categories
-    .map((category) => {
-      const budget = Number(category.budget || 0);
-      const spent = Number(category.spent || 0);
-      const counted = mode === "remaining" ? Math.max(0, budget - spent) : budget;
-      return { name: category.name, budget, spent, counted };
-    })
-    .filter((row) => row.counted > 0);
-  const total = rows.reduce((sum, row) => sum + row.counted, 0);
-  if (!rows.length) {
-    return moneyMathRow("tag", "− Reservado", formatMoney(0), "Nada reservado: todo lo que tienes está libre.");
+// A row that opens to show what it is made of. `key` remembers it open across re-renders.
+function moneyMathDetails(key, icon, label, amount, items, note = "") {
+  if (!items.length) {
+    return moneyMathRow(icon, label, amount);
   }
   return `
-    <details class="money-math-reserved" ${moneyReservedOpen ? "open" : ""}>
+    <details class="money-math-details" data-money-details="${key}" ${moneyDetailsOpen[key] ? "open" : ""}>
       <summary class="money-location-row money-math-row">
-        <span class="money-location-icon" aria-hidden="true">${renderIcon("tag")}</span>
-        <span class="money-location-text">
-          <span>− Reservado<small>${rows.length === 1 ? `Para ${escapeHtml(rows[0].name)}` : `En ${rows.length} categorías`} · toca para ver</small></span>
-          <strong>−${formatMoney(total)}</strong>
-        </span>
+        <span class="money-location-icon" aria-hidden="true">${renderIcon(icon)}</span>
+        <span class="money-location-text"><span>${label}</span><strong>${amount}</strong></span>
         <span class="money-math-chevron" aria-hidden="true">&rsaquo;</span>
       </summary>
-      <ul class="money-reserved-list">
-        ${rows
-          .map(
-            (row) => `
-          <li>
-            <span>${escapeHtml(row.name)}</span>
-            <span>${
-              mode === "remaining"
-                ? row.spent > 0
-                  ? `quedan ${formatMoney(row.counted)} de ${formatMoney(row.budget)}`
-                  : formatMoney(row.counted)
-                : `${formatMoney(row.budget)}${row.spent > 0 ? ` · usado ${formatMoney(row.spent)}` : ""}`
-            }</span>
-          </li>`
-          )
-          .join("")}
+      <ul class="money-detail-list">
+        ${items.map(([name, value]) => `<li><span>${name}</span><span>${value}</span></li>`).join("")}
       </ul>
-      <p class="money-reserved-note">${
-        mode === "remaining"
-          ? "Es lo que todavía te queda por gastar en cada categoría: baja a medida que la usas y no se mueve de tu cuenta."
-          : "Lo que separaste en cada categoría este periodo; no cuenta como libre."
-      }</p>
+      ${note ? `<p class="money-detail-note">${note}</p>` : ""}
     </details>
   `;
 }
 
-function moneyLocationsLine(liquidity) {
-  return [
-    `Cuenta ${formatMoney(liquidity.account)}`,
-    `Efectivo ${formatMoney(liquidity.cash)}`,
-    liquidity.credit > 0 ? `Tarjeta −${formatMoney(liquidity.credit)}` : ""
-  ]
-    .filter(Boolean)
-    .join(" · ");
+// "Reservado": what each peso is reserved for. `mode` "remaining": what is still left to
+// spend in each category (fixed income, libre from the real balance). "budget": each
+// category's full reserve (variable income, libre from the period's budget).
+function renderReservedBreakdown(mode) {
+  const rows = categoryStatus()
+    .filter((category) => category.id !== FREE_CATEGORY_ID)
+    .map((category) => {
+      const budget = Number(category.budget || 0);
+      const spent = Number(category.spent || 0);
+      return { name: category.name, budget, spent, counted: mode === "remaining" ? Math.max(0, budget - spent) : budget };
+    })
+    .filter((row) => row.counted > 0);
+  const total = rows.reduce((sum, row) => sum + row.counted, 0);
+  const items = rows.map((row) => [
+    escapeHtml(row.name),
+    mode === "remaining"
+      ? row.spent > 0
+        ? `quedan ${formatMoney(row.counted)} de ${formatMoney(row.budget)}`
+        : formatMoney(row.counted)
+      : `${formatMoney(row.budget)}${row.spent > 0 ? ` · usado ${formatMoney(row.spent)}` : ""}`
+  ]);
+  return moneyMathDetails(
+    "reserved",
+    "tag",
+    "Reservado",
+    total > 0 ? `−${formatMoney(total)}` : formatMoney(0),
+    items,
+    mode === "remaining"
+      ? "Lo que todavía te queda por gastar en cada categoría. Baja a medida que la usas y no sale de tu cuenta."
+      : "Lo que separaste en cada categoría este periodo; no cuenta como libre."
+  );
 }
 
-// Fixed income with a real balance: Tienes − Reservado = Libre.
+function moneyLocationItems(liquidity) {
+  return [
+    ["Cuenta", formatMoney(liquidity.account)],
+    ["Efectivo", formatMoney(liquidity.cash)],
+    ...(liquidity.credit > 0 ? [["Tarjeta (ya lo debes)", `−${formatMoney(liquidity.credit)}`]] : [])
+  ];
+}
+
+// Fixed income with a real balance: Tienes − Reservado; the big figure above is the result.
 function renderMoneyMathFromBalance(summary, liquidity) {
   const shortfall = Math.max(0, summary.reservedRemaining - liquidity.total);
   const pending = !summary.incomeApplied && summary.freeBudget > 0;
+  const notes = [
+    shortfall > 0 ? `Te faltan ${formatMoney(shortfall)} para cubrir lo reservado.` : "",
+    pending ? `Por recibir: ${formatMoney(summary.freeBudget)}. Se suma el día que te pagan.` : ""
+  ].filter(Boolean);
   return `
     <div class="money-location-list money-math">
-      ${moneyMathRow("wallet", "Tienes", formatMoney(liquidity.total), moneyLocationsLine(liquidity))}
+      ${moneyMathDetails("have", "wallet", "Tienes", formatMoney(liquidity.total), moneyLocationItems(liquidity))}
       ${renderReservedBreakdown("remaining")}
-      ${moneyMathRow("calculator", "= Libre", formatMoney(summary.freeRemaining), shortfall > 0 ? `Te faltan ${formatMoney(shortfall)} para cubrir lo reservado.` : "", "is-result")}
     </div>
-    ${
-      pending
-        ? `<p class="money-math-note">Por recibir: ${formatMoney(summary.freeBudget)}. Se suma a lo que tienes el día que te pagan; antes no cuenta como libre.</p>`
-        : ""
-    }
+    ${notes.map((note) => `<p class="money-math-note">${note}</p>`).join("")}
   `;
 }
 
-// Variable income: the period's budget − Reservado − what went outside categories = Libre.
+// Variable income: the period's budget − Reservado − what went outside categories.
 function renderMoneyMathFromBudget(summary, liquidity) {
+  const budgetItems =
+    summary.extraIncome > 0
+      ? [
+          ["Base", formatMoney(summary.baseIncome)],
+          ["Extra", formatMoney(summary.extraIncome)]
+        ]
+      : [];
   return `
     <div class="money-location-list money-math">
-      ${moneyMathRow("income", "Presupuesto del periodo", formatMoney(summary.income), summary.extraIncome > 0 ? `Incluye ${formatMoney(summary.extraIncome)} extra` : "")}
+      ${moneyMathDetails("budget", "income", "Presupuesto", formatMoney(summary.income), budgetItems)}
       ${renderReservedBreakdown("budget")}
-      ${
-        summary.freeImpactSpent > 0
-          ? moneyMathRow("receipt", "− Gastado fuera de tus categorías", `−${formatMoney(summary.freeImpactSpent)}`, summary.categoryOverspent > 0 ? `Incluye ${formatMoney(summary.categoryOverspent)} por encima de algún límite` : "")
-          : ""
-      }
-      ${moneyMathRow("calculator", "= Libre", formatMoney(summary.freeRemaining), "", "is-result")}
+      ${summary.freeImpactSpent > 0 ? moneyMathRow("receipt", "Fuera de categorías", `−${formatMoney(summary.freeImpactSpent)}`) : ""}
+      ${liquidity.initialized ? moneyMathDetails("have", "wallet", "Tienes", formatMoney(liquidity.total), moneyLocationItems(liquidity), summary.unclaimedLiquidity > 0 ? `${formatMoney(summary.unclaimedLiquidity)} de eso no lo reclama ninguna categoría; si es ingreso de este periodo, regístralo para que sume a libre.` : "") : ""}
     </div>
-    ${
-      liquidity.initialized
-        ? `<p class="money-math-note">Tienes ${formatMoney(liquidity.total)}: ${moneyLocationsLine(liquidity)}.${
-            summary.unclaimedLiquidity > 0
-              ? ` ${formatMoney(summary.unclaimedLiquidity)} de eso no lo reclama ninguna categoría; si es ingreso de este periodo, regístralo para que sume a libre.`
-              : ""
-          }</p>`
-        : ""
-    }
   `;
 }
 
@@ -4822,8 +4809,10 @@ function renderProgress(value, label) {
 function bindEvents() {
   bindMoneyInputs();
   bindDateCaptions();
-  document.querySelector(".money-math-reserved")?.addEventListener("toggle", (event) => {
-    moneyReservedOpen = event.currentTarget.open;
+  document.querySelectorAll("[data-money-details]").forEach((details) => {
+    details.addEventListener("toggle", () => {
+      moneyDetailsOpen[details.dataset.moneyDetails] = details.open;
+    });
   });
   animateBudgetRingCharts();
 
