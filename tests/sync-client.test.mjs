@@ -219,3 +219,55 @@ test("cloud saves use the authenticated Supabase user after restoring a backup s
   assert.deepEqual(savedRow.app_state, { profile: { completed: true } });
   assert.equal(result.updated_at, "2026-06-18T00:00:00.000Z");
 });
+
+// Compare-and-swap: a save that read version X only lands if the row is still X, so two
+// devices can never silently overwrite each other.
+test("a save against an expected version is conditional, and a lost race is reported", async () => {
+  const session = {
+    access_token: "a",
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+    refresh_token: "r",
+    user: { id: "cas-user", email: "cas@example.com" }
+  };
+  const storage = createStorage({ "finanzas-conductuales:cloud-session:v1": JSON.stringify(session) });
+  let rowVersion = "2026-09-20T10:00:00.000Z";
+  const filters = [];
+  const cloud = {
+    auth: {
+      getUser: async () => ({ data: { user: session.user }, error: null }),
+      setSession: async () => ({ data: { session }, error: null })
+    },
+    from() {
+      return {
+        update(row) {
+          const query = {
+            eq(column, value) {
+              filters.push([column, value]);
+              return query;
+            },
+            select() {
+              return {
+                maybeSingle: async () => {
+                  const expected = filters.find(([column]) => column === "updated_at")?.[1];
+                  if (expected !== rowVersion) return { data: null, error: null };
+                  rowVersion = row.updated_at;
+                  return { data: { updated_at: row.updated_at }, error: null };
+                }
+              };
+            }
+          };
+          return query;
+        }
+      };
+    }
+  };
+  installCloudMock(cloud, storage);
+  const syncClient = await import(`../sync-client.js?cas-test=${Date.now()}`);
+
+  const saved = await syncClient.saveCloudState({ n: 1 }, "2026-09-20T10:00:00.000Z");
+  assert.equal(saved.updated_at, rowVersion);
+  assert.deepEqual(filters.slice(0, 2), [["user_id", "cas-user"], ["updated_at", "2026-09-20T10:00:00.000Z"]]);
+
+  filters.length = 0;
+  await assert.rejects(() => syncClient.saveCloudState({ n: 2 }, "2026-09-20T10:00:00.000Z"), syncClient.CloudConflictError);
+});

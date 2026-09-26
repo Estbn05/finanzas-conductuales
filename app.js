@@ -18,7 +18,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.48";
+} from "./finance-core.js?v=1.1.49";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -59,8 +59,10 @@ import {
   decidePushSync,
   hasMeaningfulLocalData,
   hasUnsyncedLocalEdits,
+  mergeStates,
+  remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.48";
+} from "./state-model.js?v=1.1.49";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -68,6 +70,7 @@ import {
   getCloudSession,
   isCloudConfigured,
   isCloudLibraryLoaded,
+  CloudConflictError,
   loadCloudState,
   onCloudAuthChange,
   requestPasswordReset,
@@ -75,11 +78,14 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.48";
+} from "./sync-client.js?v=1.1.49";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
 const BACKUP_KEY = "finanzas-conductuales:backups:v1";
+// The version this device last agreed on with the cloud: the common base for merging
+// another device's changes (see mergeStates in state-model.js).
+const CLOUD_BASE_KEY = "finanzas-conductuales:cloud-base:v1";
 // Lock constants live at the top so loadLockConfig() (called during module init,
 // before the lock helper block below) can read LOCK_STORAGE_KEY without hitting a
 // temporal-dead-zone ReferenceError. A previous version declared these next to the
@@ -196,8 +202,6 @@ let nativeNotificationPermission = "";
 let systemBarsStyle = "";
 // 0 = the current period in Movimientos, -1 the one before, and so on.
 let movementsPeriodOffset = 0;
-// Set when a download from the cloud replaced edits this device had not uploaded yet.
-let cloudConflictNotice = false;
 // "Olvidé mi PIN": the account password is being checked.
 let lockForgotBusy = false;
 // A local-only user asked to create an account / sign in from inside the app.
@@ -466,16 +470,14 @@ async function pullCloudAfterLogin() {
     const remote = await loadCloudState();
     const decision = decideLoginSync(state, remote);
 
-    if (decision === "download") {
-      const lostLocalEdits = hasMeaningfulLocalData(state) && hasUnsyncedLocalEdits(state);
+    if (decision === "download" && !(hasMeaningfulLocalData(state) && hasUnsyncedLocalEdits(state))) {
       applyRemoteState(remote.app_state, remote.updated_at, "Nube sincronizada automáticamente.");
-      cloudConflictNotice = lostLocalEdits;
     } else if (decision === "in-sync") {
-      markCloudSynced(remote.updated_at || new Date().toISOString());
+      markCloudSynced(remote.updated_at || new Date().toISOString(), { base: remote.app_state });
       state.lastAlert = "Nube al día.";
     } else {
-      const saved = await saveCloudState(getCloudPayload());
-      markCloudSynced(saved?.updated_at || new Date().toISOString());
+      // "download" with changes of this device's own merges them in before uploading.
+      await uploadWithMerge(remote);
       if (decision === "upload-remote-empty") {
         state.lastAlert = "La nube estaba vacía; conservé tus datos locales y los subí.";
       } else if (decision === "first-upload") {
@@ -521,17 +523,15 @@ async function pushCloudState() {
 
   try {
     const remote = await loadCloudState();
-    if (decidePushSync(state, remote) === "download") {
-      const lostLocalEdits = hasMeaningfulLocalData(state) && hasUnsyncedLocalEdits(state);
+    if (decidePushSync(state, remote) === "download" && !(hasMeaningfulLocalData(state) && hasUnsyncedLocalEdits(state))) {
+      // Nothing of this device's own to keep: simply take the cloud version.
       applyRemoteState(remote.app_state, remote.updated_at, "La nube tenía cambios más recientes. Descargué esa versión.");
-      cloudConflictNotice = lostLocalEdits;
       cloudState.status = "synced";
       renderCloudStatusChange();
       return;
     }
 
-    const saved = await saveCloudState(getCloudPayload());
-    markCloudSynced(saved?.updated_at || new Date().toISOString());
+    await uploadWithMerge(remote);
     cloudState.status = "synced";
     cloudState.error = "";
     renderCloudStatusChange();
@@ -579,21 +579,80 @@ function applyRemoteState(remoteState, remoteUpdatedAt, alert) {
     activateView(DEFAULT_VIEW);
   }
   state.lastAlert = alert;
-  markCloudSynced(remoteUpdatedAt || new Date().toISOString(), { persist: false });
+  markCloudSynced(remoteUpdatedAt || new Date().toISOString(), { persist: false, base: remoteState });
   saveState({ sync: false, touch: false });
   applyingCloudState = false;
 }
 
+// `base`: the exact document now in the cloud, remembered as the merge base.
 function markCloudSynced(updatedAt, options = {}) {
-  const { persist: shouldPersist = true } = options;
+  const { persist: shouldPersist = true, base = null } = options;
   state.meta = {
     ...(state.meta || {}),
     cloudUpdatedAt: updatedAt,
     cloudUserEmail: cloudState.email
   };
+  if (base) {
+    writeCloudBase(base);
+  }
   if (shouldPersist) {
     persist(STORAGE_KEY, state);
   }
+}
+
+function writeCloudBase(appState) {
+  try {
+    localStorage.setItem(CLOUD_BASE_KEY, JSON.stringify({ email: cloudState.email, state: appState }));
+  } catch {
+    // Out of space: without a base the next merge falls back to combining both sides.
+    try {
+      localStorage.removeItem(CLOUD_BASE_KEY);
+    } catch {}
+  }
+}
+
+// Only a base from this same account counts.
+function readCloudBase() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(CLOUD_BASE_KEY) || "null");
+    return stored && stored.email === cloudState.email ? stored.state : null;
+  } catch {
+    return null;
+  }
+}
+
+// Another device saved since this one last synced, and this one has changes of its own:
+// combine both instead of letting either erase the other (mergeStates in state-model.js).
+function adoptMergedState(remote) {
+  saveLocalBackup("antes de combinar con otro dispositivo");
+  const merged = mergeStates(readCloudBase(), getCloudPayload(), remote.app_state);
+  applyingCloudState = true;
+  state = migrateState(merged, todayKey(), DEFAULT_VIEW);
+  state.meta = { ...(state.meta || {}), cloudUpdatedAt: remote.updated_at, cloudUserEmail: cloudState.email };
+  saveState({ sync: false });
+  applyingCloudState = false;
+  showNoticeSnackbar("Combinamos tus cambios con los de otro dispositivo.", { renderNow: false });
+}
+
+// Uploads this device's state with compare-and-swap: if another device saves between
+// reading and writing, read again, merge and retry.
+async function uploadWithMerge(remote) {
+  let current = remote;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (current?.app_state && hasMeaningfulLocalData(current.app_state) && remoteChangedSinceLastSync(state, current)) {
+      adoptMergedState(current);
+    }
+    const payload = getCloudPayload();
+    try {
+      const saved = await saveCloudState(payload, current?.app_state ? current.updated_at : null);
+      markCloudSynced(saved?.updated_at || new Date().toISOString(), { base: payload });
+      return;
+    } catch (error) {
+      if (!(error instanceof CloudConflictError)) throw error;
+      current = await loadCloudState();
+    }
+  }
+  throw new Error("Otro dispositivo está guardando al mismo tiempo. Lo intento de nuevo en un momento.");
 }
 
 function readLocalBackups() {
@@ -860,7 +919,6 @@ function render() {
     <main class="main-panel">
       ${renderConnectionBanner()}
       ${renderSyncProblemBanner()}
-      ${renderCloudConflictBanner()}
       ${state.activeView === "today" ? renderHeader(plan) : ""}
       ${renderView(plan)}
     </main>
@@ -1130,28 +1188,6 @@ function renderSyncProblemBanner() {
         <span>${escapeHtml(status.detail)}</span>
       </div>
       <button class="btn ghost" type="button" data-action="retry-cloud-sync">Reintentar</button>
-    </div>
-  `;
-}
-
-// The whole state syncs as one piece, so when another device saved first its version wins
-// and this device's unsynced edits are replaced. They are kept as a local backup (see
-// applyRemoteState); this says so, instead of the edits just vanishing.
-function renderCloudConflictBanner() {
-  if (!cloudConflictNotice) {
-    return "";
-  }
-  return `
-    <div class="sync-problem-banner cloud-conflict-banner" role="status">
-      <span class="sync-problem-icon" aria-hidden="true">!</span>
-      <div>
-        <strong>Trajimos cambios de otro dispositivo</strong>
-        <span>Lo que habías hecho aquí sin subir quedó guardado en Datos, en Copias locales.</span>
-      </div>
-      <div class="cloud-conflict-actions">
-        <button class="btn ghost" type="button" data-action="open-local-backups">Ver copias</button>
-        <button class="btn ghost" type="button" data-action="dismiss-cloud-conflict">Entendido</button>
-      </div>
     </div>
   `;
 }
@@ -5215,7 +5251,6 @@ function handleAction(event) {
     "filter-movements-by-date",
     "movements-prev-period",
     "movements-next-period",
-    "dismiss-cloud-conflict",
     "clear-movements-date-filter",
     "close-expense",
     "show-auth-form",
@@ -5278,13 +5313,6 @@ function handleAction(event) {
     },
     "clear-movements-date-filter": () => {
       transactionHistoryDate = "";
-    },
-    "open-local-backups": () => {
-      cloudConflictNotice = false;
-      activateView("profile");
-    },
-    "dismiss-cloud-conflict": () => {
-      cloudConflictNotice = false;
     },
     "movements-prev-period": () => {
       movementsPeriodOffset -= 1;
@@ -6319,6 +6347,7 @@ function clearLocalUserState() {
   clearTimeout(dailyReminderTimer);
   localStorage.removeItem(STORAGE_KEY);
   localStorage.removeItem(BACKUP_KEY);
+  localStorage.removeItem(CLOUD_BASE_KEY);
   state = createDefaultState(todayKey(), DEFAULT_VIEW);
   state.activeView = DEFAULT_VIEW;
   authMode = "";

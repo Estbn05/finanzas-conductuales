@@ -46,12 +46,42 @@ const cloud = {
             return { data: { updated_at: row.updated_at }, error: null };
           }
         })
-      })
+      }),
+      // Conditional save: only lands if the row is still the version that was read.
+      update: (row) => {
+        let expected = null;
+        const query = {
+          eq(column, value) {
+            if (column === "updated_at") expected = value;
+            return query;
+          },
+          select: () => ({
+            maybeSingle: async () => {
+              if (cloud.failSaves) {
+                return { data: null, error: { message: "Failed to fetch" } };
+              }
+              if (cloud.beforeUpdate) {
+                const hook = cloud.beforeUpdate;
+                cloud.beforeUpdate = null;
+                hook();
+              }
+              if (!cloud.remote || cloud.remote.updated_at !== expected) {
+                cloud.conflicts += 1;
+                return { data: null, error: null };
+              }
+              cloud.saves += 1;
+              cloud.remote = { app_state: row.app_state, updated_at: row.updated_at };
+              return { data: { updated_at: row.updated_at }, error: null };
+            }
+          })
+        };
+        return query;
+      }
     };
   }
 };
 
-function bootSignedIn({ savedState = returningUserState(), lockConfig } = {}) {
+function bootSignedIn({ savedState = returningUserState(), lockConfig, beforeBoot: extraBoot } = {}) {
   return bootApp({
     savedState,
     lockConfig,
@@ -59,6 +89,7 @@ function bootSignedIn({ savedState = returningUserState(), lockConfig } = {}) {
     beforeBoot(window) {
       window.supabase = { createClient: () => cloud, processLock: async (_name, _timeout, callback) => callback() };
       window.localStorage.setItem("finanzas-conductuales:cloud-session:v1", JSON.stringify(SESSION));
+      extraBoot?.(window);
     }
   });
 }
@@ -66,6 +97,8 @@ function bootSignedIn({ savedState = returningUserState(), lockConfig } = {}) {
 function reset({ failSaves = false } = {}) {
   cloud.failSaves = failSaves;
   cloud.saves = 0;
+  cloud.conflicts = 0;
+  cloud.beforeUpdate = null;
   cloud.remote = null;
 }
 
@@ -108,19 +141,64 @@ test("a failed cloud save shows a banner that reassures and offers a working ret
 
 // Regression: the whole state syncs as one piece, so when another device saved first
 // this device's unsynced edits were replaced without a word.
-test("downloading another device's version over unsynced local edits says so", async () => {
+// Regression: the whole state synced as one piece, so when another device had saved
+// first its version replaced this device's unsynced edits. Now both are combined.
+test("another device's changes and this device's unsynced ones are combined, and uploaded", async () => {
   reset();
-  const remoteState = returningUserState({ transactions: [{ id: "otro", merchant: "Desde el otro teléfono", amount: 5_000, date: "2026-01-01" }] });
-  cloud.remote = { app_state: remoteState, updated_at: new Date(Date.now() + 60_000).toISOString() };
+  const lastSync = new Date(Date.now() - 3_600_000).toISOString();
+  const base = returningUserState({ updated_at: lastSync });
+  const other = { ...base, transactions: [{ id: "otro", merchant: "Desde el otro teléfono", amount: 5_000, date: "2026-01-01" }], updated_at: new Date(Date.now() - 60_000).toISOString() };
+  cloud.remote = { app_state: other, updated_at: new Date(Date.now() - 60_000).toISOString() };
   const local = returningUserState({
+    transactions: [{ id: "mio", merchant: "Desde este teléfono", amount: 7_000, date: "2026-01-02" }],
     updated_at: new Date().toISOString(),
-    meta: { cloudUpdatedAt: new Date(Date.now() - 3_600_000).toISOString() }
+    meta: { cloudUpdatedAt: lastSync, cloudUserEmail: USER.email }
   });
-  const ui = await bootSignedIn({ savedState: local });
+  const ui = await bootSignedIn({
+    savedState: local,
+    beforeBoot(window) {
+      window.localStorage.setItem("finanzas-conductuales:cloud-base:v1", JSON.stringify({ email: USER.email, state: base }));
+    }
+  });
   try {
-    assert.match(ui.text(), /Trajimos cambios de otro dispositivo/);
-    await ui.click('[data-action="dismiss-cloud-conflict"]');
-    assert.doesNotMatch(ui.text(), /Trajimos cambios de otro dispositivo/);
+    const ids = ui.saved().transactions.map((t) => t.id).sort();
+    assert.deepEqual(ids, ["mio", "otro"], "one side's expense was lost");
+    assert.deepEqual(cloud.remote.app_state.transactions.map((t) => t.id).sort(), ["mio", "otro"], "the merge was not uploaded");
+    assert.match(ui.text(), /Combinamos tus cambios con los de otro dispositivo/);
+  } finally {
+    ui.close();
+  }
+});
+
+// Two devices saving at the same moment: the second write must not overwrite the first.
+test("a save that loses the race reads again, merges and retries", async () => {
+  reset();
+  const synced = new Date(Date.now() - 3_600_000).toISOString();
+  const base = returningUserState({ updated_at: synced });
+  cloud.remote = { app_state: base, updated_at: synced };
+  const ui = await bootSignedIn({
+    savedState: base,
+    beforeBoot(window) {
+      window.localStorage.setItem("finanzas-conductuales:cloud-base:v1", JSON.stringify({ email: USER.email, state: base }));
+    }
+  });
+  try {
+    // Just before this device's write lands, another device saves an expense.
+    cloud.beforeUpdate = () => {
+      const now = new Date().toISOString();
+      cloud.remote = {
+        app_state: { ...cloud.remote.app_state, transactions: [{ id: "rapido", merchant: "El otro fue más rápido", amount: 1_000, date: "2026-01-03" }], updated_at: now },
+        updated_at: now
+      };
+    };
+    await ui.click('[data-action="open-expense"]');
+    const form = ui.$("#transaction-form");
+    await ui.type(form.elements.namedItem("amount"), "4000");
+    form.requestSubmit();
+    for (let i = 0; i < 40 && cloud.conflicts === 0; i += 1) await new Promise((r) => setTimeout(r, 50));
+    for (let i = 0; i < 40 && cloud.remote.app_state.transactions.length < 2; i += 1) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(cloud.conflicts >= 1, "the conditional save never detected the race");
+    assert.equal(cloud.remote.app_state.transactions.length, 2, "one of the two expenses was overwritten");
   } finally {
     ui.close();
   }

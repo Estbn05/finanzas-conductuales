@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.48";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.49";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
@@ -526,6 +526,133 @@ export function migrateState(savedState, today, defaultView) {
     migrated.lastAlert = "Quité las categorías de ejemplo que traía una versión vieja. Crea solo las que de verdad usas.";
   }
   return migrated;
+}
+
+// ------------------------------------------------------------------ cloud merge
+// The whole state is stored in the cloud as one document. When another device saved
+// since this one last synced, the two versions are combined instead of one replacing
+// the other: a three-way merge against `base`, the version both devices last agreed on
+// (the last one this device synced). Without a base (first sync after installing, or
+// signing in with data already on the phone) it degrades to a two-way union.
+
+// Lists of records merged by id: a record added on either side survives, one deleted
+// on one side (and untouched on the other) is deleted, and when both sides changed the
+// same record the more recently saved state wins.
+const MERGE_COLLECTIONS = {
+  transactions: "id",
+  budgetJobs: "id",
+  budgetExtras: "id",
+  calendarEvents: "id",
+  cooldowns: "id",
+  merchantRules: "id",
+  periodClosures: "id",
+  wins: "id",
+  checkins: "id",
+  periodIncomeApplied: "windowStart"
+};
+// Merged field by field.
+const MERGE_FIELDS = ["profile", "settings", "dailyReminder", "retiredCategoryNames"];
+// Balances: each side's change since the base is added, so two expenses on two phones
+// both come out of the account.
+const MERGE_BALANCES = ["account", "cash", "credit"];
+// This device's own screen state; the other device's has no business here.
+const DEVICE_ONLY = new Set(["activeView", "showDiagnosis", "diagnosisSection", "lastAlert", "meta"]);
+
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+function pickChanged(baseValue, localValue, remoteValue, localWins) {
+  if (same(localValue, remoteValue)) return localValue;
+  if (same(localValue, baseValue)) return remoteValue;
+  if (same(remoteValue, baseValue)) return localValue;
+  return localWins ? localValue : remoteValue;
+}
+
+function mergeCollection(baseList, localList, remoteList, key, localWins) {
+  const index = (list) => new Map((Array.isArray(list) ? list : []).filter((item) => item && item[key] != null).map((item) => [item[key], item]));
+  const base = index(baseList);
+  const local = index(localList);
+  const remote = index(remoteList);
+  const ids = [...local.keys(), ...[...remote.keys()].filter((id) => !local.has(id))];
+  const merged = [];
+  for (const id of ids) {
+    const inBase = base.has(id);
+    const l = local.get(id);
+    const r = remote.get(id);
+    if (l && r) {
+      merged.push(pickChanged(base.get(id), l, r, localWins));
+    } else if (l) {
+      // Missing remotely: deleted there, unless it is new here or changed here since.
+      if (!inBase || !same(l, base.get(id))) merged.push(l);
+    } else if (r) {
+      if (!inBase || !same(r, base.get(id))) merged.push(r);
+    }
+  }
+  return merged;
+}
+
+function mergeFields(baseObject, localObject, remoteObject, localWins) {
+  const b = baseObject && typeof baseObject === "object" ? baseObject : {};
+  const l = localObject && typeof localObject === "object" ? localObject : {};
+  const r = remoteObject && typeof remoteObject === "object" ? remoteObject : {};
+  const merged = {};
+  for (const field of new Set([...Object.keys(l), ...Object.keys(r)])) {
+    const value = pickChanged(b[field], l[field], r[field], localWins);
+    if (value !== undefined) merged[field] = value;
+  }
+  return merged;
+}
+
+export function mergeStates(base, local, remote) {
+  const hasBase = Boolean(base && typeof base === "object");
+  const b = hasBase ? base : {};
+  const localWins = timestampValue(local?.updated_at) >= timestampValue(remote?.updated_at);
+  const merged = {};
+
+  for (const key of new Set([...Object.keys(local || {}), ...Object.keys(remote || {})])) {
+    if (DEVICE_ONLY.has(key)) {
+      merged[key] = local?.[key];
+    } else if (key in MERGE_COLLECTIONS) {
+      merged[key] = mergeCollection(b[key], local?.[key], remote?.[key], MERGE_COLLECTIONS[key], localWins);
+    } else if (MERGE_FIELDS.includes(key)) {
+      merged[key] = mergeFields(b[key], local?.[key], remote?.[key], localWins);
+    } else if (key === "liquidity") {
+      merged[key] = mergeLiquidity(hasBase ? b.liquidity : null, local?.liquidity, remote?.liquidity, localWins);
+    } else if (key === "updated_at") {
+      merged[key] = localWins ? local?.updated_at : remote?.updated_at;
+    } else {
+      merged[key] = pickChanged(b[key], local?.[key], remote?.[key], localWins);
+    }
+  }
+
+  // Both phones deposited the same period's pay on their own (each saw payday arrive):
+  // the two deposits were added as two changes, but the money came in once.
+  if (hasBase && merged.liquidity) {
+    const baseDeposits = new Set((b.periodIncomeApplied || []).map((entry) => entry.windowStart));
+    const remoteDeposits = new Map((remote?.periodIncomeApplied || []).map((entry) => [entry.windowStart, entry]));
+    for (const entry of local?.periodIncomeApplied || []) {
+      const twin = remoteDeposits.get(entry.windowStart);
+      if (!baseDeposits.has(entry.windowStart) && twin && entry.status === "applied" && twin.status === "applied") {
+        merged.liquidity.account -= Math.min(Number(entry.amount || 0), Number(twin.amount || 0));
+      }
+    }
+  }
+  return merged;
+}
+
+function mergeLiquidity(base, local, remote, localWins) {
+  if (!local || !remote) return local || remote;
+  if (!base || !base.initialized) {
+    // No common point to measure changes from: keep the most recently saved balances.
+    return localWins ? { ...local } : { ...remote };
+  }
+  const merged = { ...(localWins ? remote : local), ...(localWins ? local : remote) };
+  for (const field of MERGE_BALANCES) {
+    const b = Number(base[field] || 0);
+    merged[field] = b + (Number(local[field] || 0) - b) + (Number(remote[field] || 0) - b);
+  }
+  merged.credit = Math.max(0, merged.credit || 0);
+  merged.initialized = Boolean(local.initialized || remote.initialized);
+  return merged;
 }
 
 // True when a state payload holds anything the user would lose if it were overwritten.

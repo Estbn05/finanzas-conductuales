@@ -265,7 +265,18 @@ export async function loadCloudState() {
   return data;
 }
 
-export async function saveCloudState(appState) {
+// Thrown when the cloud changed after `expectedUpdatedAt` was read: another device saved
+// in between, so the caller must read again and merge before retrying.
+export class CloudConflictError extends Error {
+  constructor() {
+    super("Otro dispositivo guardó cambios al mismo tiempo.");
+    this.name = "CloudConflictError";
+  }
+}
+
+// With `expectedUpdatedAt`, only overwrites the row if it is still that version
+// (compare-and-swap); without it (first upload) it creates or replaces the row.
+export async function saveCloudState(appState, expectedUpdatedAt = null) {
   const cloud = getCloudClient();
   const userId = await getCloudUserIdForRequest(cloud);
   if (!cloud || !userId) {
@@ -273,21 +284,23 @@ export async function saveCloudState(appState) {
   }
 
   const updatedAt = new Date().toISOString();
-  const { data, error } = await withCloudTimeout(
-    cloud
-      .from("finance_app_state")
-      .upsert({
-        user_id: userId,
-        app_state: appState,
-        updated_at: updatedAt
-      }, { onConflict: "user_id" })
-      .select("updated_at")
-      .single(),
-    "Guardar los datos"
-  );
+  const row = { user_id: userId, app_state: appState, updated_at: updatedAt };
+  const request = expectedUpdatedAt
+    ? cloud
+        .from("finance_app_state")
+        .update(row)
+        .eq("user_id", userId)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("updated_at")
+        .maybeSingle()
+    : cloud.from("finance_app_state").upsert(row, { onConflict: "user_id" }).select("updated_at").single();
+  const { data, error } = await withCloudTimeout(request, "Guardar los datos");
 
   if (error) {
     throw error;
+  }
+  if (!data) {
+    throw new CloudConflictError();
   }
   return data;
 }
