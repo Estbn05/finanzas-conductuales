@@ -717,6 +717,28 @@ test("the current period is closed automatically, and only finished periods reac
   }
 });
 
+// Regression: Ahorro spoke per period ($400.000 this fortnight) while Datos converted
+// the same plan to months ($866.667 "ahorro proyectado") and the simulator to "cada mes".
+test("savings figures are per period on Ahorro and Datos, and agree", async () => {
+  const ui = await bootApp({ savedState: returningUserState() });
+  try {
+    await ui.click('[data-view="savings"]');
+    const suggested = ui.$(".savings-hero strong").textContent;
+    assert.match(ui.text(), /cada periodo/);
+    assert.doesNotMatch(ui.text(), /cada mes|libres\/mes|Guardar simulación/);
+
+    await ui.click('[data-view="profile"]');
+    assert.match(ui.text(), /Para este periodo/);
+    const digits = suggested.replace(/\D/g, "");
+    assert.ok(digits.length > 0);
+    const datosSuggested = ui.text().match(/Podrías apartar\s*\$\s?([\d.]+)/)?.[1].replace(/\D/g, "");
+    assert.equal(datosSuggested, digits, "Datos and Ahorro suggest different amounts");
+    assert.doesNotMatch(ui.text(), /Orientación mensual|Ingreso mensual/);
+  } finally {
+    ui.close();
+  }
+});
+
 // The boot code (render(), initializeCloudSync()) runs synchronously at module init, so
 // a module-level const/let declared below it is in its temporal dead zone for any boot
 // path that reaches it — this crashed the app three separate times. The smoke tests

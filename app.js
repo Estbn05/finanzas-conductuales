@@ -18,7 +18,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.33";
+} from "./finance-core.js?v=1.1.35";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -59,7 +59,7 @@ import {
   decidePushSync,
   hasMeaningfulLocalData,
   uid
-} from "./state-model.js?v=1.1.33";
+} from "./state-model.js?v=1.1.35";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -74,7 +74,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.33";
+} from "./sync-client.js?v=1.1.35";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -816,8 +816,8 @@ function render() {
   app.classList.toggle("is-menu-open", menuOpen);
   app.classList.toggle("is-expense-open", quickExpenseOpen);
   app.innerHTML = `
-    <button class="drawer-scrim" type="button" data-action="close-menu" aria-label="Cerrar menu"></button>
-    <aside class="sidebar" aria-label="Menu principal">
+    <button class="drawer-scrim" type="button" data-action="close-menu" aria-label="Cerrar menú"></button>
+    <aside class="sidebar" aria-label="Menú principal">
       <div class="sidebar-head">
         <a class="brand" href="#" data-view="today" aria-label="Ir al inicio">
           ${renderBrandMark()}
@@ -826,7 +826,7 @@ function render() {
             <small>${capitalize(budgetSummary().cadenceLabel)} · ${formatMoney(budgetSummary().freeRemaining)} libre</small>
           </span>
         </a>
-        <button class="drawer-close" type="button" data-action="close-menu" aria-label="Cerrar menu">x</button>
+        <button class="drawer-close" type="button" data-action="close-menu" aria-label="Cerrar menú">x</button>
       </div>
       <div class="nav-panel is-open" id="main-menu">
         <nav class="nav-list" aria-label="Secciones principales">
@@ -1282,9 +1282,9 @@ function renderAuthGate() {
             </div>
           </div>
           <p class="auth-lead">
-            Una app para registrar gastos, ver cuanto dinero queda libre y separar categorías del periodo sin convertir cada compra en culpa.
+            Una app para registrar gastos, ver cuánto dinero queda libre y separar categorías del periodo sin convertir cada compra en culpa.
           </p>
-          <div class="auth-benefits" aria-label="Para que sirve la app">
+          <div class="auth-benefits" aria-label="Para qué sirve la app">
             <article>
               <strong>Dinero libre visible</strong>
               <span>El inicio muestra lo disponible después de reservas, categorías y gastos reales.</span>
@@ -1304,7 +1304,7 @@ function renderAuthGate() {
           <article class="auth-card auth-choice-card">
             <div>
               <p class="eyebrow">Acceso</p>
-              <h2>Elige como entrar</h2>
+              <h2>Elige cómo entrar</h2>
             </div>
             ${inlineError}
             <div class="auth-choice-actions">
@@ -1453,12 +1453,12 @@ function renderToday(plan) {
           ? ""
           : `<div class="empty-state home-empty actionable-empty">
               <span class="empty-icon" aria-hidden="true">+</span>
-              <strong>Tu plan aun no tiene categorías</strong>
+              <strong>Tu plan aún no tiene categorías</strong>
               <span>Aparta dinero para comida, transporte o cualquier propósito.</span>
               <button class="btn primary" type="button" data-action="open-setaside-sheet">Apartar dinero</button>
             </div>`
       }
-      <div class="home-period-note">Presupuesto ${formatMoney(homeSummary.income)} · ${freeShareOfBudget(homeSummary)}% sigue libre</div>
+      <div class="home-period-note">Presupuesto ${formatMoney(homeSummary.baseIncome)}${homeSummary.extraIncome > 0 ? ` + ${formatMoney(homeSummary.extraIncome)} extra` : ""} · ${freeShareOfBudget(homeSummary)}% sigue libre</div>
     </section>
   `;
 
@@ -2054,7 +2054,7 @@ function periodCloseReport(plan = calculatePlan(), summary = budgetSummary()) {
     expenseCount: movements.filter((movement) => movement.kind === "expense").length,
     incomeCount: movements.filter((movement) => movement.kind === "income").length,
     status,
-    adjustments: periodCloseAdjustments(summary, plan, categories, freeFinal)
+    adjustments: periodCloseAdjustments(summary, plan, categories, freeFinal, prediction.remainingDays)
   };
 }
 
@@ -2123,7 +2123,7 @@ function periodCloseSavingsText(report) {
   return `No hay ahorro posible en este cierre. Primero libera gasto libre o reduce categorías excedidas.`;
 }
 
-function periodCloseAdjustments(summary, plan, exceededCategories, freeFinal) {
+function periodCloseAdjustments(summary, plan, exceededCategories, freeFinal, remainingDays = 0) {
   const adjustments = [];
   if (freeFinal < 0) {
     adjustments.push(`Recupera ${formatMoney(Math.abs(freeFinal))} bajando gasto libre o moviendo dinero desde una categoría menos usada.`);
@@ -2144,8 +2144,12 @@ function periodCloseAdjustments(summary, plan, exceededCategories, freeFinal) {
   if (Number(plan.savingsCapacityGap || 0) > 0) {
     adjustments.push(`Para acercarte al ahorro ideal, libera ${formatMoney(plan.savingsCapacityGap)} en el próximo periodo.`);
   }
-  if (!adjustments.length && freeFinal > 0) {
-    adjustments.push(`Mantén los límites y considera mover ${formatMoney(freeFinal)} sobrantes a ahorro antes de iniciar el próximo periodo.`);
+  // Before the last day the free money is still what the user lives on until payday;
+  // suggesting to move all of it to savings "3 days before the end" was bad advice.
+  if (!adjustments.length && freeFinal > 0 && remainingDays <= 0) {
+    adjustments.push(`Mantén los límites y considera mover a ahorro los ${formatMoney(freeFinal)} que te sobraron antes de iniciar el próximo periodo.`);
+  } else if (!adjustments.length && freeFinal > 0) {
+    adjustments.push("Vas bien. Si al final del periodo te sobra dinero, puedes pasarlo a ahorro.");
   }
   if (!adjustments.length) {
     adjustments.push("Mantén el plan actual y registra gastos desde el primer día del próximo periodo.");
@@ -2658,7 +2662,7 @@ function renderSavings(plan) {
   const periodsToTarget = plan.projectedPeriodSavings > 0
     ? Math.ceil(plan.emergencyGap / plan.projectedPeriodSavings)
     : 0;
-  const futureRaise = getMonthlyIncome(state.profile) * (state.settings.monthlyRaisePct / 100);
+  const futureRaise = summary.baseIncome * (state.settings.monthlyRaisePct / 100);
   const escalatedSavings = futureRaise * (state.settings.escalationPct / 100);
 
   return `
@@ -2703,9 +2707,9 @@ function renderSavings(plan) {
         <h2>¿Y si tus ingresos aumentaran?</h2>
         <div class="simulator-result">
           <strong data-simulator-result>${formatMoney(escalatedSavings)}</strong>
-          <span>adicionales al ahorro cada mes</span>
+          <span>más para ahorrar cada periodo</span>
         </div>
-        <form id="smart-form" class="simulator-form" data-monthly-income="${getMonthlyIncome(state.profile)}">
+        <form id="smart-form" class="simulator-form" data-period-income="${summary.baseIncome}">
           <label>
             <span>Aumento hipotético <output data-raise-output>${state.settings.monthlyRaisePct}%</output></span>
             <input name="monthlyRaisePct" type="range" min="0" max="100" step="1" value="${state.settings.monthlyRaisePct}">
@@ -2714,14 +2718,13 @@ function renderSavings(plan) {
             <span>Porción del aumento al ahorro <output data-escalation-output>${state.settings.escalationPct}%</output></span>
             <input name="escalationPct" type="range" min="0" max="100" step="5" value="${state.settings.escalationPct}">
           </label>
-          <button class="btn primary" type="submit">Guardar simulación</button>
         </form>
       </article>
 
       <article class="reference-fund">
         <div><p class="eyebrow">Fondo de emergencia</p><h2>${targetCovered ? "Meta cubierta" : `${periodsToTarget || "Sin"} periodos estimados`}</h2></div>
         ${renderProgress(plan.emergencyProgress, "Avance simulado con el ahorro actual")}
-        <p>${futureFreedom(plan)}. Es una proyección orientativa, no una promesa.</p>
+        <p>Es una proyección orientativa, no una promesa.</p>
       </article>
     </section>
   `;
@@ -3561,7 +3564,6 @@ function renderCooldown(cooldown) {
 }
 
 function renderProfile(plan) {
-  const monthlyIncome = getMonthlyIncome(state.profile);
   const liquidity = liquiditySummary();
 
   return `
@@ -3591,8 +3593,8 @@ function renderProfile(plan) {
       </article>
 
       <article class="data-section">
-        <div class="data-section-heading"><span class="data-icon">${renderIcon("income")}</span><div><strong>Recomendación</strong><small>Orientación mensual simple</small></div><button type="button" data-view="savings">Ver ahorro</button></div>
-        <div class="data-metrics three"><div><span>Ingreso mensual</span><strong>${formatMoney(monthlyIncome)}</strong></div><div><span>Ahorro proyectado</span><strong>${formatMoney(plan.savings)}</strong></div><div><span>Para gastos</span><strong>${formatMoney(plan.expenses)}</strong></div></div>
+        <div class="data-section-heading"><span class="data-icon">${renderIcon("income")}</span><div><strong>Recomendación</strong><small>Para este periodo</small></div><button type="button" data-view="savings">Ver ahorro</button></div>
+        <div class="data-metrics three"><div><span>${budgetSummary().extraIncome > 0 ? "Presupuesto + extra" : "Presupuesto"}</span><strong>${formatMoney(budgetSummary().income)}</strong></div><div><span>Podrías apartar</span><strong>${formatMoney(plan.suggestedPeriodSavings)}</strong></div><div><span>Libre después</span><strong>${formatMoney(plan.freeAfterSuggestion)}</strong></div></div>
         <p class="data-note">Es una simulación: no modifica tu presupuesto ni tus saldos.</p>
       </article>
 
@@ -3949,7 +3951,7 @@ function renderOnboardingModal() {
           <section class="onboarding-step is-active" data-step="1">
             <span class="step-badge">Paso 1 de 3</span>
             <h2 id="onboarding-title">¿Ganas dinero periódicamente?</h2>
-            <p>Así calculamos cuanto tienes disponible en cada periodo.</p>
+            <p>Así calculamos cuánto tienes disponible en cada periodo.</p>
             <div class="sheet-field">
               <span class="sheet-label">¿Tu ingreso es fijo o variable?</span>
               <div class="onboarding-segmented" data-onboarding-income-type-group>
@@ -4003,7 +4005,7 @@ function renderOnboardingModal() {
               </label>
             </div>
             <div class="onboarding-preview"><span>Total real</span><strong data-onboarding-total-preview>${formatMoney(liquidity.account + liquidity.cash)}</strong></div>
-            <small class="balance-hint" data-onboarding-balance>Puedes ajustar esto despues, cuando quieras, desde Datos.</small>
+            <small class="balance-hint" data-onboarding-balance>Puedes ajustar esto después, cuando quieras, desde Datos.</small>
           </section>
 
           <section class="onboarding-step" data-step="3">
@@ -4768,7 +4770,7 @@ function handleOnboardingSubmit(event) {
   state.wins.push({
     id: uid("win"),
     date: todayKey(),
-    text: "Creaste tu primer plan y viste cuanto puedes gastar."
+    text: "Creaste tu primer plan y viste cuánto puedes gastar."
   });
   state.lastAlert = "Plan listo. Registra tu primer gasto cuando ocurra.";
   activateView(DEFAULT_VIEW);
@@ -4980,15 +4982,18 @@ function bindSavingsSimulatorPreview(form) {
   const raiseOutput = form.querySelector("[data-raise-output]");
   const escalationOutput = form.querySelector("[data-escalation-output]");
   const update = () => {
-    const monthlyIncome = Number(form.dataset.monthlyIncome || 0);
+    const periodIncome = Number(form.dataset.periodIncome || 0);
     const raiseValue = Number(raise.value || 0);
     const escalationValue = Number(escalation.value || 0);
     if (raiseOutput) raiseOutput.value = `${raiseValue}%`;
     if (escalationOutput) escalationOutput.value = `${escalationValue}%`;
-    if (result) result.textContent = formatMoney(monthlyIncome * (raiseValue / 100) * (escalationValue / 100));
+    if (result) result.textContent = formatMoney(periodIncome * (raiseValue / 100) * (escalationValue / 100));
   };
   raise?.addEventListener("input", update);
   escalation?.addEventListener("input", update);
+  // Remembered when the slider is released; there is nothing to "save" in a simulation.
+  raise?.addEventListener("change", () => form.requestSubmit());
+  escalation?.addEventListener("change", () => form.requestSubmit());
 }
 
 function bindMerchantRuleSuggestions(form) {
@@ -5508,7 +5513,7 @@ function validateDiagnosisForm(form) {
   const requiredNumbers = [
     ["incomeAmount", "El presupuesto por periodo debe ser mayor que cero.", 1],
     ["committedExpenses", "Los gastos comprometidos no pueden estar vacios.", 0],
-    ["emergencySavings", "El ahorro actual para la simulación no puede estar vacio.", 0],
+    ["emergencySavings", "El ahorro actual para la simulación no puede estar vacío.", 0],
     // Balances may be negative (an overdraft); they only have to be filled in.
     ["account", "El dinero en cuenta no puede estar vacío.", -Infinity],
     ["cash", "El dinero en físico no puede estar vacío.", -Infinity],
@@ -5520,7 +5525,7 @@ function validateDiagnosisForm(form) {
   }
 
   if (activeFields.has("incomeCadence") && !allowedCadences.includes(data.get("incomeCadence"))) {
-    return { field: "incomeCadence", message: "Elige cada cuanto recibes presupuesto." };
+    return { field: "incomeCadence", message: "Elige cada cuánto recibes presupuesto." };
   }
 
   for (const [field, message, min] of requiredNumbers) {
@@ -5534,7 +5539,7 @@ function validateDiagnosisForm(form) {
   }
 
   if (activeFields.has("periodStart") && !cleanDate(data.get("periodStart"), "")) {
-    return { field: "periodStart", message: "El inicio del periodo actual debe ser una fecha valida." };
+    return { field: "periodStart", message: "El inicio del periodo actual debe ser una fecha válida." };
   }
 
   if (activeFields.has("payday")) {
@@ -5891,7 +5896,6 @@ function handleSmartSubmit(event) {
   state.settings.monthlyRaisePct = clamp(numberFrom(data.get("monthlyRaisePct")), 0, 100);
   state.settings.escalationPct = clamp(numberFrom(data.get("escalationPct")), 0, 100);
   state.settings.updated_at = new Date().toISOString();
-  state.lastAlert = "Simulación de aumento actualizada.";
   saveState();
   render();
 }
@@ -6762,7 +6766,7 @@ function removeBudgetJob(id) {
 function removeMerchantRule(id) {
   const rule = state.merchantRules.find((item) => item.id === id);
   state.merchantRules = state.merchantRules.filter((item) => item.id !== id);
-  state.lastAlert = rule ? `Quite la regla de ${rule.merchant}.` : "Regla quitada.";
+  state.lastAlert = rule ? `Quité la regla de ${rule.merchant}.` : "Regla quitada.";
 }
 
 function removeTransaction(id) {
@@ -7635,16 +7639,6 @@ function rememberMerchantRule(transaction) {
 
 function spendByCategory() {
   return getSpendByCategory(state, todayKey());
-}
-
-function futureFreedom(plan) {
-  const monthlyReturn = plan.savings * 0.006;
-  const hours = monthlyReturn / Math.max(1, getMonthlyIncome(state.profile) / 160);
-  if (hours < 1) {
-    const minutes = Math.round(hours * 60);
-    return `${minutes} ${minutes === 1 ? "minuto" : "minutos"} libres/mes`;
-  }
-  return `${hours.toFixed(1)} horas libres/mes`;
 }
 
 function suggestedSavingsMoment() {
