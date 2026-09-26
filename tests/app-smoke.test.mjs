@@ -779,6 +779,92 @@ test("navigation: Progreso lives under Plan, and settings live in Datos", async 
   }
 });
 
+// Local backups moved from localStorage (~5 MB for everything, where three full copies
+// of the state crowded out the main save) to IndexedDB.
+async function saveThePlan(ui) {
+  await ui.click('[data-view="profile"]');
+  await ui.click('[data-action="open-diagnosis"]');
+  ui.$("#diagnosis-form").requestSubmit();
+  await settle(ui.window);
+  for (let i = 0; i < 20 && !ui.$('[data-action="request-restore-backup"]'); i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await ui.click('[data-view="profile"]');
+  }
+}
+
+test("local backups are kept in IndexedDB, not localStorage, and can be restored", async () => {
+  const { IDBFactory } = await import("fake-indexeddb");
+  const indexedDB = new IDBFactory();
+  const ui = await bootApp({ savedState: returningUserState(), indexedDB });
+  try {
+    await saveThePlan(ui);
+    assert.ok(ui.$('[data-action="request-restore-backup"]'), "no backup listed in Datos");
+    assert.equal(ui.window.localStorage.getItem("finanzas-conductuales:backups:v1"), null);
+  } finally {
+    ui.close();
+  }
+
+  // Relaunch with the same IndexedDB: the backup is still there.
+  const again = await bootApp({ savedState: returningUserState(), indexedDB });
+  try {
+    for (let i = 0; i < 20 && !again.$('[data-action="request-restore-backup"]'); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await again.click('[data-view="profile"]');
+    }
+    await again.click('[data-action="request-restore-backup"]');
+    await again.click('[data-action="confirm-restore-backup"]');
+    assert.match(again.text(), /Restauramos la copia/);
+  } finally {
+    again.close();
+  }
+});
+
+test("backups left in localStorage by an older version move to IndexedDB", async () => {
+  const legacy = [{ id: "backup-old", created_at: "2026-09-01T10:00:00.000Z", reason: "antes de guardar plan", counts: { fields: 0, transactions: 0, extras: 0 }, state: returningUserState() }];
+  const ui = await bootApp({
+    savedState: returningUserState(),
+    beforeBoot(window) {
+      window.localStorage.setItem("finanzas-conductuales:backups:v1", JSON.stringify(legacy));
+    }
+  });
+  try {
+    for (let i = 0; i < 20 && ui.window.localStorage.getItem("finanzas-conductuales:backups:v1"); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(ui.window.localStorage.getItem("finanzas-conductuales:backups:v1"), null, "old backups were not moved");
+    await ui.click('[data-view="profile"]');
+    assert.ok(ui.$('[data-action="request-restore-backup"][data-id="backup-old"]'), "the moved backup is not listed");
+  } finally {
+    ui.close();
+  }
+});
+
+test("a damaged main save is recovered from the newest backup in IndexedDB", async () => {
+  const { IDBFactory } = await import("fake-indexeddb");
+  const indexedDB = new IDBFactory();
+  const first = await bootApp({ savedState: returningUserState({ transactions: [transaction({ merchant: "Antes del daño" })] }), indexedDB });
+  try {
+    await saveThePlan(first);
+  } finally {
+    first.close();
+  }
+  const damaged = await bootApp({
+    indexedDB,
+    beforeBoot(window) {
+      window.localStorage.setItem("finanzas-conductuales:v1", "{ esto no es JSON");
+    }
+  });
+  try {
+    for (let i = 0; i < 40 && !/Antes del daño|recuperamos/.test(damaged.text()); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.match(damaged.text(), /lo recuperamos desde tu última copia automática/);
+    assert.equal(damaged.saved().transactions[0].merchant, "Antes del daño");
+  } finally {
+    damaged.close();
+  }
+});
+
 // The boot code (render(), initializeCloudSync()) runs synchronously at module init, so
 // a module-level const/let declared below it is in its temporal dead zone for any boot
 // path that reaches it — this crashed the app three separate times. The smoke tests

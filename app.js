@@ -18,7 +18,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.49";
+} from "./finance-core.js?v=1.1.50";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -59,10 +59,12 @@ import {
   decidePushSync,
   hasMeaningfulLocalData,
   hasUnsyncedLocalEdits,
+  compactForStorage,
+  compactMergeBase,
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.49";
+} from "./state-model.js?v=1.1.50";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -78,7 +80,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.49";
+} from "./sync-client.js?v=1.1.50";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -86,6 +88,20 @@ const BACKUP_KEY = "finanzas-conductuales:backups:v1";
 // The version this device last agreed on with the cloud: the common base for merging
 // another device's changes (see mergeStates in state-model.js).
 const CLOUD_BASE_KEY = "finanzas-conductuales:cloud-base:v1";
+// Local backups live in IndexedDB, which has far more room than localStorage (~5 MB for
+// everything). Three full copies of the state there used to push the main save against
+// the quota after a couple of years of expenses. BACKUP_KEY is the old location, read
+// once to migrate and as a fallback where IndexedDB is unavailable.
+const BACKUP_DB_NAME = "finanzas-conductuales";
+const BACKUP_STORE = "backups";
+const BACKUP_LIMIT = 3;
+// In-memory list the UI reads synchronously; IndexedDB is its durable copy.
+let localBackups = [];
+// Set when the main save could not be read at startup and must be restored from a
+// backup once the backups have loaded.
+let recoverFromBackupPending = false;
+let backupsReady = null;
+let backupDbPromise = null;
 // Lock constants live at the top so loadLockConfig() (called during module init,
 // before the lock helper block below) can read LOCK_STORAGE_KEY without hitting a
 // temporal-dead-zone ReferenceError. A previous version declared these next to the
@@ -279,6 +295,7 @@ window.setTimeout(() => {
     window.requestAnimationFrame(() => pollLocalStateUntilStable(deadline));
   }
 })(performance.now() + LOCAL_STATE_POLL_DURATION_MS);
+loadLocalBackups();
 initializeCloudSync();
 scheduleDailyReminder();
 window.addEventListener("hashchange", () => {
@@ -318,7 +335,8 @@ function isQuotaExceededError(error) {
 // Wraps every write to localStorage. On QuotaExceededError, frees space by trimming
 // the backup history down to the single most recent snapshot and retries once; if that
 // still fails, the write is lost but the user is told so instead of it vanishing silently.
-function persist(key, value) {
+function persist(key, rawValue) {
+  const value = key === STORAGE_KEY ? compactForStorage(rawValue) : rawValue;
   try {
     localStorage.setItem(key, JSON.stringify(value));
     return true;
@@ -328,7 +346,9 @@ function persist(key, value) {
     }
     try {
       if (key !== BACKUP_KEY) {
-        localStorage.setItem(BACKUP_KEY, JSON.stringify(readLocalBackups().slice(0, 1)));
+        // The merge base can be rebuilt on the next sync; old-style backups can go too.
+        localStorage.removeItem(CLOUD_BASE_KEY);
+        localStorage.removeItem(BACKUP_KEY);
       }
       localStorage.setItem(key, JSON.stringify(value));
       return true;
@@ -352,12 +372,8 @@ function loadState() {
     }
     return migrateState(JSON.parse(saved), todayKey(), DEFAULT_VIEW);
   } catch {
-    const backups = readLocalBackups();
-    if (backups[0]?.state) {
-      const restored = migrateState(backups[0].state, todayKey(), DEFAULT_VIEW);
-      restored.lastAlert = "Tu guardado local estaba dañado; lo recuperamos desde tu última copia automática.";
-      return restored;
-    }
+    // Restored from the newest backup as soon as the backups load (loadLocalBackups).
+    recoverFromBackupPending = true;
     return createDefaultState(todayKey(), DEFAULT_VIEW);
   }
 }
@@ -579,7 +595,7 @@ function applyRemoteState(remoteState, remoteUpdatedAt, alert) {
     activateView(DEFAULT_VIEW);
   }
   state.lastAlert = alert;
-  markCloudSynced(remoteUpdatedAt || new Date().toISOString(), { persist: false, base: remoteState });
+  markCloudSynced(remoteUpdatedAt || new Date().toISOString(), { persist: false, base: state });
   saveState({ sync: false, touch: false });
   applyingCloudState = false;
 }
@@ -602,7 +618,8 @@ function markCloudSynced(updatedAt, options = {}) {
 
 function writeCloudBase(appState) {
   try {
-    localStorage.setItem(CLOUD_BASE_KEY, JSON.stringify({ email: cloudState.email, state: appState }));
+    // Compact: record hashes instead of a second full copy of every expense.
+    localStorage.setItem(CLOUD_BASE_KEY, JSON.stringify({ email: cloudState.email, state: compactMergeBase(appState) }));
   } catch {
     // Out of space: without a base the next merge falls back to combining both sides.
     try {
@@ -625,7 +642,8 @@ function readCloudBase() {
 // combine both instead of letting either erase the other (mergeStates in state-model.js).
 function adoptMergedState(remote) {
   saveLocalBackup("antes de combinar con otro dispositivo");
-  const merged = mergeStates(readCloudBase(), getCloudPayload(), remote.app_state);
+  // Both sides normalized the same way, so records only differ where someone changed them.
+  const merged = mergeStates(readCloudBase(), getCloudPayload(), migrateState(remote.app_state, todayKey(), DEFAULT_VIEW));
   applyingCloudState = true;
   state = migrateState(merged, todayKey(), DEFAULT_VIEW);
   state.meta = { ...(state.meta || {}), cloudUpdatedAt: remote.updated_at, cloudUserEmail: cloudState.email };
@@ -656,6 +674,10 @@ async function uploadWithMerge(remote) {
 }
 
 function readLocalBackups() {
+  return localBackups;
+}
+
+function readLegacyBackups() {
   try {
     const raw = localStorage.getItem(BACKUP_KEY);
     const backups = raw ? JSON.parse(raw) : [];
@@ -663,6 +685,93 @@ function readLocalBackups() {
   } catch {
     return [];
   }
+}
+
+function openBackupDb() {
+  return new Promise((resolve) => {
+    try {
+      if (!window.indexedDB) {
+        resolve(null);
+        return;
+      }
+      const request = window.indexedDB.open(BACKUP_DB_NAME, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore(BACKUP_STORE, { keyPath: "id" });
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => resolve(null);
+      request.onblocked = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+function backupDb() {
+  backupDbPromise ||= openBackupDb();
+  return backupDbPromise;
+}
+
+// Runs `work(store)` in one transaction; resolves with the request it returns, if any.
+async function withBackupStore(mode, work) {
+  const db = await backupDb();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    try {
+      const transaction = db.transaction(BACKUP_STORE, mode);
+      const request = work(transaction.objectStore(BACKUP_STORE));
+      transaction.oncomplete = () => resolve(request?.result ?? null);
+      transaction.onerror = () => resolve(null);
+      transaction.onabort = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+// Loads the backups into memory at startup, moving any left in localStorage by older
+// versions into IndexedDB, and finishes a pending recovery.
+function loadLocalBackups() {
+  backupsReady ||= (async () => {
+    const db = await backupDb();
+    const legacy = readLegacyBackups();
+    if (db) {
+      const stored = (await withBackupStore("readonly", (store) => store.getAll())) || [];
+      localBackups = [...stored, ...legacy.filter((item) => !stored.some((s) => s.id === item.id))]
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+        .slice(0, BACKUP_LIMIT);
+      if (legacy.length) {
+        await writeBackups();
+        try {
+          localStorage.removeItem(BACKUP_KEY);
+        } catch {}
+      }
+    } else {
+      localBackups = legacy;
+    }
+    if (recoverFromBackupPending && localBackups[0]?.state) {
+      recoverFromBackupPending = false;
+      state = migrateState(localBackups[0].state, todayKey(), DEFAULT_VIEW);
+      state.lastAlert = "Tu guardado local estaba dañado; lo recuperamos desde tu última copia automática.";
+      saveState({ sync: false, touch: false });
+      showNoticeSnackbar(state.lastAlert, { renderNow: false });
+      render();
+    } else if (state.activeView === "profile") {
+      renderBackground();
+    }
+  })();
+  return backupsReady;
+}
+
+async function writeBackups() {
+  const db = await backupDb();
+  if (!db) {
+    persist(BACKUP_KEY, localBackups);
+    return;
+  }
+  const keep = localBackups;
+  await withBackupStore("readwrite", (store) => {
+    store.clear();
+    keep.forEach((backup) => store.put(backup));
+  });
 }
 
 function saveLocalBackup(reason, snapshot = state) {
@@ -684,14 +793,18 @@ function saveLocalBackup(reason, snapshot = state) {
       showDiagnosis: false
     }
   };
-  const backups = [backup, ...readLocalBackups()].slice(0, 3);
-  persist(BACKUP_KEY, backups);
+  // After the stored backups have loaded, so an early backup never overwrites them.
+  (backupsReady || loadLocalBackups()).then(() => {
+    localBackups = [backup, ...localBackups].slice(0, BACKUP_LIMIT);
+    return writeBackups();
+  });
 }
 
 function restoreLocalBackup(id) {
   const backup = readLocalBackups().find((item) => item.id === id);
   if (!backup?.state) {
     state.lastAlert = "No encontré esa copia local.";
+    showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
     return;
   }
   saveLocalBackup("antes de restaurar una copia local");
@@ -712,6 +825,7 @@ function restoreLocalBackup(id) {
   clearSnackbar({ renderNow: false });
   activateView(DEFAULT_VIEW);
   state.lastAlert = `Restauramos la copia del ${formatBackupTimestamp(backup.created_at)}.`;
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
 }
 
 function friendlyCloudError(error) {
@@ -4941,6 +5055,7 @@ function handleOnboardingSubmit(event) {
     text: "Creaste tu primer plan y viste cuánto puedes gastar."
   });
   state.lastAlert = "Plan listo. Registra tu primer gasto cuando ocurra.";
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
   activateView(DEFAULT_VIEW);
   saveState();
   render();
@@ -5680,6 +5795,7 @@ function submitDiagnosisForm(form) {
   state.showDiagnosis = false;
   activateView(DEFAULT_VIEW);
   state.lastAlert = successMessage;
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
   saveState();
   render();
 }
@@ -5786,6 +5902,7 @@ function handleBudgetSubmit(event) {
   const data = new FormData(event.currentTarget);
   if (state.budgetJobs.length >= 10) {
     state.lastAlert = "Mantengamos máximo 10 categorías para que el plan siga claro.";
+    showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
     saveState();
     render();
     return;
@@ -5828,6 +5945,7 @@ function handleBudgetSubmit(event) {
 
   state.budgetJobs.push(job);
   state.lastAlert = `${name} reserva ${formatMoney(semesterBudget)} del periodo ${budgetSummary().cadenceLabel}.`;
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
   planSheet = "";
   saveState();
   render();
@@ -5926,6 +6044,7 @@ function handleTransactionSubmit(event) {
       updated_at: new Date().toISOString()
     });
     state.lastAlert = `${merchant} quedó en pausa 24 horas antes de decidir.`;
+    showNoticeSnackbar(state.lastAlert, { renderNow: false });
   } else {
     const transaction = addTransaction({ merchant, description, amount, category, budgeted, oneOff, source, calendarEventId });
     if (calendarEventId) {
@@ -6001,6 +6120,7 @@ function handleExtraEditSubmit(event) {
     savingsPercent: clamp(numberFrom(data.get("savingsPercent")), 0, 100)
   });
   state.lastAlert = `${extra.source} quedo actualizado y el saldo se ajusto.`;
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
   editingExtraId = "";
   saveState();
   render();
@@ -6141,6 +6261,7 @@ function handleFinancialEventSubmit(event) {
     updated_at: new Date().toISOString()
   });
   state.lastAlert = `${title} quedo en tu calendario con estimado de ${formatMoney(amount)}.`;
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
   saveState();
   render();
 }
@@ -6251,6 +6372,7 @@ async function handleCloudLoginSubmit(event) {
     authNotice = null;
     resetQuickExpenseAfterLogin();
     state.lastAlert = mode === "signup" ? "Cuenta creada." : "Sesión iniciada.";
+    showNoticeSnackbar(state.lastAlert, { renderNow: false });
     await pullCloudAfterLogin();
   } catch (error) {
     cloudState.sessionReady = true;
@@ -6348,6 +6470,8 @@ function clearLocalUserState() {
   localStorage.removeItem(STORAGE_KEY);
   localStorage.removeItem(BACKUP_KEY);
   localStorage.removeItem(CLOUD_BASE_KEY);
+  localBackups = [];
+  withBackupStore("readwrite", (store) => store.clear());
   state = createDefaultState(todayKey(), DEFAULT_VIEW);
   state.activeView = DEFAULT_VIEW;
   authMode = "";
@@ -6364,6 +6488,7 @@ function startCalendarEventExpense(id) {
   const event = state.calendarEvents.find((item) => item.id === id);
   if (!event) {
     state.lastAlert = "No encontre ese evento del calendario.";
+    showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
     return;
   }
 
@@ -6375,6 +6500,7 @@ function startCalendarEventExpense(id) {
     category: event.category || FREE_CATEGORY_ID
   };
   state.lastAlert = `${event.title} listo para registrar como gasto.`;
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
   openQuickExpense();
 }
 
@@ -6392,18 +6518,21 @@ function reopenCalendarEvent(id) {
   const event = state.calendarEvents.find((item) => item.id === id);
   if (!event) {
     state.lastAlert = "No encontre ese evento del calendario.";
+    showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
     return;
   }
   event.spent = false;
   event.transactionId = "";
   event.updated_at = new Date().toISOString();
   state.lastAlert = `${event.title} volvio a quedar pendiente.`;
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
 }
 
 function removeCalendarEvent(id) {
   const event = state.calendarEvents.find((item) => item.id === id);
   state.calendarEvents = state.calendarEvents.filter((item) => item.id !== id);
   state.lastAlert = event ? `${event.title} salio del calendario.` : "Evento eliminado.";
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
 }
 
 // The period close used to be saved only by hand, and the final one only on the period's
@@ -7006,12 +7135,14 @@ function removeBudgetJob(id) {
     }
   });
   state.lastAlert = "Categoría eliminada. Sus gastos vuelven a revisión.";
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
 }
 
 function removeMerchantRule(id) {
   const rule = state.merchantRules.find((item) => item.id === id);
   state.merchantRules = state.merchantRules.filter((item) => item.id !== id);
   state.lastAlert = rule ? `Quité la regla de ${rule.merchant}.` : "Regla quitada.";
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
 }
 
 function removeTransaction(id) {
@@ -7026,6 +7157,7 @@ function removeTransaction(id) {
   state.lastAlert = transaction
     ? `${transaction.merchant} eliminado. La categoría se recalculó.`
     : "Gasto eliminado.";
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
   if (snackbar?.transactionId === id) {
     clearSnackbar({ renderNow: false });
   }
@@ -7040,6 +7172,7 @@ function removeBudgetExtra(id) {
   state.budgetExtras = state.budgetExtras.filter((item) => item.id !== id);
   reverseBudgetExtra(extra);
   state.lastAlert = extra ? `${extra.source} ya no suma al presupuesto.` : "Dinero extra eliminado.";
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
 }
 
 function updateBudgetExtra(extra, next) {
@@ -7112,6 +7245,7 @@ function cancelCooldown(id) {
     text: "Cancelaste una compra después de pausarla."
   });
   state.lastAlert = "Compra cancelada. Ese ahorro ya cuenta.";
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
 }
 
 function unlockCooldown(id) {

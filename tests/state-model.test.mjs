@@ -13,6 +13,7 @@ import {
   normalizeLiquidity,
   normalizeLocation,
   normalizeTransactions,
+  compactForStorage,
   describeSyncStatus,
   relativeTimeEs,
   remoteChangedSinceLastSync,
@@ -216,4 +217,19 @@ test("unsynced local edits are the ones made after the last successful sync", ()
   assert.equal(hasUnsyncedLocalEdits({ updated_at: "2026-06-10T09:59:00.000Z", meta }), false);
   assert.equal(hasUnsyncedLocalEdits({ updated_at: "2026-06-10T10:05:00.000Z", meta: {} }), true);
   assert.equal(hasUnsyncedLocalEdits({ meta }), false);
+});
+
+test("the compact local save round-trips every expense exactly", () => {
+  const today = "2026-09-26";
+  const original = normalizeTransactions(
+    [
+      { id: "a", date: "2026-09-20", merchant: "Tienda", amount: 5_000, category: "free", source: "account", updated_at: "2026-09-20T10:00:00.000Z", createdAt: "2026-09-20T10:00:00.000Z" },
+      { id: "b", date: "2026-09-21", merchant: "Terpel", description: "Tanqueada", amount: 60_000, category: "transporte", budgeted: true, oneOff: true, source: "credit", calendarEventId: "c1", updated_at: "2026-09-22T10:00:00.000Z", createdAt: "2026-09-21T10:00:00.000Z" }
+    ],
+    today
+  );
+  const compact = compactForStorage({ transactions: original });
+  assert.ok(JSON.stringify(compact).length < JSON.stringify({ transactions: original }).length);
+  assert.equal("source" in compact.transactions[0], false);
+  assert.deepEqual(normalizeTransactions(compact.transactions, today), original.map((t) => (t.createdAt === t.updated_at ? (({ createdAt, ...rest }) => rest)(t) : t)));
 });

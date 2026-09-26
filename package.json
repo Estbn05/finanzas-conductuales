@@ -1,6 +1,6 @@
 {
   "name": "finanzas-conductuales",
-  "version": "1.1.49",
+  "version": "1.1.50",
   "description": "Aplicacion personal de finanzas basada en principios de economia conductual.",
   "private": true,
   "type": "module",
@@ -37,6 +37,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^8.4.0",
+    "fake-indexeddb": "^6.2.5",
     "jsdom": "^29.1.1",
     "playwright-core": "^1.63.0"
   }

@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.49";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.50";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
@@ -213,6 +213,30 @@ export function normalizeTransactions(transactions, today) {
     calendarEventId: transaction.calendarEventId || "",
     updated_at: transaction.updated_at || transaction.createdAt || transaction.date || ""
   }));
+}
+
+// The main save on the phone drops, from each expense, the fields that hold their default
+// value; normalizeTransactions puts them back on load. ~44% smaller, which matters because
+// localStorage holds ~5 MB for everything and years of expenses add up. Only for the local
+// save: the cloud document and the merge base keep full records.
+export function compactForStorage(state) {
+  if (!Array.isArray(state?.transactions)) return state;
+  return {
+    ...state,
+    transactions: state.transactions.map(stripDefaults)
+  };
+}
+
+function stripDefaults(transaction) {
+  const compact = { ...transaction };
+  delete compact.labeled;
+  if (compact.description === "") delete compact.description;
+  if (!compact.oneOff) delete compact.oneOff;
+  if (!compact.budgeted) delete compact.budgeted;
+  if (compact.source === "account") delete compact.source;
+  if (!compact.calendarEventId) delete compact.calendarEventId;
+  if (compact.createdAt && compact.createdAt === compact.updated_at) delete compact.createdAt;
+  return compact;
 }
 
 export function normalizePeriodClosures(closures) {
@@ -558,7 +582,51 @@ const MERGE_BALANCES = ["account", "cash", "credit"];
 // This device's own screen state; the other device's has no business here.
 const DEVICE_ONLY = new Set(["activeView", "showDiagnosis", "diagnosisSection", "lastAlert", "meta"]);
 
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+// Compares by content: key order and default-valued fields (dropped by the compact local
+// save, restored in another order on load) are not changes.
+function canonicalJson(value) {
+  const sortKeys = (v) => {
+    if (Array.isArray(v)) return v.map(sortKeys);
+    if (v && typeof v === "object") {
+      return Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys(v[k])]));
+    }
+    return v;
+  };
+  return JSON.stringify(sortKeys(value));
+}
+
+function comparableRecord(record) {
+  return record && typeof record === "object" && !Array.isArray(record) ? canonicalJson(stripDefaults(record)) : canonicalJson(record);
+}
+
+const same = (a, b) => canonicalJson(a) === canonicalJson(b);
+const sameRecord = (a, b) => comparableRecord(a) === comparableRecord(b);
+
+// FNV-1a over the record's JSON: enough to tell "unchanged since the base" apart from
+// "changed", which is all the merge needs from the base for record lists.
+function recordHash(record) {
+  const text = comparableRecord(record);
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `${text.length.toString(36)}.${hash.toString(36)}`;
+}
+
+// The merge base as stored on the device: record lists become { id: hash } maps instead
+// of full copies (~20 bytes per expense instead of ~250), the rest stays as is. Keeping a
+// second full copy of every expense would eat the phone's ~5 MB of local storage.
+export function compactMergeBase(state) {
+  const compact = { ...state };
+  for (const [key, idKey] of Object.entries(MERGE_COLLECTIONS)) {
+    if (!Array.isArray(state?.[key])) continue;
+    compact[key] = {
+      hashes: Object.fromEntries(state[key].filter((item) => item && item[idKey] != null).map((item) => [item[idKey], recordHash(item)]))
+    };
+  }
+  return compact;
+}
 
 function pickChanged(baseValue, localValue, remoteValue, localWins) {
   if (same(localValue, remoteValue)) return localValue;
@@ -569,7 +637,21 @@ function pickChanged(baseValue, localValue, remoteValue, localWins) {
 
 function mergeCollection(baseList, localList, remoteList, key, localWins) {
   const index = (list) => new Map((Array.isArray(list) ? list : []).filter((item) => item && item[key] != null).map((item) => [item[key], item]));
-  const base = index(baseList);
+  // The base is either a full list or a compact { hashes } map (compactMergeBase).
+  const baseHashes = baseList && !Array.isArray(baseList) && baseList.hashes ? new Map(Object.entries(baseList.hashes)) : null;
+  const fullBase = baseHashes ? new Map() : index(baseList);
+  const base = {
+    has: (id) => (baseHashes ? baseHashes.has(String(id)) : fullBase.has(id)),
+    get: (id) => (baseHashes ? { __hash: baseHashes.get(String(id)) } : fullBase.get(id))
+  };
+  const same = (record, baseRecord) =>
+    baseRecord && baseRecord.__hash !== undefined ? recordHash(record) === baseRecord.__hash : sameRecord(record, baseRecord);
+  const pick = (baseRecord, l, r) => {
+    if (sameRecord(l, r)) return l;
+    if (same(l, baseRecord)) return r;
+    if (same(r, baseRecord)) return l;
+    return localWins ? l : r;
+  };
   const local = index(localList);
   const remote = index(remoteList);
   const ids = [...local.keys(), ...[...remote.keys()].filter((id) => !local.has(id))];
@@ -579,7 +661,7 @@ function mergeCollection(baseList, localList, remoteList, key, localWins) {
     const l = local.get(id);
     const r = remote.get(id);
     if (l && r) {
-      merged.push(pickChanged(base.get(id), l, r, localWins));
+      merged.push(pick(inBase ? base.get(id) : undefined, l, r));
     } else if (l) {
       // Missing remotely: deleted there, unless it is new here or changed here since.
       if (!inBase || !same(l, base.get(id))) merged.push(l);
@@ -627,7 +709,10 @@ export function mergeStates(base, local, remote) {
   // Both phones deposited the same period's pay on their own (each saw payday arrive):
   // the two deposits were added as two changes, but the money came in once.
   if (hasBase && merged.liquidity) {
-    const baseDeposits = new Set((b.periodIncomeApplied || []).map((entry) => entry.windowStart));
+    const baseLedger = b.periodIncomeApplied;
+    const baseDeposits = new Set(
+      Array.isArray(baseLedger) ? baseLedger.map((entry) => entry.windowStart) : Object.keys(baseLedger?.hashes || {})
+    );
     const remoteDeposits = new Map((remote?.periodIncomeApplied || []).map((entry) => [entry.windowStart, entry]));
     for (const entry of local?.periodIncomeApplied || []) {
       const twin = remoteDeposits.get(entry.windowStart);

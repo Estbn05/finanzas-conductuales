@@ -1,5 +1,6 @@
 // Shared jsdom harness: boots the real app.js in a simulated browser so tests can drive
 // it through real clicks and form submits instead of searching its source for strings.
+import { IDBFactory } from "fake-indexeddb";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 
@@ -60,7 +61,9 @@ export function returningUserState(overrides = {}) {
   };
 }
 
-export async function bootApp({ savedState, lockConfig, syncConfig = {}, beforeBoot } = {}) {
+// `indexedDB`: an IndexedDB factory (fake-indexeddb) to share between boots, so data the
+// app stored there survives a "relaunch". Each boot gets a fresh, empty one by default.
+export async function bootApp({ savedState, lockConfig, syncConfig = {}, beforeBoot, indexedDB = new IDBFactory() } = {}) {
   const timers = new Set();
   liveTimers = timers;
   const dom = new JSDOM(
@@ -72,6 +75,7 @@ export async function bootApp({ savedState, lockConfig, syncConfig = {}, beforeB
   );
   const { window } = dom;
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+  window.indexedDB = indexedDB;
   // Default: no Supabase config, so the app runs local-only, the way it must keep working
   // offline. Note sync-client.js reads this once per process when first imported, so a
   // test file that needs a (mocked) cloud must set it on its FIRST boot; see
