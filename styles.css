@@ -8100,3 +8100,9 @@ html[data-theme="dark"] .money-math > * + * {
   flex: none;
   white-space: nowrap;
 }
+
+/* The math rows carry a second line under the label; the amount sits centered against
+   both lines, not on the first line's baseline. */
+.money-math-row .money-location-text {
+  align-items: center;
+}
