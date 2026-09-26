@@ -391,8 +391,8 @@ test("authenticated new users get a three-step financial onboarding", async () =
   assert.ok(styles.includes(".onboarding-category-chips"));
   assert.ok(styles.includes(".onboarding-category-chip"));
   assert.match(styles, /\.onboarding-form input,[\s\S]*\.onboarding-form select\s*{[\s\S]*-webkit-appearance: none/);
-  assert.ok(styles.includes("-webkit-text-fill-color: #101614 !important"));
-  assert.ok(styles.includes("-webkit-text-fill-color: #e8f5ee !important"));
+  assert.ok(styles.includes("-webkit-text-fill-color: #101614"));
+  assert.ok(styles.includes("-webkit-text-fill-color: #e8f5ee"));
 });
 
 // Regresion: createDefaultState() describia a una persona concreta (un estudiante con
@@ -1249,7 +1249,7 @@ test("every form keeps readable controls in Android PWA themes", async () => {
   // later block, but an earlier rule had left its title near-white (#fff9ee) for the dark
   // background that block replaced — leaving white-on-light-green. `strong` has to be
   // repainted alongside `small`/`b` or the button's own title is the hardest part to read.
-  assert.match(styles, /\.plan-action:first-child strong \{[\s\S]{0,300}color: #052a22 !important;/);
+  assert.match(styles, /\.plan-action:first-child strong \{[\s\S]{0,300}color: #052a22;/);
 
   // Field colors per theme and their contrast are checked in theme-tokens.test.mjs.
   assert.match(styles, /input:not\(\[type="checkbox"\]\)[\s\S]*select,[\s\S]*textarea\s*{/);
@@ -1401,12 +1401,11 @@ test("drawer visual system keeps menu contrast in mobile themes", async () => {
   assert.ok(styles.includes("--ledger-deep"));
   assert.ok(styles.includes("--ledger-glow"));
   assert.match(styles, /\.app-shell\.is-menu-open \.drawer-scrim\s*{[\s\S]*backdrop-filter: blur\(8px\)/);
-  assert.match(styles, /\.brand strong\s*{[\s\S]*color: #fff7e8/);
   assert.match(styles, /\.nav-item:hover,[\s\S]*\.nav-item\.is-active\s*{[\s\S]*color: #fff7e8/);
   assert.match(styles, /\.menu-tools \.btn\.ghost\s*{[\s\S]*color: rgba\(255, 247, 232, 0\.78\)/);
   assert.match(styles, /Sidebar ghost button dark contrast v14[\s\S]*html\[data-theme="dark"\] \.sidebar \.menu-tools \.btn\.ghost[\s\S]*background: rgba\(255, 255, 255, 0\.07\) !important/);
   assert.match(styles, /Mobile drawer scroll fix v11[\s\S]*\.app-shell\.is-menu-open \.sidebar\s*{[\s\S]*height: 100dvh[\s\S]*touch-action: pan-y/);
-  assert.match(styles, /\.app-shell\.is-menu-open \.nav-panel,[\s\S]*\.app-shell\.is-menu-open \.nav-panel\.is-open\s*{[\s\S]*overflow-y: auto !important[\s\S]*padding-bottom: calc\(116px \+ env\(safe-area-inset-bottom, 0px\)\)/);
+  assert.match(styles, /\.app-shell\.is-menu-open \.nav-panel,[\s\S]*\.app-shell\.is-menu-open \.nav-panel\.is-open\s*{[\s\S]*overflow-y: auto;[\s\S]*padding-bottom: calc\(116px \+ env\(safe-area-inset-bottom, 0px\)\)/);
 });
 
 // Regression: extracting state-model.js out of app.js left it out of the mobile build's
