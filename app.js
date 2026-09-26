@@ -18,7 +18,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.39";
+} from "./finance-core.js?v=1.1.43";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -60,7 +60,7 @@ import {
   hasMeaningfulLocalData,
   hasUnsyncedLocalEdits,
   uid
-} from "./state-model.js?v=1.1.39";
+} from "./state-model.js?v=1.1.43";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -75,7 +75,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.39";
+} from "./sync-client.js?v=1.1.43";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -158,16 +158,18 @@ const INCOME_CADENCE_VALUES = Object.keys(INCOME_CADENCES);
 // Las que el onboarding no muestra como boton directo y quedan detras de "Otro".
 const SECONDARY_INCOME_CADENCES = ["semester", "yearly"];
 
+// `inBottomNav`: already one tap away in the bottom bar on phones, so the drawer only
+// shows them on desktop, where the drawer is the navigation.
 const NAV_ITEMS = [
-  { id: "today", label: "Inicio", icon: "01" },
-  { id: "budget", label: "Plan", icon: "02" },
-  { id: "savings", label: "Ahorro", icon: "03" },
-  { id: "calendar", label: "Calendario", icon: "04" },
-  { id: "movements", label: "Movimientos", icon: "05" },
-  { id: "progress", label: "Progreso", icon: "06" },
-  { id: "profile", label: "Datos", icon: "07" }
+  { id: "today", label: "Inicio", icon: "home", inBottomNav: true },
+  { id: "budget", label: "Plan", icon: "plan", inBottomNav: true },
+  { id: "movements", label: "Movimientos", icon: "receipt", inBottomNav: true },
+  { id: "savings", label: "Ahorro", icon: "target" },
+  { id: "calendar", label: "Gastos planeados", icon: "calendar" },
+  { id: "profile", label: "Datos", icon: "user" }
 ];
-const APP_VIEWS = new Set([...NAV_ITEMS.map((item) => item.id), "periodClose"]);
+// Progreso and the period close are reached from Plan.
+const APP_VIEWS = new Set([...NAV_ITEMS.map((item) => item.id), "periodClose", "progress"]);
 
 const app = document.querySelector("#app");
 let state = loadState();
@@ -844,21 +846,14 @@ function render() {
       </div>
       <div class="nav-panel is-open" id="main-menu">
         <nav class="nav-list" aria-label="Secciones principales">
-          <button class="nav-item is-primary" type="button" data-action="open-expense">
+          <button class="nav-item is-primary is-in-bottom-nav" type="button" data-action="open-expense">
             <span class="nav-number">+</span>
             <span>Registrar gasto</span>
           </button>
           ${NAV_ITEMS.map((item) => renderNavItem(item)).join("")}
         </nav>
-        ${renderThemeSwitcher()}
         <div class="menu-tools">
           ${renderSyncStatusLine()}
-          <button class="btn primary" type="button" data-action="open-diagnosis">Editar mi plan</button>
-          ${
-            isLocalOnly()
-              ? `<button class="btn ghost" type="button" data-action="request-account">Crear cuenta</button>`
-              : `<button class="btn ghost" type="button" data-action="cloud-sign-out">Cerrar sesión</button>`
-          }
         </div>
       </div>
     </aside>
@@ -887,6 +882,50 @@ function render() {
   bindEvents();
 }
 
+function renderDailyReminderPanel() {
+  const reminder = normalizeDailyReminder(state.dailyReminder);
+  const permission = notificationPermissionStatus();
+  return `
+      <article class="calendar-panel reminder-panel">
+        <div class="calendar-panel-heading">
+          <div>
+            <p class="eyebrow">Revisión diaria</p>
+            <h2>Recordatorio de gastos</h2>
+          </div>
+          <span class="metric-badge ${permission === "granted" ? "under" : permission === "denied" ? "danger" : ""}">${notificationStatusLabel(permission)}</span>
+        </div>
+        ${
+          permission === "granted"
+            ? ""
+            : `<button class="btn secondary" type="button" data-action="request-reminder-permission">Permitir notificaciones</button>`
+        }
+        <form class="calendar-reminder-form" id="daily-reminder-form">
+          <label class="toggle-row">
+            <input name="enabled" type="checkbox" ${reminder.enabled ? "checked" : ""}>
+            <span>
+              <strong>Preguntar cada día</strong>
+              <small>Mensaje: "¿Quieres registrar tus gastos de hoy?"</small>
+            </span>
+          </label>
+          <label>
+            Hora
+            <input name="time" type="time" value="${escapeAttr(reminder.time)}" required>
+          </label>
+          <button class="btn primary" type="submit">Guardar recordatorio</button>
+        </form>
+        <div class="reminder-actions">
+          ${
+            permission === "granted"
+              ? `<button class="btn ghost" type="button" data-action="send-test-reminder">Probar</button>`
+              : ""
+          }
+        </div>
+        <p class="data-note">${reminderSupportNote(permission)}</p>
+      </article>
+
+  `;
+}
+
 function renderThemeSwitcher() {
   // Active state must reflect the STORED choice, not themePreference()'s resolved
   // value — otherwise picking "Sistema" while the OS is dark would show "Oscuro" as
@@ -913,10 +952,11 @@ function renderThemeSwitcher() {
 }
 
 function renderNavItem(item) {
-  const active = state.activeView === item.id || (item.id === "budget" && state.activeView === "periodClose") ? "is-active" : "";
+  const active =
+    state.activeView === item.id || (item.id === "budget" && ["periodClose", "progress"].includes(state.activeView)) ? "is-active" : "";
   return `
-    <button class="nav-item ${active}" type="button" data-view="${item.id}">
-      <span class="nav-number">${item.icon}</span>
+    <button class="nav-item ${active} ${item.inBottomNav ? "is-in-bottom-nav" : ""}" type="button" data-view="${item.id}">
+      <span class="nav-number" aria-hidden="true">${renderIcon(item.icon)}</span>
       <span>${item.label}</span>
     </button>
   `;
@@ -977,7 +1017,7 @@ function renderBottomNavigation() {
         <span class="bottom-nav-icon" aria-hidden="true">${renderIcon("home")}</span>
         <span>Inicio</span>
       </button>
-      <button class="bottom-nav-item ${["budget", "periodClose"].includes(state.activeView) ? "is-active" : ""}" type="button" data-view="budget">
+      <button class="bottom-nav-item ${["budget", "periodClose", "progress"].includes(state.activeView) ? "is-active" : ""}" type="button" data-view="budget">
         <span class="bottom-nav-icon" aria-hidden="true">${renderIcon("plan")}</span>
         <span>Plan</span>
       </button>
@@ -1893,7 +1933,22 @@ function renderBudget(plan) {
       </article>
 
       ${shouldShowPeriodClose(closeReport) ? renderPeriodCloseCard(summary, plan, closeReport) : ""}
-      ${renderPeriodReportCard(summary, plan, closeReport)}
+      <div class="plan-actions plan-history-links">
+        ${
+          shouldShowPeriodClose(closeReport)
+            ? ""
+            : `<button class="plan-action" type="button" data-view="periodClose">
+                <span class="plan-action-icon" aria-hidden="true">${renderIcon("list")}</span>
+                <span><strong>Resumen del periodo</strong><small>Gastos por categoría y reporte para compartir</small></span>
+                <b>&rsaquo;</b>
+              </button>`
+        }
+        <button class="plan-action" type="button" data-view="progress">
+          <span class="plan-action-icon" aria-hidden="true">${renderIcon("trend")}</span>
+          <span><strong>Periodos anteriores</strong><small>Cómo te fue y cómo cambia de un periodo a otro</small></span>
+          <b>&rsaquo;</b>
+        </button>
+      </div>
 
       <div class="plan-actions">
         <button class="plan-action" type="button" data-action="open-extra-sheet">
@@ -2817,16 +2872,13 @@ function renderCalendar() {
   const upcomingEvents = events.filter((event) => event.date >= todayKey() && !event.spent);
   const nextEvent = upcomingEvents[0] || null;
   const nextThirtyTotal = calendarEstimateForDays(30);
-  const reminder = normalizeDailyReminder(state.dailyReminder);
-  const permission = notificationPermissionStatus();
-  const reminderState = reminder.enabled ? "Activo" : "Apagado";
 
   return `
-    <section class="screen-view calendar-view" aria-label="Calendario financiero">
+    <section class="screen-view calendar-view" aria-label="Gastos planeados">
       <div class="screen-title-row">
         <div>
-          <p class="eyebrow">Planes reales</p>
-          <h1>Calendario financiero</h1>
+          <p class="eyebrow">Fechas que traen gastos</p>
+          <h1>Gastos planeados</h1>
         </div>
         <span class="period-chip">${events.length} ${events.length === 1 ? "evento" : "eventos"}</span>
       </div>
@@ -2840,40 +2892,7 @@ function renderCalendar() {
           <span>Siguiente plan</span>
           <strong>${nextEvent ? formatShortDate(nextEvent.date) : "Sin fecha"}</strong>
         </article>
-        <article>
-          <span>Recordatorio</span>
-          <strong>${reminderState} ${reminder.enabled ? reminder.time : ""}</strong>
-        </article>
       </div>
-
-      <article class="calendar-panel reminder-panel">
-        <div class="calendar-panel-heading">
-          <div>
-            <p class="eyebrow">Revisión diaria</p>
-            <h2>Recordatorio de gastos</h2>
-          </div>
-          <span class="metric-badge ${permission === "granted" ? "under" : permission === "denied" ? "danger" : ""}">${notificationStatusLabel(permission)}</span>
-        </div>
-        <form class="calendar-reminder-form" id="daily-reminder-form">
-          <label class="toggle-row">
-            <input name="enabled" type="checkbox" ${reminder.enabled ? "checked" : ""}>
-            <span>
-              <strong>Preguntar cada día</strong>
-              <small>Mensaje: "Quieres registrar tus gastos de hoy?"</small>
-            </span>
-          </label>
-          <label>
-            Hora
-            <input name="time" type="time" value="${escapeAttr(reminder.time)}" required>
-          </label>
-          <button class="btn primary" type="submit">Guardar recordatorio</button>
-        </form>
-        <div class="reminder-actions">
-          <button class="btn secondary" type="button" data-action="request-reminder-permission" ${permission === "granted" ? "disabled" : ""}>Permitir notificaciones</button>
-          <button class="btn ghost" type="button" data-action="send-test-reminder" ${permission === "granted" ? "" : "disabled"}>Probar</button>
-        </div>
-        <p class="data-note">${reminderSupportNote(permission)}</p>
-      </article>
 
       <article class="calendar-panel">
         <div class="calendar-panel-heading">
@@ -3679,6 +3698,12 @@ function renderProfile(plan) {
         <div class="data-metrics three"><div><span>${budgetSummary().extraIncome > 0 ? "Presupuesto + extra" : "Presupuesto"}</span><strong>${formatMoney(budgetSummary().income)}</strong></div><div><span>Podrías apartar</span><strong>${formatMoney(plan.suggestedPeriodSavings)}</strong></div><div><span>Libre después</span><strong>${formatMoney(plan.freeAfterSuggestion)}</strong></div></div>
         <p class="data-note">Es una simulación: no modifica tu presupuesto ni tus saldos.</p>
       </article>
+
+      <article class="data-section settings-section">
+        <div class="data-section-heading"><span class="data-icon">${renderIcon("menu")}</span><div><strong>Ajustes</strong><small>Apariencia y recordatorio diario</small></div></div>
+        ${renderThemeSwitcher()}
+      </article>
+      ${renderDailyReminderPanel()}
 
       <article class="data-section">
         <div class="data-section-heading"><span class="data-icon">${renderIcon("lock")}</span><div><strong>Bloqueo con PIN</strong><small>${lockConfig.enabled ? "Activado. Pedimos tu PIN al abrir la app." : "Pide un PIN de 4 dígitos para abrir la app. No cifra tus datos guardados en el teléfono."}</small></div></div>

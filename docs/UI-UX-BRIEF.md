@@ -121,9 +121,15 @@ Una consideracion importante de lenguaje: actualmente la app usa tanto **campo**
 2. **Plan:** crear y administrar categorias, presupuesto y dinero extra.
 3. **Registrar:** accion central, siempre accesible.
 4. **Movimientos:** historial y correcciones.
-5. **Menu:** Ahorro, Datos y Cerrar sesion.
+5. **Menu:** Ahorro, Gastos planeados y Datos, mas el estado de la copia en la nube.
 
-La navegacion inferior actual muestra Menu, Inicio, Registrar y Plan. Es una buena base, pero conviene evaluar si **Movimientos** merece acceso directo porque revisar y corregir gastos es una tarea frecuente.
+Decisiones tomadas (sept. 2026):
+
+- **Movimientos** tiene acceso directo en la barra inferior.
+- En movil el menu no repite lo que ya esta en la barra inferior (Inicio, Plan, Movimientos, Registrar); en escritorio, donde el menu es la navegacion, si aparecen. Sin numeros 01-07: iconos.
+- **Progreso** y el cierre de periodo se abren desde Plan ("Periodos anteriores", "Resumen del periodo") y mantienen marcada la pestaña Plan.
+- **Datos** reune la configuracion: Apariencia y Recordatorio diario (bloque "Ajustes"), PIN, copias, cuenta (Cerrar sesion, Eliminar cuenta) y la politica de privacidad.
+- El antiguo "Calendario financiero" se llama **Gastos planeados**: el calendario de gastos del dia a dia vive en Movimientos.
 
 ### Navegacion en escritorio
 

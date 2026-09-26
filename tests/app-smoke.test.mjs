@@ -70,10 +70,11 @@ test("every main view renders without throwing", async () => {
     const expected = {
       today: /Tu dinero libre/,
       budget: /Plan/,
-      savings: /Ahorro/,
-      calendar: /Calendario/,
-      movements: /Movimientos/,
+      // Reached from Plan ("Periodos anteriores"), not from the menu.
       progress: /Progreso/,
+      savings: /Ahorro/,
+      calendar: /Gastos planeados/,
+      movements: /Movimientos/,
       profile: /Datos/
     };
     for (const [view, pattern] of Object.entries(expected)) {
@@ -699,6 +700,7 @@ test("the current period is closed automatically, and only finished periods reac
     assert.equal(current.windowStart, `${todayKey().slice(0, 8)}01`);
     assert.equal(current.spent, 25_000);
 
+    await ui.click('[data-view="budget"]');
     await ui.click('[data-view="progress"]');
     assert.match(ui.text(), /Cuando termine tu primer periodo/, "the period in progress must not show as closed");
   } finally {
@@ -709,6 +711,7 @@ test("the current period is closed automatically, and only finished periods reac
   const ended = { ...saved.periodClosures[0], windowStart: "2000-01-01", windowEnd: "2000-02-01", id: "2000-01-01:2000-02-01" };
   const later = await bootApp({ savedState: { ...saved, periodClosures: [ended] } });
   try {
+    await later.click('[data-view="budget"]');
     await later.click('[data-view="progress"]');
     assert.doesNotMatch(later.text(), /Cuando termine tu primer periodo/);
     assert.match(later.text(), /25\.000 gastado/);
@@ -749,6 +752,28 @@ test("'Olvidé mi PIN' without an account explains the only way back in", async 
     assert.equal(ui.$("#lock-forgot-form"), null);
     await ui.click("[data-lock-forgot-back]");
     assert.ok(ui.$("[data-lock-digit]"), "back should return to the keypad");
+  } finally {
+    ui.close();
+  }
+});
+
+// Regression: Progreso lit up no tab at all, and the menu repeated the bottom bar with
+// numbers 01-07 that meant nothing.
+test("navigation: Progreso lives under Plan, and settings live in Datos", async () => {
+  const ui = await bootApp({ savedState: returningUserState() });
+  try {
+    assert.doesNotMatch(ui.$(".sidebar").textContent, /0[1-7]/);
+    assert.equal(ui.$('.sidebar [data-view="progress"]'), null);
+    await ui.click('[data-view="budget"]');
+    await ui.click('[data-view="progress"]');
+    assert.ok(ui.$('.bottom-nav-item.is-active[data-view="budget"]'), "Progreso should keep the Plan tab lit");
+
+    await ui.click('[data-view="profile"]');
+    assert.match(ui.text(), /Ajustes/);
+    assert.ok(ui.$(".settings-section .theme-switcher"));
+    assert.ok(ui.$("#daily-reminder-form"), "the daily reminder moved to Datos");
+    await ui.click('[data-view="calendar"]');
+    assert.equal(ui.$("#daily-reminder-form"), null);
   } finally {
     ui.close();
   }

@@ -10095,3 +10095,70 @@ html .nav-item.is-primary .nav-number {
   gap: 8px;
   justify-content: flex-end;
 }
+
+/* Phones: Inicio, Plan, Movimientos and Registrar are in the bottom bar; the drawer only
+   lists what is not. */
+@media (max-width: 1099px) {
+  .nav-item.is-in-bottom-nav {
+    display: none !important;
+  }
+}
+
+.nav-number svg {
+  width: 20px;
+  height: 20px;
+}
+
+.settings-section .theme-switcher {
+  border: 0;
+  padding-bottom: 0;
+}
+
+.reminder-panel > .btn.secondary {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.plan-history-links {
+  display: grid;
+  gap: 10px;
+}
+
+/* Same empty-track fix for the category cards in Plan. */
+html[data-theme="dark"] .category-card-bar {
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* On phones two category cards side by side cut their text ("Prueba Por / periodo") and
+   one card alone left half the row empty. */
+@media (max-width: 560px) {
+  .plan-category-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Links to past periods are navigation, not the main action of the screen. */
+.plan-history-links .plan-action {
+  border: 1px solid var(--ds-line);
+  background: var(--ds-surface) !important;
+  box-shadow: none !important;
+  color: var(--ds-ink);
+}
+
+.plan-history-links .plan-action-icon {
+  color: var(--ds-primary-strong);
+  background: var(--ds-primary-soft) !important;
+}
+
+.plan-history-links .plan-action strong,
+.plan-history-links .plan-action b {
+  color: var(--ds-ink) !important;
+}
+
+.plan-history-links .plan-action small {
+  color: var(--ds-muted) !important;
+}
+
+.plan-history-links .plan-action-icon {
+  color: var(--ds-primary-strong) !important;
+}

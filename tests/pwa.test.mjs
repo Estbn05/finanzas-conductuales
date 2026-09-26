@@ -64,8 +64,8 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.match(app, /const DEFAULT_VIEW = "today"/);
   assert.ok(app.includes('class="bottom-nav"'));
   assert.ok(app.includes('class="drawer-scrim"'));
-  assert.ok(app.includes('{ id: "calendar", label: "Calendario", icon: "04" }'));
-  assert.ok(app.includes('{ id: "movements", label: "Movimientos", icon: "05" }'));
+  assert.ok(app.includes('{ id: "calendar", label: "Gastos planeados", icon: "calendar" }'));
+  assert.ok(app.includes('{ id: "movements", label: "Movimientos", icon: "receipt", inBottomNav: true }'));
   assert.ok(app.includes('data-action="open-expense"'));
   assert.ok(app.includes('data-action="close-expense"'));
   assert.ok(app.includes('data-action="set-theme"'));
