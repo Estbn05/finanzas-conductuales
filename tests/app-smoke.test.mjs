@@ -579,6 +579,59 @@ test("there is one 'libre': Inicio, the Libre row and Plan all show the same fre
   }
 });
 
+async function setAside(ui, name, amount) {
+  await ui.click('[data-action="open-setaside-sheet"]');
+  const form = ui.$("#setaside-form");
+  form.elements.namedItem("name").value = name;
+  await ui.type(form.elements.namedItem("amount"), String(amount));
+  form.requestSubmit();
+  await settle(ui.window);
+}
+
+// Regression: setting money aside once reserved it again in every later period.
+test("apartar dinero reserves for this period only, and expires with it", async () => {
+  const ui = await bootApp({
+    savedState: returningUserState({ budgetJobs: [{ id: "mercado", name: "Mercado", amount: 200_000, cadence: "period" }] })
+  });
+  let saved;
+  try {
+    await setAside(ui, "Remedios", 50_000);
+    await setAside(ui, "Mercado", 30_000);
+    saved = ui.saved();
+    const remedios = saved.budgetJobs.find((job) => job.name === "Remedios");
+    const mercado = saved.budgetJobs.find((job) => job.id === "mercado");
+    assert.equal(remedios.cadence, "once");
+    assert.equal(mercado.amount, 200_000, "a one-off top-up must not raise the recurring amount");
+    assert.equal(mercado.topUps.length, 1);
+    assert.equal(mercado.topUps[0].amount, 30_000);
+  } finally {
+    ui.close();
+  }
+
+  // Same data, one period later: the one-offs are gone, the name survives for old movements.
+  const lastPeriod = "2000-01-01";
+  const nextPeriod = await bootApp({
+    savedState: {
+      ...saved,
+      budgetJobs: saved.budgetJobs.map((job) => ({
+        ...job,
+        windowStart: job.cadence === "once" ? lastPeriod : job.windowStart,
+        topUps: (job.topUps || []).map((topUp) => ({ ...topUp, windowStart: lastPeriod }))
+      }))
+    }
+  });
+  try {
+    nextPeriod.window.document.querySelector('[data-view="budget"]').click();
+    await settle(nextPeriod.window);
+    const after = nextPeriod.saved();
+    assert.deepEqual(after.budgetJobs.map((job) => job.id), ["mercado"]);
+    assert.deepEqual(after.budgetJobs[0].topUps, []);
+    assert.ok(Object.values(after.retiredCategoryNames).includes("Remedios"));
+  } finally {
+    nextPeriod.close();
+  }
+});
+
 // The boot code (render(), initializeCloudSync()) runs synchronously at module init, so
 // a module-level const/let declared below it is in its temporal dead zone for any boot
 // path that reaches it — this crashed the app three separate times. The smoke tests

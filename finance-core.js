@@ -15,7 +15,9 @@ export const JOB_CADENCES = {
   monthly: { label: "mensual" },
   semester: { label: "semestral" },
   yearly: { label: "anual" },
-  period: { label: "una vez por periodo" }
+  period: { label: "una vez por periodo" },
+  // Set aside once: counts only in the period it was created in (job.windowStart).
+  once: { label: "solo este periodo" }
 };
 
 export function calculatePlan(state, today) {
@@ -103,7 +105,44 @@ export function getPeriodWeeks(profile) {
   return INCOME_CADENCES[getIncomeCadence(profile)].weeks;
 }
 
-export function budgetAmountForJob(job, profile) {
+// What a category reserves in the period starting at `windowStart`. "Apartar dinero" is a
+// one-off: a new name becomes a "once" category, and money set aside onto an existing
+// category is a top-up for this period only. Both used to be added to a recurring
+// "period" amount, so $50.000 set aside once was reserved again in every later period
+// and the savings category grew with every extra income. Without `windowStart` (a form
+// preview, onboarding) the base amount is returned.
+export function budgetAmountForJob(job, profile, windowStart) {
+  const topUps = windowStart
+    ? (job.topUps || [])
+        .filter((topUp) => topUp.windowStart === windowStart)
+        .reduce((sum, topUp) => sum + Number(topUp.amount || 0), 0)
+    : 0;
+  if (job.cadence === "once") {
+    const counts = !windowStart || !job.windowStart || job.windowStart === windowStart;
+    return (counts ? Math.round(Number(job.amount || 0)) : 0) + topUps;
+  }
+  return recurringBudgetAmount(job, profile) + topUps;
+}
+
+// One-off categories and top-ups from earlier periods no longer reserve anything; drop
+// them so they stop cluttering the plan and counting toward the 10-category limit.
+// `retired` keeps each dropped category's name, so older movements still say what they
+// were for instead of "Sin categoría".
+export function pruneExpiredOneOffs(budgetJobs, windowStart) {
+  const retired = [];
+  const kept = [];
+  for (const job of budgetJobs || []) {
+    if (job.cadence === "once" && job.windowStart && job.windowStart !== windowStart) {
+      retired.push({ id: job.id, name: job.name });
+      continue;
+    }
+    const topUps = (job.topUps || []).filter((topUp) => topUp.windowStart === windowStart);
+    kept.push(topUps.length === (job.topUps || []).length ? job : { ...job, topUps });
+  }
+  return { budgetJobs: kept, retired };
+}
+
+function recurringBudgetAmount(job, profile) {
   const amount = Number(job.amount ?? job.budget ?? 0);
   const cadence = job.cadence || "monthly";
   if (cadence === "weekly") {
@@ -129,10 +168,11 @@ export function budgetSummary(state, today) {
   const baseIncome = getPeriodIncome(state.profile);
   const extraIncome = extraIncomeForPeriod(state, today);
   const income = baseIncome + extraIncome;
+  const window = budgetWindow(state.profile, today);
   const jobBudgets = state.budgetJobs.map((job) => ({
     id: job.id,
     isSavings: isSavingsJob(job),
-    budget: budgetAmountForJob(job, state.profile),
+    budget: budgetAmountForJob(job, state.profile, window.start),
     spent: spent[job.id] || 0
   }));
   const reserved = jobBudgets.reduce((sum, job) => sum + job.budget, 0);
@@ -148,7 +188,6 @@ export function budgetSummary(state, today) {
   const freeSpent = spent[FREE_CATEGORY_ID] || 0;
   const totalSpent = Object.values(spent).reduce((sum, amount) => sum + Number(amount || 0), 0);
   const freeImpactSpent = freeSpent + categoryOverspent;
-  const window = budgetWindow(state.profile, today);
   // What is owed on the card is subtracted: that money is already spoken for even while
   // it sits in the account. Otherwise paying by card would not lower free money, and the
   // app would report more than the user has right after spending.
@@ -317,7 +356,7 @@ function freeImpactForPrediction(state, summary, today) {
 
   const categoryOverspent = (state.budgetJobs || []).reduce((sum, job) => {
     const used = spent[job.id] || 0;
-    const budget = budgetAmountForJob(job, state.profile);
+    const budget = budgetAmountForJob(job, state.profile, window.start);
     return sum + Math.max(0, used - budget);
   }, 0);
   const observedFreeSpent = (spent[FREE_CATEGORY_ID] || 0) + categoryOverspent;
@@ -365,9 +404,10 @@ export function extraIncomeForPeriod(state, today) {
 
 export function categoryStatus(state, today) {
   const spent = spendByCategory(state, today);
+  const windowStart = budgetWindow(state.profile, today).start;
   return state.budgetJobs.map((job) => {
     const used = spent[job.id] || 0;
-    const budget = budgetAmountForJob(job, state.profile);
+    const budget = budgetAmountForJob(job, state.profile, windowStart);
     const ratio = budget ? (used / budget) * 100 : 0;
     return {
       id: job.id,

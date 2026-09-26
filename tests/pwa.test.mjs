@@ -1218,16 +1218,11 @@ test("apartar dinero reserves money in plain language without moving real balanc
   assert.ok(sheet.includes("aquí no se mueve dinero de verdad"));
   assert.ok(sheet.includes('type="button" data-setaside-name='));
 
-  // A weekly/monthly category multiplies its amount across the period (budgetAmountForJob),
-  // so a one-off set-aside must never be summed straight onto one — that would reserve
-  // several times what was asked for. Only a "period" category can absorb it directly.
-  const target = app.slice(app.indexOf("function setAsideTarget"), app.indexOf("function handleSetAsideSubmit"));
-  assert.ok(target.includes('if (match.cadence === "period")'));
-  assert.ok(target.includes("`${name} extra`"));
-
+  // A set-aside is for this period only (see setAsideForThisPeriod and the behavior tests
+  // in finance-core.test.mjs / app-smoke.test.mjs).
   const submit = app.slice(app.indexOf("function handleSetAsideSubmit"), app.indexOf("function reduceSavingsAllocation"));
   assert.ok(submit.includes("amount > summary.freeRemaining"));
-  assert.ok(submit.includes('cadence: "period"'));
+  assert.ok(submit.includes("setAsideForThisPeriod("));
   assert.ok(submit.includes("state.budgetJobs.length >= 10"));
 
   // Picking a suggestion chip runs through a direct listener rather than data-action:

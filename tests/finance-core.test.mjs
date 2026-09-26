@@ -4,6 +4,7 @@ import {
   budgetAmountForJob,
   budgetRingAllocation,
   budgetSummary,
+  pruneExpiredOneOffs,
   budgetWindow,
   calculatePlan,
   categoryStatus,
@@ -979,4 +980,40 @@ test("what is owed on the card comes out of the real total", () => {
     "2026-06-10"
   );
   assert.equal(summary.liquidityTotal, 700_000);
+});
+
+// Regression: "Apartar dinero" used to add to a recurring "per period" amount, so money
+// set aside once was reserved again in every later period.
+test("a one-off set-aside reserves only in its own period", () => {
+  const profile = { incomeCadence: "monthly", incomeAmount: 1_000_000, periodStart: "2026-06-01" };
+  const remedios = { id: "remedios", name: "Remedios", amount: 50_000, cadence: "once", windowStart: "2026-06-01" };
+  assert.equal(budgetAmountForJob(remedios, profile, "2026-06-01"), 50_000);
+  assert.equal(budgetAmountForJob(remedios, profile, "2026-07-01"), 0);
+
+  const mercado = {
+    id: "mercado",
+    name: "Mercado",
+    amount: 200_000,
+    cadence: "period",
+    topUps: [{ windowStart: "2026-06-01", amount: 30_000 }]
+  };
+  assert.equal(budgetAmountForJob(mercado, profile, "2026-06-01"), 230_000);
+  assert.equal(budgetAmountForJob(mercado, profile, "2026-07-01"), 200_000, "the top-up leaked into the next period");
+
+  const june = { profile, liquidity: { account: 0, cash: 0 }, budgetJobs: [remedios, mercado], transactions: [], budgetExtras: [] };
+  assert.equal(budgetSummary(june, "2026-06-10").reserved, 280_000);
+  assert.equal(budgetSummary(june, "2026-07-10").reserved, 200_000);
+});
+
+test("expired one-offs are dropped at a new period, keeping their names", () => {
+  const jobs = [
+    { id: "remedios", name: "Remedios", amount: 50_000, cadence: "once", windowStart: "2026-06-01" },
+    { id: "mercado", name: "Mercado", amount: 200_000, cadence: "period", topUps: [{ windowStart: "2026-06-01", amount: 30_000 }] },
+    { id: "viaje", name: "Viaje", amount: 90_000, cadence: "once", windowStart: "2026-07-01" }
+  ];
+  const { budgetJobs, retired } = pruneExpiredOneOffs(jobs, "2026-07-01");
+  assert.deepEqual(budgetJobs.map((job) => job.id), ["mercado", "viaje"]);
+  assert.deepEqual(budgetJobs[0].topUps, []);
+  assert.deepEqual(retired, [{ id: "remedios", name: "Remedios" }]);
+  assert.equal(pruneExpiredOneOffs(jobs, "2026-06-01").budgetJobs[1], jobs[1], "nothing to prune must keep the same objects");
 });

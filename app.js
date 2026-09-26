@@ -3,6 +3,8 @@ import {
   INCOME_CADENCES,
   LARGE_PURCHASE_RATIO,
   budgetAmountForJob as getBudgetAmountForJob,
+  budgetWindow as getBudgetWindow,
+  pruneExpiredOneOffs,
   budgetRingAllocation as getBudgetRingAllocation,
   budgetSummary as getBudgetSummary,
   calculatePlan as calculateFinancePlan,
@@ -2535,7 +2537,7 @@ function categoryIconFor(name) {
 
 function renderBudgetJob(job) {
   const spent = spendByCategory()[job.id] || 0;
-  const budget = getBudgetAmountForJob(job, state.profile);
+  const budget = getBudgetAmountForJob(job, state.profile, budgetSummary().window.start);
   const ratio = budget ? (spent / budget) * 100 : 0;
   const band = ratio > 90 ? "danger" : ratio > 65 ? "warning" : "good";
   const remaining = Math.max(0, budget - spent);
@@ -2548,7 +2550,7 @@ function renderBudgetJob(job) {
           <span class="category-card-icon" aria-hidden="true">${renderIcon(categoryIconFor(job.name))}</span>
           <div>
             <strong>${escapeHtml(job.name)}</strong>
-            <span>${capitalize(cadenceLabel(job.cadence))} · ${formatMoney(job.amount)}</span>
+            <span>${capitalize(cadenceLabel(job.cadence))} · ${formatMoney(job.amount)}${budget > getBudgetAmountForJob(job, state.profile) ? ` + ${formatMoney(budget - getBudgetAmountForJob(job, state.profile))} apartado este periodo` : ""}</span>
           </div>
         </div>
         <button class="category-menu-btn" type="button" data-action="request-remove-job" data-id="${escapeAttr(job.id)}" aria-label="Eliminar ${escapeAttr(job.name)}">&middot;&middot;&middot;</button>
@@ -6836,18 +6838,34 @@ function addTransaction({ merchant, description = "", amount, category, budgeted
 
 function savingsAllocationTarget() {
   const job = findSavingsJob();
-  if (!job) {
-    return { job: null, label: "Ahorro", createName: "Ahorro" };
-  }
-  if (job.cadence === "period") {
-    return { job, label: job.name, createName: job.name };
-  }
-  return { job: null, label: `${job.name} extra`, createName: `${job.name} extra` };
+  return job ? { job, label: job.name, createName: job.name } : { job: null, label: "Ahorro", createName: "Ahorro" };
 }
 
 function findSavingsJob() {
   const matches = state.budgetJobs.filter(isSavingsJob);
   return matches.find((job) => job.cadence === "period") || matches[0];
+}
+
+// Sets money aside for THIS period only: a top-up on an existing category, or a new
+// "once" category that expires with the period.
+function setAsideForThisPeriod(job, name, amount, updatedAt) {
+  const windowStart = budgetSummary().window.start;
+  if (job) {
+    job.topUps = [...(job.topUps || []), { windowStart, amount }];
+    job.updated_at = updatedAt;
+    return job;
+  }
+  const created = {
+    id: uniqueCategoryId(name),
+    name,
+    amount,
+    cadence: "once",
+    windowStart,
+    topUps: [],
+    updated_at: updatedAt
+  };
+  state.budgetJobs.push(created);
+  return created;
 }
 
 function applySavingsAllocation(amount, updatedAt) {
@@ -6856,21 +6874,7 @@ function applySavingsAllocation(amount, updatedAt) {
   }
 
   const target = savingsAllocationTarget();
-  if (target.job) {
-    target.job.amount = Number(target.job.amount || 0) + amount;
-    target.job.updated_at = updatedAt;
-    return target.job;
-  }
-
-  const job = {
-    id: uniqueCategoryId(target.createName),
-    name: target.createName,
-    amount,
-    cadence: "period",
-    updated_at: updatedAt
-  };
-  state.budgetJobs.push(job);
-  return job;
+  return setAsideForThisPeriod(target.job, target.createName, amount, updatedAt);
 }
 
 // Mirrors savingsAllocationTarget's rule, and for the same reason: a weekly/monthly
@@ -6881,13 +6885,7 @@ function applySavingsAllocation(amount, updatedAt) {
 function setAsideTarget(name) {
   const wanted = String(name).trim().toLowerCase();
   const match = state.budgetJobs.find((job) => String(job.name || "").trim().toLowerCase() === wanted);
-  if (!match) {
-    return { job: null, createName: name };
-  }
-  if (match.cadence === "period") {
-    return { job: match, createName: match.name };
-  }
-  return { job: null, createName: `${name} extra` };
+  return match ? { job: match, createName: match.name } : { job: null, createName: name };
 }
 
 function handleSetAsideSubmit(event) {
@@ -6922,19 +6920,7 @@ function handleSetAsideSubmit(event) {
     return;
   }
 
-  const now = new Date().toISOString();
-  if (target.job) {
-    target.job.amount = Number(target.job.amount || 0) + amount;
-    target.job.updated_at = now;
-  } else {
-    state.budgetJobs.push({
-      id: uniqueCategoryId(target.createName),
-      name: target.createName,
-      amount,
-      cadence: "period",
-      updated_at: now
-    });
-  }
+  setAsideForThisPeriod(target.job, target.createName, amount, new Date().toISOString());
 
   planSheet = "";
   state.lastAlert = `Apartaste ${formatMoney(amount)} para ${target.createName}.`;
@@ -6948,9 +6934,16 @@ function reduceSavingsAllocation(jobId, amount) {
   if (!job) {
     return;
   }
-  job.amount = Math.max(0, Number(job.amount || 0) - amount);
   job.updated_at = new Date().toISOString();
-  if (job.cadence === "period" && job.amount === 0 && /ahorro/i.test(job.name)) {
+  const topUps = job.topUps || [];
+  const index = topUps.findIndex((topUp) => Number(topUp.amount) === Number(amount));
+  if (index >= 0) {
+    job.topUps = topUps.filter((_, position) => position !== index);
+  } else if (job.cadence === "period") {
+    // Saved before one-off set-asides existed: the amount was added to the base.
+    job.amount = Math.max(0, Number(job.amount || 0) - amount);
+  }
+  if (job.cadence === "once" && Number(job.amount || 0) <= 0 && !(job.topUps || []).length) {
     state.budgetJobs = state.budgetJobs.filter((item) => item.id !== jobId);
   }
 }
@@ -7402,12 +7395,26 @@ function liquiditySummary(summary = budgetSummary()) {
 // period's fixed income due? was it already logged or rejected?) is the pure
 // resolvePeriodIncome() in finance-core.js; this only applies its result to `state`.
 function ensurePeriodIncomeApplication() {
+  retireExpiredOneOffs();
   const result = resolvePeriodIncome(state, todayKey());
   state.periodIncomeStatus = result.periodIncomeStatus;
   state.periodIncomeApplied = result.periodIncomeApplied;
   if (result.deposit > 0) {
     adjustLiquidity("account", result.deposit, "ingreso-periodico");
   }
+}
+
+function retireExpiredOneOffs() {
+  const { budgetJobs, retired } = pruneExpiredOneOffs(state.budgetJobs, getBudgetWindow(state.profile, todayKey()).start);
+  if (budgetJobs.length === state.budgetJobs.length && budgetJobs.every((job, index) => job === state.budgetJobs[index])) {
+    return;
+  }
+  state.budgetJobs = budgetJobs;
+  state.retiredCategoryNames = { ...(state.retiredCategoryNames || {}) };
+  retired.forEach(({ id, name }) => {
+    state.retiredCategoryNames[id] = name;
+  });
+  cachedBudgetSummary = null;
 }
 
 function adjustLiquidity(location, delta, reason) {
@@ -7499,7 +7506,7 @@ function categoryName(categoryId) {
   if (categoryId === FREE_CATEGORY_ID) {
     return "Libre / sin clasificar";
   }
-  return state.budgetJobs.find((job) => job.id === categoryId)?.name || "Sin categoría";
+  return state.budgetJobs.find((job) => job.id === categoryId)?.name || state.retiredCategoryNames?.[categoryId] || "Sin categoría";
 }
 
 function activeMerchantRules() {
@@ -7754,7 +7761,8 @@ function cadenceLabel(cadence) {
     monthly: "mensual",
     semester: "semestral",
     yearly: "anual",
-    period: "por periodo"
+    period: "por periodo",
+    once: "solo este periodo"
   };
   return labels[cadence] || labels.monthly;
 }

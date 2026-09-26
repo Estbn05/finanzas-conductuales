@@ -189,6 +189,9 @@ export function normalizeBudgetJobs(jobs) {
     ...job,
     amount: Number(job.amount ?? job.budget ?? 0),
     cadence: JOB_CADENCE_VALUES.includes(job.cadence) ? job.cadence : "monthly",
+    topUps: Array.isArray(job.topUps)
+      ? job.topUps.filter((topUp) => topUp && typeof topUp.windowStart === "string" && Number(topUp.amount) > 0)
+      : [],
     updated_at: job.updated_at || ""
   }));
 }
@@ -468,6 +471,8 @@ export function createDefaultState(today, defaultView) {
     cooldowns: [],
     periodClosures: [],
     merchantRules: [],
+    // Names of one-off categories that expired, by id, so old movements keep their label.
+    retiredCategoryNames: {},
     checkins: [],
     wins: []
   };
@@ -503,6 +508,10 @@ export function migrateState(savedState, today, defaultView) {
     cooldowns: savedState.cooldowns || defaults.cooldowns,
     periodClosures: normalizePeriodClosures(savedState.periodClosures || defaults.periodClosures),
     merchantRules: normalizeMerchantRules(savedState.merchantRules || defaults.merchantRules, savedState.transactions || defaults.transactions),
+    retiredCategoryNames:
+      savedState.retiredCategoryNames && typeof savedState.retiredCategoryNames === "object"
+        ? { ...savedState.retiredCategoryNames }
+        : {},
     checkins: savedState.checkins || defaults.checkins,
     wins: savedState.wins || defaults.wins
   };
