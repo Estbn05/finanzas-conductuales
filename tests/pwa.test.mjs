@@ -174,7 +174,6 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(styles.includes(".savings-hero .trust-tags span"));
   assert.ok(styles.includes("Calendar reminder dark contrast v13"));
   assert.ok(styles.includes(".reminder-panel .metric-badge"));
-  assert.ok(styles.includes(".reminder-actions .btn:disabled"));
   assert.ok(app.includes("function nativeLocalNotifications()"));
   assert.ok(app.includes("function scheduleNativeDailyReminder"));
   assert.ok(app.includes("function initializeNativeNotificationActions"));
@@ -184,8 +183,6 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(app.includes("TEST_REMINDER_NOTIFICATION_ID"));
   assert.ok(app.includes("localNotificationActionPerformed"));
   assert.ok(app.includes("Android mostrará el recordatorio aunque la app no este abierta."));
-  assert.ok(styles.includes("Sidebar ghost button dark contrast v14"));
-  assert.ok(styles.includes("html[data-theme=\"dark\"] .sidebar .menu-tools .btn.ghost"));
   assert.ok(styles.includes("Distribution brand mark v18"));
   assert.ok(styles.includes(".brand-ring-free"));
   assert.ok(styles.includes("--ds-bg: #f7f4ee"));
@@ -1402,8 +1399,6 @@ test("drawer visual system keeps menu contrast in mobile themes", async () => {
   assert.ok(styles.includes("--ledger-glow"));
   assert.match(styles, /\.app-shell\.is-menu-open \.drawer-scrim\s*{[\s\S]*backdrop-filter: blur\(8px\)/);
   assert.match(styles, /\.nav-item:hover,[\s\S]*\.nav-item\.is-active\s*{[\s\S]*color: var\(--ledger-cream\)/);
-  assert.match(styles, /\.menu-tools \.btn\.ghost\s*{[\s\S]*color: rgb\(var\(--rgb-cream-ledger\) \/ 0\.78\)/);
-  assert.match(styles, /Sidebar ghost button dark contrast v14[\s\S]*html\[data-theme="dark"\] \.sidebar \.menu-tools \.btn\.ghost[\s\S]*background: rgb\(var\(--rgb-white\) \/ 0\.07\) !important/);
   assert.match(styles, /Mobile drawer scroll fix v11[\s\S]*\.app-shell\.is-menu-open \.sidebar\s*{[\s\S]*height: 100dvh[\s\S]*touch-action: pan-y/);
   assert.match(styles, /\.app-shell\.is-menu-open \.nav-panel,[\s\S]*\.app-shell\.is-menu-open \.nav-panel\.is-open\s*{[\s\S]*overflow-y: auto;[\s\S]*padding-bottom: calc\(116px \+ env\(safe-area-inset-bottom, 0px\)\)/);
 });

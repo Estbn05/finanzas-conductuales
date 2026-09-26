@@ -23,10 +23,8 @@
   --rgb-mint-soft: 93 210 170;
   --rgb-green: 21 144 111;
   --rgb-green-deep: 11 111 91;
-  --rgb-cream: 255 250 240;
-  --rgb-cream-ledger: 255 247 232;
+  --rgb-cream: 255 247 232;
   --rgb-cream-paper: 255 253 248;
-  --rgb-cream-warm: 255 249 238;
   --rgb-brown: 100 75 38;
   --rgb-brown-soft: 109 86 51;
   --rgb-red: 184 67 60;
@@ -350,11 +348,11 @@ a {
   transform: translateX(-105%);
   transition: transform 280ms cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
-  border-right: 1px solid rgb(var(--rgb-cream-ledger) / 0.12);
+  border-right: 1px solid rgb(var(--rgb-cream) / 0.12);
   color: var(--ds-ink);
   background:
     radial-gradient(circle at 16% 8%, rgba(105, 213, 181, 0.18), transparent 32%),
-    linear-gradient(180deg, #fffaf0 0%, #f7efe2 100%);
+    linear-gradient(180deg, var(--ledger-cream) 0%, #f7efe2 100%);
   box-shadow: 24px 0 54px rgba(64, 50, 31, 0.18);
 }
 
@@ -365,7 +363,7 @@ a {
   grid-template-columns: minmax(0, 1fr) auto;
   padding-bottom: 14px;
   border-bottom: 1px solid var(--line);
-  border-bottom-color: rgb(var(--rgb-cream-ledger) / 0.12);
+  border-bottom-color: rgb(var(--rgb-cream) / 0.12);
   margin-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
 }
 
@@ -384,8 +382,8 @@ a {
   place-items: center;
   border-radius: var(--radius);
   font-weight: 900;
-  border: 1px solid rgb(var(--rgb-cream-ledger) / 0.28);
-  color: #fffaf0 !important;
+  border: 1px solid rgb(var(--rgb-cream) / 0.28);
+  color: var(--ledger-cream) !important;
   border-color: rgba(142, 240, 202, 0.36) !important;
   background:
     radial-gradient(circle at 31% 24%, rgba(181, 255, 224, 0.5), transparent 28%),
@@ -2411,7 +2409,7 @@ input[type="range"] {
   box-shadow: 0 10px 22px rgba(154, 97, 23, 0.08);
   color: var(--ds-ink);
   border-color: #efd9aa;
-  background: linear-gradient(180deg, #fff4dc 0%, #fff9ee 100%);
+  background: linear-gradient(180deg, #fff4dc 0%, var(--ledger-cream) 100%);
 }
 
 .history-row.is-income {
@@ -3210,7 +3208,7 @@ input[type="range"] {
 .metric-badge,
 .event-title-line span {
   border: 1px solid rgb(var(--rgb-white) / 0.58);
-  background: rgb(var(--rgb-cream-warm) / 0.74);
+  background: rgb(var(--rgb-cream) / 0.74);
   box-shadow: inset 0 1px 0 rgb(var(--rgb-white) / 0.7);
   backdrop-filter: blur(10px);
 }
@@ -3229,7 +3227,7 @@ input[type="range"] {
 .actionable-empty {
   border-color: var(--raised-border);
   background:
-    linear-gradient(180deg, rgba(255, 253, 247, 0.94), rgb(var(--rgb-cream-warm) / 0.96)),
+    linear-gradient(180deg, rgba(255, 253, 247, 0.94), rgb(var(--rgb-cream) / 0.96)),
     var(--panel);
   box-shadow: var(--card-shadow);
 }
@@ -3266,11 +3264,11 @@ input[type="range"] {
 
 .plan-action:first-child strong,
 .plan-action:first-child b {
-  color: #fff9ee;
+  color: var(--ledger-cream);
 }
 
 .plan-action:first-child small {
-  color: rgb(var(--rgb-cream-warm) / 0.68);
+  color: rgb(var(--rgb-cream) / 0.68);
 }
 
 .history-sort select,
@@ -3318,14 +3316,14 @@ input[type="range"] {
 .savings-hero > span,
 .savings-fit,
 .trust-tags span {
-  color: rgb(var(--rgb-cream-warm) / 0.72);
+  color: rgb(var(--rgb-cream) / 0.72);
 }
 
 .savings-hero > strong {
   font-size: clamp(2.2rem, 12vw, 3.35rem);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: #fff9ee;
+  color: var(--ledger-cream);
   letter-spacing: -0.055em;
 }
 
@@ -3340,7 +3338,7 @@ input[type="range"] {
 .calendar-summary-grid article:first-child,
 .calendar-panel.reminder-panel {
   background:
-    linear-gradient(180deg, rgba(231, 245, 237, 0.95), rgb(var(--rgb-cream-warm) / 0.96)),
+    linear-gradient(180deg, rgba(231, 245, 237, 0.95), rgb(var(--rgb-cream) / 0.96)),
     var(--panel);
 }
 
@@ -3451,14 +3449,14 @@ input[type="range"] {
   border-radius: 50%;
   font-size: 1.1rem;
   font-weight: 800;
-  border-color: rgb(var(--rgb-cream-ledger) / 0.16);
-  color: rgb(var(--rgb-cream-ledger) / 0.72);
-  background: rgb(var(--rgb-cream-ledger) / 0.06);
+  border-color: rgb(var(--rgb-cream) / 0.16);
+  color: rgb(var(--rgb-cream) / 0.72);
+  background: rgb(var(--rgb-cream) / 0.06);
 }
 
 .drawer-close:hover {
   color: var(--ledger-cream);
-  background: rgb(var(--rgb-cream-ledger) / 0.12);
+  background: rgb(var(--rgb-cream) / 0.12);
 }
 
 .nav-list {
@@ -3480,7 +3478,7 @@ input[type="range"] {
 
 .nav-item.is-primary .nav-number {
   color: #05241f;
-  background: rgb(var(--rgb-cream-ledger) / 0.44);
+  background: rgb(var(--rgb-cream) / 0.44);
 }
 
 .menu-tools {
@@ -3489,19 +3487,6 @@ input[type="range"] {
   border-top: 1px solid rgb(var(--rgb-cream-paper) / 0.18);
   margin-top: auto;
   gap: 10px;
-}
-
-.menu-tools .btn {
-  width: 100%;
-  justify-content: center;
-  min-height: 54px;
-  border-radius: 20px;
-}
-
-.menu-tools .btn.ghost {
-  border-color: rgb(var(--rgb-cream-ledger) / 0.12);
-  color: rgb(var(--rgb-cream-ledger) / 0.78);
-  background: rgb(var(--rgb-cream-ledger) / 0.07);
 }
 
 .money-bar,
@@ -3550,20 +3535,16 @@ input[type="range"] {
 :where(html[data-theme="dark"]) .brand strong,
 :where(html[data-theme="dark"]) .nav-item,
 :where(html[data-theme="dark"]) .nav-item span:last-child {
-  color: rgb(var(--rgb-cream-ledger) / 0.82);
+  color: rgb(var(--rgb-cream) / 0.82);
 }
 
 :where(html[data-theme="dark"]) .brand small {
-  color: rgb(var(--rgb-cream-ledger) / 0.66);
+  color: rgb(var(--rgb-cream) / 0.66);
 }
 
 :where(html[data-theme="dark"]) .nav-item:hover,
 :where(html[data-theme="dark"]) .nav-item.is-active {
   color: var(--ledger-cream);
-}
-
-:where(html[data-theme="dark"]) .menu-tools .btn.primary {
-  color: #06231e;
 }
 
 /* Design system v3: professional finance UI, responsive and accessible */
@@ -3697,7 +3678,7 @@ button:disabled {
 }
 
 .money-bar::before {
-  border: 1px solid rgb(var(--rgb-cream-ledger) / 0.12);
+  border: 1px solid rgb(var(--rgb-cream) / 0.12);
   border-radius: 32px;
   transform: rotate(18deg);
   inset: 12px 16px auto auto;
@@ -4236,7 +4217,7 @@ select[data-invalid="true"] {
   display: grid;
   justify-items: center;
   gap: 5px;
-  color: #fff9ee;
+  color: var(--ledger-cream);
   background:
     radial-gradient(circle at 20% 0%, rgba(244, 204, 117, 0.24), transparent 30%),
     linear-gradient(150deg, var(--plum), #1f2a27 72%);
@@ -4393,7 +4374,7 @@ select[data-invalid="true"] {
 .brand strong {
   line-height: 1.15;
   overflow-wrap: anywhere;
-  color: #fffaf0;
+  color: var(--ledger-cream);
 }
 
 .nav-item {
@@ -5269,7 +5250,7 @@ textarea,
 
 /* `strong` va aqui junto a `small`/`b` a proposito: este bloque repinta el fondo del
    primer .plan-action a un degradado verde CLARO, pero mas arriba
-   `.plan-action:first-child strong` lo dejo en #fff9ee (casi blanco) para el fondo
+   `.plan-action:first-child strong` lo dejo en var(--ledger-cream) (casi blanco) para el fondo
    oscuro anterior. Sin incluirlo, el titulo del boton queda blanco sobre verde claro
    y practicamente no se lee. */
 .plan-action:first-child strong {
@@ -5290,15 +5271,14 @@ textarea,
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(120deg, rgb(var(--rgb-cream-ledger) / 0.055) 0 1px, transparent 1px 34px),
+    linear-gradient(120deg, rgb(var(--rgb-cream) / 0.055) 0 1px, transparent 1px 34px),
     radial-gradient(circle at 18% 92%, rgba(71, 214, 166, 0.16), transparent 26%);
   content: "";
   opacity: 0.28;
 }
 
 .brand strong,
-.brand small,
-.menu-tools .btn.ghost {
+.brand small {
   color: var(--ds-ink);
 }
 
@@ -5317,7 +5297,7 @@ textarea,
   place-items: center;
   font-size: 0.78rem;
   font-weight: 800;
-  border: 1px solid rgb(var(--rgb-cream-ledger) / 0.12);
+  border: 1px solid rgb(var(--rgb-cream) / 0.12);
   box-shadow: inset 0 1px 0 rgb(var(--rgb-white) / 0.08);
   width: 40px;
   height: 40px;
@@ -5347,17 +5327,6 @@ textarea,
      WCAG AA's 4.5:1. Darkened slightly; margin checked against both gradient stops. */
   color: #063229;
   background: linear-gradient(135deg, #a8efd7, #1fb38b);
-}
-
-.menu-tools .btn.primary {
-  /* #0f8f70 end-stop gave dark text only 2.92:1 here — the worst of the primary-button
-     contrast failures. Lightened the dark stop so the gradient stays within a range
-     dark text can read across its whole surface (checked at both stops). */
-  background:
-    radial-gradient(circle at 20% 20%, rgb(var(--rgb-white) / 0.36), transparent 24%),
-    linear-gradient(135deg, #6fe1bb, #3ac29e 70%);
-  box-shadow: 0 16px 34px rgba(15, 143, 112, 0.28);
-  color: #083f35 !important;
 }
 
 .drawer-scrim,
@@ -5394,7 +5363,7 @@ textarea,
   width: 52px;
   height: 52px;
   margin-top: -28px;
-  color: #fffaf0;
+  color: var(--ledger-cream);
   background:
     radial-gradient(circle at 34% 24%, rgb(var(--rgb-white) / 0.38), transparent 28%),
     linear-gradient(145deg, #36c69e, var(--ds-primary-strong));
@@ -5647,8 +5616,7 @@ html[data-theme="dark"] .sidebar {
   box-shadow: 24px 0 54px rgb(var(--rgb-black) / 0.3);
 }
 
-html[data-theme="dark"] .brand strong,
-html[data-theme="dark"] .menu-tools .btn.ghost {
+html[data-theme="dark"] .brand strong {
   color: var(--ds-ink);
 }
 
@@ -5880,34 +5848,6 @@ html[data-theme="dark"] .reminder-panel .metric-badge.danger,
   border-color: rgb(var(--rgb-coral-soft) / 0.24) !important;
   background: rgb(var(--rgb-coral-soft) / 0.14) !important;
   -webkit-text-fill-color: var(--ds-danger) !important;
-}
-
-html[data-theme="dark"] .reminder-actions .btn:disabled,
-#app[data-theme="dark"] .reminder-actions .btn:disabled {
-  color: var(--ds-muted) !important;
-  border-color: rgb(var(--rgb-white) / 0.14) !important;
-  background: rgb(var(--rgb-white) / 0.07) !important;
-  box-shadow: none !important;
-  opacity: 1 !important;
-  -webkit-text-fill-color: var(--ds-muted) !important;
-}
-
-/* Sidebar ghost button dark contrast v14 */
-html[data-theme="dark"] .sidebar .menu-tools .btn.ghost,
-#app[data-theme="dark"] .sidebar .menu-tools .btn.ghost {
-  color: var(--ds-muted) !important;
-  border-color: rgb(var(--rgb-white) / 0.14) !important;
-  background: rgb(var(--rgb-white) / 0.07) !important;
-  box-shadow: none !important;
-  -webkit-text-fill-color: var(--ds-muted) !important;
-}
-
-html[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover,
-#app[data-theme="dark"] .sidebar .menu-tools .btn.ghost:hover {
-  color: var(--ds-ink) !important;
-  border-color: rgb(var(--rgb-mint) / 0.24) !important;
-  background: rgb(var(--rgb-mint) / 0.1) !important;
-  -webkit-text-fill-color: var(--ds-ink) !important;
 }
 
 /* Prediction, period close and merchant rules v28 */
@@ -7711,8 +7651,6 @@ html[data-theme="dark"] .progress-track {
   padding-top: calc(22px + var(--safe-area-inset-top, env(safe-area-inset-top, 0px)));
 }
 
-/* Same for the drawer: its header (app name and close button) sat under the strip. */
-
 /* Light theme: the drawer's close button kept the near-white colors of the old dark-only
    drawer, so it was invisible on cream. */
 html:not([data-theme="dark"]) .drawer-close {
@@ -7894,4 +7832,11 @@ html[data-theme="dark"] .category-card-bar {
 .plan-history-links .plan-action-icon {
   background: var(--ds-primary-soft) !important;
   color: var(--ds-primary-strong) !important;
+}
+
+/* The number inside these boxes is a dark brown chosen for the light cream box; on the
+   dark theme's dark box it was nearly invisible ("Te quedarían...", "Conversión
+   automática", "Debes ahora"). */
+html[data-theme="dark"] .conversion-box strong {
+  color: var(--ds-amber);
 }

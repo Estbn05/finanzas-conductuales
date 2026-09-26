@@ -18,7 +18,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.47";
+} from "./finance-core.js?v=1.1.48";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -60,7 +60,7 @@ import {
   hasMeaningfulLocalData,
   hasUnsyncedLocalEdits,
   uid
-} from "./state-model.js?v=1.1.47";
+} from "./state-model.js?v=1.1.48";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -75,7 +75,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.47";
+} from "./sync-client.js?v=1.1.48";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -5086,7 +5086,9 @@ function bindSetAsidePreview(form) {
     if (preview) {
       preview.innerHTML =
         amount > 0
-          ? `<span>Después de apartar</span><strong>Te quedarían ${formatMoney(Math.max(0, available - amount))} libres</strong><small>Ahora tienes ${formatMoney(available)} libres.</small>`
+          ? exceeds
+            ? `<span>Después de apartar</span><strong>Te pasas por ${formatMoney(amount - available)}</strong><small>Ahora tienes ${formatMoney(available)} libres.</small>`
+            : `<span>Después de apartar</span><strong>Te quedarían ${formatMoney(available - amount)} libres</strong><small>Ahora tienes ${formatMoney(available)} libres.</small>`
           : `<span>Después de apartar</span><strong>Escribe un monto para ver cuánto te queda libre.</strong><small>Ahora tienes ${formatMoney(available)} libres.</small>`;
     }
     if (warning) warning.hidden = !exceeds;
