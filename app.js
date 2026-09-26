@@ -18,7 +18,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.54";
+} from "./finance-core.js?v=1.1.56";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -64,7 +64,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.54";
+} from "./state-model.js?v=1.1.56";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -80,7 +80,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.54";
+} from "./sync-client.js?v=1.1.56";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -268,6 +268,8 @@ const TOUR_STEPS = [
     text: "Ahorro, gastos planeados y Datos: tus saldos, el PIN, las copias y los ajustes. Desde Datos puedes volver a ver esta guía."
   }
 ];
+// The "Reservado en categorías" breakdown on Inicio is open.
+let moneyReservedOpen = false;
 let planSheet = "";
 let pendingJobRemovalId = "";
 let pendingBackupRestoreId = "";
@@ -1810,22 +1812,10 @@ function renderHeader(plan) {
   const summary = budgetSummary();
   const liquidity = liquiditySummary(summary);
   const period = `${formatShortDate(summary.window.start)} - ${formatShortDate(previousDay(summary.window.end))}`;
-  const periodLine =
-    summary.extraIncome > 0
-      ? `<span class="money-split">Total incluye extra: ${periodExtraSourceLabel(summary)}. Base ${formatMoney(summary.baseIncome)} · Total ${formatMoney(summary.income)}</span>`
-      : "";
-  // Once "libre" is computed from the real balance (finance-core.js), showing
-  // "Saldo extra sin usar" again here would just repeat the exact same number under a
-  // different label.
-  const showUnclaimedLiquidity = !summary.usesLiquidityBasedFree && summary.unclaimedLiquidity > 0;
-  // Before payday, fixed-income users (who already have a real balance on file) don't
-  // have this period's money yet: show the expected amount as informational only,
-  // never counted inside "libre".
-  const showPendingIncome = summary.usesLiquidityBasedFree && !summary.incomeApplied && summary.freeBudget > 0;
 
   return `
     ${renderIncomeAppliedBanner()}
-    <header class="money-bar ${summary.overReserved ? "danger" : ""}" role="status" aria-label="Dinero libre sin asignar">
+    <header class="money-bar ${summary.overReserved ? "danger" : ""}" aria-label="Tu dinero libre">
       <div class="money-context"><span>Tu dinero libre</span><span>${period}</span></div>
       <strong>${formatMoney(summary.freeRemaining)}</strong>
       <span class="money-caption">${summary.overReserved ? "Presupuesto sobreasignado" : "Disponible para nuevos gastos"}</span>
@@ -1834,35 +1824,131 @@ function renderHeader(plan) {
           ? `<span class="money-split danger-text">Exceso sobre topes: ${formatMoney(summary.categoryOverspent)}</span>`
           : ""
       }
-      <div class="money-location-list">
-        <div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("account")}</span><span class="money-location-text"><span>Cuenta</span><strong>${formatMoney(liquidity.account)}</strong></span></div>
-        <div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("cash")}</span><span class="money-location-text"><span>Efectivo</span><strong>${formatMoney(liquidity.cash)}</strong></span></div>
-        ${liquidity.credit > 0 ? renderCreditRow(liquidity) : ""}
-        <div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("calculator")}</span><span class="money-location-text"><span>Total real</span><strong>${formatMoney(liquidity.total)}</strong></span></div>
-        ${
-          showUnclaimedLiquidity
-            ? `<div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("calculator")}</span><span class="money-location-text"><span>Saldo extra sin usar</span><strong>${formatMoney(summary.unclaimedLiquidity)}</strong></span></div>`
-            : ""
-        }
-        ${
-          showPendingIncome
-            ? `<div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("calculator")}</span><span class="money-location-text"><span>Por recibir (aún no cuenta como libre)</span><strong>${formatMoney(summary.freeBudget)}</strong></span></div>`
-            : ""
-        }
-      </div>
-      <details class="money-help-toggle">
-        <summary>Por qué libre no es igual a total real</summary>
-        <p class="money-help">${
-          summary.usesLiquidityBasedFree
-            ? `Como tienes un ingreso fijo programado, libre es tu saldo real (cuenta + efectivo) menos lo reservado en categorías — nunca incluye dinero que aún no te ha llegado. El día que te pagan, ese ingreso se suma automáticamente a tu saldo real, y "libre" sube en ese momento, no antes. Total real es cuenta + efectivo ahora mismo, incluyendo lo reservado en categorías.`
-            : `Libre es tu cupo de este periodo menos lo ya gastado sin categoría. Total real es cuenta + efectivo ahora mismo, incluyendo lo que sí está reservado en categorías y cualquier saldo extra que aún no has clasificado.${
-                summary.unclaimedLiquidity > 0
-                  ? ` "Saldo extra sin usar" (${formatMoney(summary.unclaimedLiquidity)}) es dinero real que ya tienes y que ninguna categoría reclama todavía. Si ya sabes que es parte de tu ingreso de este periodo, regístralo como ingreso para que se sume a libre.`
-                  : ""
-              }`
-        }</p>
-      </details>
+      ${summary.usesLiquidityBasedFree ? renderMoneyMathFromBalance(summary, liquidity) : renderMoneyMathFromBudget(summary, liquidity)}
     </header>
+  `;
+}
+
+// The hero card spells out how "libre" is reached, as a subtraction the user can read top
+// to bottom, instead of showing the result next to the ingredients and hiding the piece
+// that joins them (what is still reserved) behind a "why" link nobody remembers to open.
+
+function moneyMathRow(icon, label, amount, extra = "", modifier = "") {
+  return `
+    <div class="money-location-row money-math-row ${modifier}">
+      <span class="money-location-icon" aria-hidden="true">${renderIcon(icon)}</span>
+      <span class="money-location-text">
+        <span>${label}${extra ? `<small>${extra}</small>` : ""}</span>
+        <strong>${amount}</strong>
+      </span>
+    </div>
+  `;
+}
+
+// "− Reservado en categorías": opens to show what each peso is reserved for.
+// `mode` "remaining": what is still left to spend in each category (fixed income, where
+// libre comes from the real balance). "budget": each category's full reserve (variable
+// income, where libre comes from the period's budget).
+function renderReservedBreakdown(mode) {
+  const categories = categoryStatus().filter((category) => category.id !== FREE_CATEGORY_ID);
+  const rows = categories
+    .map((category) => {
+      const budget = Number(category.budget || 0);
+      const spent = Number(category.spent || 0);
+      const counted = mode === "remaining" ? Math.max(0, budget - spent) : budget;
+      return { name: category.name, budget, spent, counted };
+    })
+    .filter((row) => row.counted > 0);
+  const total = rows.reduce((sum, row) => sum + row.counted, 0);
+  if (!rows.length) {
+    return moneyMathRow("tag", "− Reservado", formatMoney(0), "Nada reservado: todo lo que tienes está libre.");
+  }
+  return `
+    <details class="money-math-reserved" ${moneyReservedOpen ? "open" : ""}>
+      <summary class="money-location-row money-math-row">
+        <span class="money-location-icon" aria-hidden="true">${renderIcon("tag")}</span>
+        <span class="money-location-text">
+          <span>− Reservado<small>${rows.length === 1 ? `Para ${escapeHtml(rows[0].name)}` : `En ${rows.length} categorías`} · toca para ver</small></span>
+          <strong>−${formatMoney(total)}</strong>
+        </span>
+        <span class="money-math-chevron" aria-hidden="true">&rsaquo;</span>
+      </summary>
+      <ul class="money-reserved-list">
+        ${rows
+          .map(
+            (row) => `
+          <li>
+            <span>${escapeHtml(row.name)}</span>
+            <span>${
+              mode === "remaining"
+                ? row.spent > 0
+                  ? `quedan ${formatMoney(row.counted)} de ${formatMoney(row.budget)}`
+                  : formatMoney(row.counted)
+                : `${formatMoney(row.budget)}${row.spent > 0 ? ` · usado ${formatMoney(row.spent)}` : ""}`
+            }</span>
+          </li>`
+          )
+          .join("")}
+      </ul>
+      <p class="money-reserved-note">${
+        mode === "remaining"
+          ? "Es lo que todavía te queda por gastar en cada categoría: baja a medida que la usas y no se mueve de tu cuenta."
+          : "Lo que separaste en cada categoría este periodo; no cuenta como libre."
+      }</p>
+    </details>
+  `;
+}
+
+function moneyLocationsLine(liquidity) {
+  return [
+    `Cuenta ${formatMoney(liquidity.account)}`,
+    `Efectivo ${formatMoney(liquidity.cash)}`,
+    liquidity.credit > 0 ? `Tarjeta −${formatMoney(liquidity.credit)}` : ""
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+// Fixed income with a real balance: Tienes − Reservado = Libre.
+function renderMoneyMathFromBalance(summary, liquidity) {
+  const shortfall = Math.max(0, summary.reservedRemaining - liquidity.total);
+  const pending = !summary.incomeApplied && summary.freeBudget > 0;
+  return `
+    <div class="money-location-list money-math">
+      ${moneyMathRow("wallet", "Tienes", formatMoney(liquidity.total), moneyLocationsLine(liquidity))}
+      ${renderReservedBreakdown("remaining")}
+      ${moneyMathRow("calculator", "= Libre", formatMoney(summary.freeRemaining), shortfall > 0 ? `Te faltan ${formatMoney(shortfall)} para cubrir lo reservado.` : "", "is-result")}
+    </div>
+    ${
+      pending
+        ? `<p class="money-math-note">Por recibir: ${formatMoney(summary.freeBudget)}. Se suma a lo que tienes el día que te pagan; antes no cuenta como libre.</p>`
+        : ""
+    }
+  `;
+}
+
+// Variable income: the period's budget − Reservado − what went outside categories = Libre.
+function renderMoneyMathFromBudget(summary, liquidity) {
+  return `
+    <div class="money-location-list money-math">
+      ${moneyMathRow("income", "Presupuesto del periodo", formatMoney(summary.income), summary.extraIncome > 0 ? `Incluye ${formatMoney(summary.extraIncome)} extra` : "")}
+      ${renderReservedBreakdown("budget")}
+      ${
+        summary.freeImpactSpent > 0
+          ? moneyMathRow("receipt", "− Gastado fuera de tus categorías", `−${formatMoney(summary.freeImpactSpent)}`, summary.categoryOverspent > 0 ? `Incluye ${formatMoney(summary.categoryOverspent)} por encima de algún límite` : "")
+          : ""
+      }
+      ${moneyMathRow("calculator", "= Libre", formatMoney(summary.freeRemaining), "", "is-result")}
+    </div>
+    ${
+      liquidity.initialized
+        ? `<p class="money-math-note">Tienes ${formatMoney(liquidity.total)}: ${moneyLocationsLine(liquidity)}.${
+            summary.unclaimedLiquidity > 0
+              ? ` ${formatMoney(summary.unclaimedLiquidity)} de eso no lo reclama ninguna categoría; si es ingreso de este periodo, regístralo para que sume a libre.`
+              : ""
+          }</p>`
+        : ""
+    }
   `;
 }
 
@@ -4736,6 +4822,9 @@ function renderProgress(value, label) {
 function bindEvents() {
   bindMoneyInputs();
   bindDateCaptions();
+  document.querySelector(".money-math-reserved")?.addEventListener("toggle", (event) => {
+    moneyReservedOpen = event.currentTarget.open;
+  });
   animateBudgetRingCharts();
 
   document.querySelectorAll("[data-view]").forEach((button) => {

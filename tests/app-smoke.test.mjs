@@ -506,8 +506,8 @@ test("card: an expense raises what you owe, the statement payment clears it with
     assert.equal(saved.transactions[0].source, "credit");
     assert.equal(saved.liquidity.account, 1_500_000, "a card expense must not touch the account");
     assert.equal(saved.liquidity.credit, 100_000);
-    assert.match(ui.text(), /Tarjeta \(ya lo debes\)/);
-    assert.match(ui.text(), /Total real\s*\$\s?1\.400\.000/);
+    assert.match(ui.text(), /Tienes\s*\$\s?1\.400\.000/);
+    assert.match(ui.text(), /Tarjeta −\$\s?100\.000/);
 
     await ui.click('[data-view="profile"]');
     await ui.click('[data-action="open-credit-payment"]');
@@ -951,6 +951,53 @@ test("the tour skips steps with nothing to show and closes with Escape", async (
     await settle(ui.window);
     assert.equal(ui.$("#app-tour"), null);
     assert.equal(ui.saved().settings.tourDone, true);
+  } finally {
+    ui.close();
+  }
+});
+
+// The hero card spells out how "libre" is reached, so nobody has to remember why it
+// differs from what they have in the account.
+test("Inicio shows libre as Tienes minus what is still reserved, with what each peso is for", async () => {
+  const ui = await bootApp({
+    savedState: {
+      ...fixedIncomeState(),
+      budgetJobs: [
+        { id: "mercado", name: "Mercado", amount: 100_000, cadence: "period" },
+        { id: "remedios", name: "Remedios", amount: 50_000, cadence: "period" }
+      ],
+      transactions: [transaction({ merchant: "D1", amount: 20_000, category: "mercado", labeled: true })],
+      liquidity: { account: 1_000_000, cash: 480_000, initialized: true }
+    }
+  });
+  try {
+    const card = ui.$(".money-bar").textContent.replace(/\s+/g, " ");
+    // 1.480.000 - (80.000 left in Mercado + 50.000 in Remedios) = 1.350.000
+    assert.match(card, /Tienes.*\$ ?1\.480\.000/);
+    assert.match(card, /Cuenta \$ ?1\.000\.000 · Efectivo \$ ?480\.000/);
+    assert.match(card, /Reservado.*−\$ ?130\.000/);
+    assert.match(card, /= Libre.*\$ ?1\.350\.000/);
+    const items = [...ui.window.document.querySelectorAll(".money-reserved-list li")].map((li) => li.textContent.replace(/\s+/g, " ").trim());
+    assert.deepEqual(items, ["Mercado quedan $ 80.000 de $ 100.000", "Remedios $ 50.000"].map((t) => t.replace(/ /g, " ")));
+    assert.doesNotMatch(card, /Por qué libre no es igual/);
+  } finally {
+    ui.close();
+  }
+});
+
+test("with variable income, libre is the period's budget minus reserved and what went outside categories", async () => {
+  const ui = await bootApp({
+    savedState: returningUserState({
+      budgetJobs: [{ id: "mercado", name: "Mercado", amount: 300_000, cadence: "monthly" }],
+      transactions: [transaction({ merchant: "Tienda", amount: 50_000, category: "free" })]
+    })
+  });
+  try {
+    const card = ui.$(".money-bar").textContent.replace(/\s+/g, " ");
+    assert.match(card, /Presupuesto del periodo.*\$ ?2\.000\.000/);
+    assert.match(card, /Reservado.*−\$ ?300\.000/);
+    assert.match(card, /Gastado fuera de tus categorías.*−\$ ?50\.000/);
+    assert.match(card, /= Libre.*\$ ?1\.650\.000/);
   } finally {
     ui.close();
   }

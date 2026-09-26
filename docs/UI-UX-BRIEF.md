@@ -300,7 +300,7 @@ En pantallas anchas conviene mantener visible una barra lateral compacta con las
 **Contenido vigente:**
 
 - Dinero libre del periodo como cifra protagonista.
-- Cuenta, efectivo y total real.
+- Bajo la cifra, la resta que la explica: "Tienes" (cuenta + efectivo − tarjeta) − "Reservado" (lo que aun queda por gastar en cada categoria, desplegable para ver en que) = "Libre". Con ingreso variable: presupuesto del periodo − reservado − gastado fuera de categorias = libre.
 - Lista corta de categorias, ordenadas por porcentaje usado.
 - Acceso a editar limites.
 
@@ -308,7 +308,7 @@ En pantallas anchas conviene mantener visible una barra lateral compacta con las
 
 - Mantener esta pantalla muy compacta.
 - Añadir una frase de contexto temporal: "Periodo del 1 al 30 de junio".
-- Mostrar la diferencia entre "libre" y "total real" con ayuda contextual.
+- ~~Mostrar la diferencia entre "libre" y "total real" con ayuda contextual.~~ Resuelto (sept. 2026): la tarjeta muestra la resta completa en vez de esconder la explicacion detras de un enlace; asi no hay que recordar que se aparto.
 - Dar un estado vacio accionable cuando no hay categorias.
 - No convertir Inicio en un dashboard de todas las funciones.
 
@@ -519,7 +519,7 @@ La base actual verde/teal es apropiada porque comunica estabilidad sin sentirse 
 1. **Actualizar la fuente visual de verdad.** Las capturas y partes del README representan una version anterior con Deudas.
 2. **Unificar vocabulario.** Se mezclan campo, categoria, presupuesto, reservado, libre y saldo real sin una explicacion central.
 3. **Simplificar Datos.** El formulario avanzado es demasiado largo y mezcla datos esenciales con preguntas conductuales.
-4. **Aclarar libre frente a total real.** Son conceptos distintos y pueden parecer contradictorios.
+4. ~~**Aclarar libre frente a total real.**~~ Resuelto: ver 9.4.
 5. **Diseñar escritorio como escritorio.** En pantallas anchas conviene una navegacion lateral persistente.
 6. **Hacer visible la correccion.** Movimientos permite eliminar, pero deberia permitir editar y reclasificar.
 

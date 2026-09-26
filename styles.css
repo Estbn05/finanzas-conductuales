@@ -7999,3 +7999,104 @@ html[data-theme="dark"] .conversion-box strong {
   min-height: 44px;
   padding: 0 16px;
 }
+
+/* Inicio's hero card as a subtraction: Tienes − Reservado = Libre. */
+.money-math > * + * {
+  border-top: 1px solid var(--ds-line);
+}
+
+html[data-theme="dark"] .money-math > * + * {
+  border-top-color: rgb(var(--rgb-white) / 0.1);
+}
+
+.money-math-row .money-location-text > span:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.money-math-row small {
+  color: var(--ds-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.money-math-row.is-result .money-location-text > span:first-child {
+  color: var(--ds-ink);
+  font-weight: 800;
+}
+
+.money-math-row.is-result strong {
+  color: var(--ds-primary-strong);
+  font-size: 1rem;
+}
+
+.money-math-reserved > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.money-math-reserved > summary::-webkit-details-marker {
+  display: none;
+}
+
+.money-math-chevron {
+  flex: none;
+  color: var(--ds-muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  transition: transform 160ms ease;
+}
+
+.money-math-reserved[open] .money-math-chevron {
+  transform: rotate(90deg);
+}
+
+.money-reserved-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0 14px 4px 60px;
+  list-style: none;
+}
+
+.money-reserved-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--ds-ink);
+  font-size: 0.8rem;
+}
+
+.money-reserved-list li span:last-child {
+  color: var(--ds-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.money-reserved-note,
+.money-math-note {
+  margin: 0;
+  color: var(--ds-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.money-reserved-note {
+  padding: 8px 14px 12px 60px;
+}
+
+.money-math-note {
+  margin-top: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .money-math-chevron {
+    transition: none;
+  }
+}
+
+.money-math-row strong {
+  flex: none;
+  white-space: nowrap;
+}
