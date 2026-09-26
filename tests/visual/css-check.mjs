@@ -3,7 +3,8 @@
 // value of EVERY CSS property of every element (and its ::before, ::after, ::placeholder)
 // and swaps back, so one page load checks any number of candidates.
 //
-//   node tests/visual/css-check.mjs <candidate.css> [--only <text>]
+//   node tests/visual/css-check.mjs <candidate.css> [--only <text>] [--states]
+//   --states also checks every screen with :hover, :active, :focus and :focus-visible forced.
 //
 // Exit code 1 if the candidate renders anything differently. Also exported for tools
 // that need per-element attribution (see css-important.mjs).
@@ -99,6 +100,7 @@ function installInPage(original) {
     return out;
   };
 
+  const DYNAMIC_STATE = /:(hover|active|focus-visible|focus-within|focus)(?![\w-])/g;
   const FAMILY_EXTRA = {
     inset: ["top", "right", "bottom", "left"],
     gap: ["row-gap", "column-gap"],
@@ -121,8 +123,9 @@ function installInPage(original) {
     } else if (found) {
       return false;
     }
+    const plain = selector.replace(/::?(before|after|placeholder)\b/g, "") || "*";
     try {
-      return el.matches(selector.replace(/::?(before|after|placeholder)\b/g, "") || "*");
+      return el.matches(plain) || el.matches(plain.replace(DYNAMIC_STATE, "") || "*");
     } catch {
       return false;
     }
@@ -136,8 +139,41 @@ function installInPage(original) {
     }
   });
 
+  // Elements a rule with :hover/:active/... is about: the selector up to the compound that
+  // carries the state, with the state removed ("html .btn.ghost:hover span" -> "html .btn.ghost").
+  const markHosts = (state) => {
+    const re = new RegExp(`:${state}(?![\\w-])`);
+    let count = 0;
+    const visit = (rules) => {
+      for (const rule of rules) {
+        if (rule.cssRules && !rule.selectorText) {
+          visit(rule.cssRules);
+          continue;
+        }
+        if (!rule.selectorText) continue;
+        for (const selector of rule.selectorText.split(",")) {
+          const at = selector.search(re);
+          if (at < 0) continue;
+          const host = selector.slice(0, at).replace(DYNAMIC_STATE, "").trim();
+          try {
+            document.querySelectorAll(host || "*").forEach((el) => {
+              if (!el.hasAttribute("data-vis-force")) count += 1;
+              el.setAttribute("data-vis-force", "");
+            });
+          } catch {}
+        }
+      }
+    };
+    visit(style.sheet.cssRules);
+    return count;
+  };
+
   let base = null;
   window.__css = {
+    markHosts,
+    unmarkHosts() {
+      document.querySelectorAll("[data-vis-force]").forEach((el) => el.removeAttribute("data-vis-force"));
+    },
     async init() {
       await settle();
       base = snap();
@@ -171,7 +207,8 @@ function installInPage(original) {
         if (!mediaOk(decl.media)) continue;
         const matches = decl.selectors.some((s) => {
           try {
-            return document.querySelector(s.replace(/::?(before|after|placeholder)\b/g, "") || "*") !== null;
+            const plain = s.replace(/::?(before|after|placeholder)\b/g, "").replace(DYNAMIC_STATE, "") || "*";
+            return document.querySelector(plain) !== null;
           } catch {
             return false;
           }
@@ -185,7 +222,12 @@ function installInPage(original) {
 
 // ------------------------------------------------------------------ node side
 // candidatesFor(scenarioName) -> [{ label, css, decls }]; onResult(name, label, result).
-export async function runChecks({ only = "", candidatesFor, coverageDecls = [], onResult, onCoverage }) {
+// With `states`, every scenario is checked again with each interaction state forced (via
+// the DevTools protocol, as DevTools' ":hov" panel does) on the elements the stylesheet's
+// :hover/:active/... rules target; results are reported as "<scenario>:<state>".
+export const INTERACTION_STATES = ["hover", "active", "focus", "focus-visible"];
+
+export async function runChecks({ only = "", candidatesFor, coverageDecls = [], onResult, onCoverage, states = [], stateViewports }) {
   const original = await readFile(join(root, "styles.css"), "utf8");
   return forEachScenario({ only }, async (page, name) => {
     await page.evaluate(installInPage, original);
@@ -193,10 +235,30 @@ export async function runChecks({ only = "", candidatesFor, coverageDecls = [], 
     if (coverageDecls.length && onCoverage) {
       onCoverage(name, await page.evaluate((decls) => window.__css.coverage(decls), coverageDecls));
     }
-    for (const { label, css, decls = [] } of candidatesFor(name)) {
-      const result = await page.evaluate(([candidate, list]) => window.__css.check(candidate, list), [css, decls]);
-      onResult(name, label, result);
+    const runCandidates = async (label) => {
+      for (const { label: candidateLabel, css, decls = [] } of candidatesFor(name)) {
+        const result = await page.evaluate(([candidate, list]) => window.__css.check(candidate, list), [css, decls]);
+        onResult(label, candidateLabel, result);
+      }
+    };
+    await runCandidates(name);
+    if (!states.length || (stateViewports && !stateViewports.some((v) => name.startsWith(`${v}-`)))) return;
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("DOM.enable");
+    await cdp.send("CSS.enable");
+    for (const state of states) {
+      const marked = await page.evaluate((s) => window.__css.markHosts(s), state);
+      if (!marked) continue;
+      const { root: doc } = await cdp.send("DOM.getDocument", { depth: -1 });
+      const { nodeIds } = await cdp.send("DOM.querySelectorAll", { nodeId: doc.nodeId, selector: "[data-vis-force]" });
+      for (const nodeId of nodeIds) await cdp.send("CSS.forcePseudoState", { nodeId, forcedPseudoClasses: [state] });
+      await page.evaluate(() => window.__css.init());
+      await runCandidates(`${name}:${state}`);
+      for (const nodeId of nodeIds) await cdp.send("CSS.forcePseudoState", { nodeId, forcedPseudoClasses: [] });
+      await page.evaluate(() => window.__css.unmarkHosts());
     }
+    await page.evaluate(() => window.__css.init());
+    await cdp.detach();
   });
 }
 
@@ -207,6 +269,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   let differing = 0;
   const failures = await runChecks({
     only,
+    states: process.argv.includes("--states") ? INTERACTION_STATES : [],
     candidatesFor: () => [{ label: "candidate", css: candidate }],
     onResult(name, _label, result) {
       if (!result.count) return;

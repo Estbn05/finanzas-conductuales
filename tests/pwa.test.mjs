@@ -1235,7 +1235,7 @@ test("apartar dinero reserves money in plain language without moving real balanc
   // declares its green gradient after `.btn:disabled`, so without an explicit override a
   // blocked "Apartar dinero" / "Agregar categoría" renders identically to an enabled one
   // and the tap just silently does nothing.
-  assert.match(styles, /\.btn\.primary:disabled[\s\S]{0,200}background: #d7dad6 !important/);
+  assert.match(styles, /\.btn\.primary:disabled[\s\S]{0,200}background: #d7dad6/);
 
   // The set-aside subtitle is intentionally darker than var(--muted), which only reaches
   // 4.35:1 on this panel — below the 4.5:1 AA floor.
@@ -1257,7 +1257,7 @@ test("every form keeps readable controls in Android PWA themes", async () => {
   assert.ok(styles.includes('input[type="date"]::-webkit-datetime-edit'));
   assert.ok(styles.includes("var(--field-arrow)"));
   assert.ok(styles.includes("input:-webkit-autofill"));
-  assert.match(styles, /\.btn\.ghost\s*{[\s\S]*background: rgba\(255, 255, 255, 0\.06\)/);
+  assert.match(styles, /\.btn\.ghost\s*{[\s\S]*background: rgb\(var\(--rgb-white\) \/ 0\.06\)/);
   assert.match(styles, /\.history-row,[\s\S]*background: var\(--panel\)/);
   assert.equal(styles.includes("background: #fffdf8;"), false);
   assert.match(styles, /\.quick-amount input\[data-money-input="true"\]\s*{[\s\S]*background: transparent !important/);
@@ -1401,9 +1401,9 @@ test("drawer visual system keeps menu contrast in mobile themes", async () => {
   assert.ok(styles.includes("--ledger-deep"));
   assert.ok(styles.includes("--ledger-glow"));
   assert.match(styles, /\.app-shell\.is-menu-open \.drawer-scrim\s*{[\s\S]*backdrop-filter: blur\(8px\)/);
-  assert.match(styles, /\.nav-item:hover,[\s\S]*\.nav-item\.is-active\s*{[\s\S]*color: #fff7e8/);
-  assert.match(styles, /\.menu-tools \.btn\.ghost\s*{[\s\S]*color: rgba\(255, 247, 232, 0\.78\)/);
-  assert.match(styles, /Sidebar ghost button dark contrast v14[\s\S]*html\[data-theme="dark"\] \.sidebar \.menu-tools \.btn\.ghost[\s\S]*background: rgba\(255, 255, 255, 0\.07\) !important/);
+  assert.match(styles, /\.nav-item:hover,[\s\S]*\.nav-item\.is-active\s*{[\s\S]*color: var\(--ledger-cream\)/);
+  assert.match(styles, /\.menu-tools \.btn\.ghost\s*{[\s\S]*color: rgb\(var\(--rgb-cream-ledger\) \/ 0\.78\)/);
+  assert.match(styles, /Sidebar ghost button dark contrast v14[\s\S]*html\[data-theme="dark"\] \.sidebar \.menu-tools \.btn\.ghost[\s\S]*background: rgb\(var\(--rgb-white\) \/ 0\.07\) !important/);
   assert.match(styles, /Mobile drawer scroll fix v11[\s\S]*\.app-shell\.is-menu-open \.sidebar\s*{[\s\S]*height: 100dvh[\s\S]*touch-action: pan-y/);
   assert.match(styles, /\.app-shell\.is-menu-open \.nav-panel,[\s\S]*\.app-shell\.is-menu-open \.nav-panel\.is-open\s*{[\s\S]*overflow-y: auto;[\s\S]*padding-bottom: calc\(116px \+ env\(safe-area-inset-bottom, 0px\)\)/);
 });

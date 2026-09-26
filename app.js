@@ -18,7 +18,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.46";
+} from "./finance-core.js?v=1.1.47";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -60,7 +60,7 @@ import {
   hasMeaningfulLocalData,
   hasUnsyncedLocalEdits,
   uid
-} from "./state-model.js?v=1.1.46";
+} from "./state-model.js?v=1.1.47";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -75,7 +75,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.46";
+} from "./sync-client.js?v=1.1.47";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";

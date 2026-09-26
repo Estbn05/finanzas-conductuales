@@ -114,7 +114,42 @@ export const SCENARIOS = [
   { name: "onboarding", state: "incomplete", signedIn: false, steps: [] },
   { name: "auth-landing", state: "empty", signedIn: false, steps: [] },
   { name: "auth-signin", state: "empty", signedIn: false, steps: ['[data-action="show-auth-form"][data-auth-mode="signin"]'] },
-  { name: "auth-signup", state: "empty", signedIn: false, steps: ['[data-action="show-auth-form"][data-auth-mode="signup"]'] }
+  { name: "auth-signup", state: "empty", signedIn: false, steps: ['[data-action="show-auth-form"][data-auth-mode="signup"]'] },
+  // States the screens above never show: selections, errors, disabled buttons.
+  {
+    name: "onboarding-filled",
+    state: "incomplete",
+    signedIn: false,
+    steps: [
+      '[data-onboarding-income-type="fixed"]',
+      '[data-onboarding-cadence="biweekly"]',
+      { fill: '#onboarding-form [name="incomeAmount"]', value: "2000000" },
+      "[data-onboarding-next]",
+      { fill: '#onboarding-form [name="account"]', value: "800000" },
+      "[data-onboarding-next]",
+      '[data-onboarding-category-chip][data-category-index="0"]',
+      '[data-onboarding-category-chip][data-category-index="2"]'
+    ]
+  },
+  { name: "onboarding-error", state: "incomplete", signedIn: false, steps: ["[data-onboarding-next]"] },
+  {
+    name: "diagnosis-invalid",
+    steps: ['[data-view="profile"]', '[data-action="open-diagnosis"]', { fill: '#diagnosis-form [name="incomeAmount"]', value: "" }, { submit: "#diagnosis-form" }]
+  },
+  { name: "setaside-too-much", steps: ['[data-action="open-setaside-sheet"]', { fill: '#setaside-form [name="amount"]', value: "99000000" }] },
+  { name: "lock-wrong", lock: true, steps: ['[data-lock-digit="1"]', '[data-lock-digit="2"]', '[data-lock-digit="3"]', '[data-lock-digit="4"]'] },
+  { name: "reminder-denied", notifications: "denied", steps: ['[data-view="profile"]'] },
+  {
+    name: "auth-error",
+    state: "empty",
+    signedIn: false,
+    steps: [
+      '[data-action="show-auth-form"][data-auth-mode="signin"]',
+      { fill: '#cloud-signin-form [name="email"]', value: "visual@example.com" },
+      { fill: '#cloud-signin-form [name="password"]', value: "incorrecta" },
+      { submit: "#cloud-signin-form" }
+    ]
+  }
 ];
 export const THEMES = ["light", "dark"];
 // One width per band of the stylesheet's @media breakpoints that real devices use.
@@ -256,6 +291,11 @@ export async function forEachScenario({ only = "", viewports = VIEWPORTS } = {},
               }
             }, { saved, signedIn, lock: Boolean(scenario.lock) });
             await page.addInitScript((flag) => { window.__VISUAL_SIGNED_IN = flag; }, signedIn);
+            if (scenario.notifications) {
+              await page.addInitScript((permission) => {
+                Object.defineProperty(Notification, "permission", { get: () => permission });
+              }, scenario.notifications);
+            }
             await page.route("**/sync-config.js*", (route) =>
               route.fulfill({ contentType: "text/javascript", body: 'window.FINANZAS_SYNC_CONFIG = { supabaseUrl: "https://stub.supabase.co", supabaseAnonKey: "stub" };' })
             );
@@ -264,14 +304,24 @@ export async function forEachScenario({ only = "", viewports = VIEWPORTS } = {},
             await page.goto(`http://localhost:${PORT}/`);
             await page.waitForFunction(() => document.querySelector("#app")?.children.length > 0, null, { timeout: 10000 });
             await page.waitForTimeout(700);
-            for (const selector of scenario.steps) {
-              const clicked = await page.evaluate((sel) => {
-                const el = document.querySelector(sel);
+            for (const step of scenario.steps) {
+              // A string clicks; { fill, value } types into a field; { submit } submits a form.
+              const done = await page.evaluate((action) => {
+                const selector = typeof action === "string" ? action : action.fill || action.submit;
+                const el = document.querySelector(selector);
                 if (!el) return false;
-                el.click();
+                if (typeof action === "string") {
+                  el.click();
+                } else if (action.fill) {
+                  el.value = action.value;
+                  el.dispatchEvent(new Event("input", { bubbles: true }));
+                  el.dispatchEvent(new Event("change", { bubbles: true }));
+                } else {
+                  el.requestSubmit();
+                }
                 return true;
-              }, selector);
-              if (!clicked) throw new Error(`nothing matches ${selector}`);
+              }, step);
+              if (!done) throw new Error(`nothing matches ${JSON.stringify(step)}`);
               await page.waitForTimeout(250);
             }
             await page.addStyleTag({ content: "*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}" });
