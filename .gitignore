@@ -23,3 +23,6 @@ graphify-out/
 
 # Ajustes personales de Claude Code; lo compartido vive en .claude/settings.json
 .claude/settings.local.json
+
+# Capturas de tests/visual (se regeneran con npm run visual:capture)
+tests/visual/out/

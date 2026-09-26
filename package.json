@@ -1,6 +1,6 @@
 {
   "name": "finanzas-conductuales",
-  "version": "1.1.44",
+  "version": "1.1.45",
   "description": "Aplicacion personal de finanzas basada en principios de economia conductual.",
   "private": true,
   "type": "module",
@@ -8,10 +8,12 @@
     "start": "node server.mjs",
     "build:mobile": "node scripts/build-mobile.mjs",
     "bump": "node scripts/bump-version.mjs",
+    "visual:capture": "node tests/visual/capture.mjs --out",
+    "visual:compare": "node tests/visual/compare.mjs",
     "android:sync": "npm run build:mobile && npx cap sync android",
     "android:apk": "npm run android:sync && cd android && .\\gradlew.bat assembleDebug",
     "android:open": "npm run android:sync && npx cap open android",
-    "check": "node --check app.js && node --check finance-core.js && node --check sync-client.js && node --check server.mjs && node --check tests/finance-core.test.mjs && node --check tests/pwa.test.mjs && node --check tests/sync-client.test.mjs && node --check state-model.js && node --check tests/state-model.test.mjs && node --check tests/app-smoke.test.mjs && node --check tests/app-sync-smoke.test.mjs && node --check tests/app-local-only.test.mjs && node --check tests/theme-tokens.test.mjs && node --check tests/helpers/boot-app.mjs && node --check scripts/bump-version.mjs",
+    "check": "node --check app.js && node --check finance-core.js && node --check sync-client.js && node --check server.mjs && node --check tests/finance-core.test.mjs && node --check tests/pwa.test.mjs && node --check tests/sync-client.test.mjs && node --check state-model.js && node --check tests/state-model.test.mjs && node --check tests/app-smoke.test.mjs && node --check tests/app-sync-smoke.test.mjs && node --check tests/app-local-only.test.mjs && node --check tests/theme-tokens.test.mjs && node --check tests/visual/capture.mjs && node --check tests/visual/compare.mjs && node --check tests/helpers/boot-app.mjs && node --check scripts/bump-version.mjs",
     "test": "node --test",
     "verify": "npm run check && npm test"
   },
@@ -34,6 +36,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^8.4.0",
-    "jsdom": "^29.1.1"
+    "jsdom": "^29.1.1",
+    "playwright-core": "^1.63.0"
   }
 }

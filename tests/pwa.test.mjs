@@ -192,7 +192,6 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.ok(styles.includes(":focus-visible"));
   assert.ok(styles.includes("@media (prefers-reduced-motion: reduce)"));
   assert.ok(styles.includes(".expense-impact-preview"));
-  assert.ok(styles.includes(".money-location-chips"));
   assert.ok(styles.includes("grid-template-columns: repeat(5"));
   assert.ok(styles.includes(".money-context"));
   assert.ok(styles.includes(".category-card-bar"));
@@ -959,7 +958,6 @@ test("authentication gates onboarding and signed-in users can close their sessio
   assert.ok(styles.includes(".auth-benefits"));
   assert.ok(styles.includes(".auth-actions"));
   assert.ok(styles.includes(".auth-choice-actions"));
-  assert.ok(styles.includes(".auth-back"));
   assert.ok(styles.includes(".auth-card"));
   assert.ok(styles.includes(".session-check"));
   assert.equal(styles.includes(".auth-recovery-actions"), false);
@@ -1403,11 +1401,8 @@ test("drawer visual system keeps menu contrast in mobile themes", async () => {
   assert.ok(styles.includes("--ledger-deep"));
   assert.ok(styles.includes("--ledger-glow"));
   assert.match(styles, /\.app-shell\.is-menu-open \.drawer-scrim\s*{[\s\S]*backdrop-filter: blur\(8px\)/);
-  assert.match(styles, /\.sidebar\s*{[\s\S]*linear-gradient\(180deg, #15231f 0%, #0b2c26 58%, #061f1b 100%\)/);
   assert.match(styles, /\.brand strong\s*{[\s\S]*color: #fff7e8/);
-  assert.match(styles, /\.nav-item\s*{[\s\S]*color: rgba\(255, 247, 232, 0\.68\)/);
   assert.match(styles, /\.nav-item:hover,[\s\S]*\.nav-item\.is-active\s*{[\s\S]*color: #fff7e8/);
-  assert.match(styles, /\.nav-item\.is-active \.nav-number\s*{[\s\S]*background: linear-gradient\(145deg, #7ee8c4, #47d6a6\)/);
   assert.match(styles, /\.menu-tools \.btn\.ghost\s*{[\s\S]*color: rgba\(255, 247, 232, 0\.78\)/);
   assert.match(styles, /Sidebar ghost button dark contrast v14[\s\S]*html\[data-theme="dark"\] \.sidebar \.menu-tools \.btn\.ghost[\s\S]*background: rgba\(255, 255, 255, 0\.07\) !important/);
   assert.match(styles, /Mobile drawer scroll fix v11[\s\S]*\.app-shell\.is-menu-open \.sidebar\s*{[\s\S]*height: 100dvh[\s\S]*touch-action: pan-y/);
