@@ -8114,3 +8114,110 @@ html[data-theme="dark"] .money-math > * + * {
 .money-detail-note {
   padding-top: 0;
 }
+
+/* Loading screen (session check, sign-in): the real steps light up one after another.
+   Each step's times come from app.js as --step-on / --step-done, already offset by the
+   time elapsed, so a re-render mid-way picks up where the sequence was. */
+.loading-steps {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.loading-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ds-muted);
+  font-weight: 600;
+  animation: loading-step-on 200ms ease var(--step-on) forwards;
+}
+
+.loading-step-mark {
+  position: relative;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--ds-line-strong);
+  border-radius: 50%;
+}
+
+.loading-step-spin,
+.loading-step-check {
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  opacity: 0;
+}
+
+.loading-step-spin {
+  border: 2px solid transparent;
+  border-top-color: var(--ds-primary);
+  border-right-color: var(--ds-primary);
+  animation:
+    loading-spin 800ms linear infinite,
+    loading-show 1ms linear var(--step-on) forwards,
+    loading-hide 1ms linear var(--step-done, 1000s) forwards;
+}
+
+.loading-step-check {
+  display: grid;
+  place-items: center;
+  background: var(--ds-primary);
+  color: rgb(var(--rgb-white));
+  transform: scale(0.6);
+  animation: loading-pop 220ms ease var(--step-done) forwards;
+}
+
+.loading-step-check .ui-icon {
+  width: 14px;
+  height: 14px;
+  stroke-width: 3;
+}
+
+@keyframes loading-step-on {
+  to {
+    color: var(--ds-ink);
+  }
+}
+
+@keyframes loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes loading-show {
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes loading-hide {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes loading-pop {
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-step-spin {
+    border-color: var(--ds-primary);
+    animation:
+      loading-show 1ms linear var(--step-on) forwards,
+      loading-hide 1ms linear var(--step-done, 1000s) forwards;
+  }
+
+  .loading-step-check {
+    transform: none;
+    animation-duration: 1ms;
+  }
+}

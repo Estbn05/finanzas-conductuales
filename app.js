@@ -18,7 +18,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.58";
+} from "./finance-core.js?v=1.1.60";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -64,7 +64,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.58";
+} from "./state-model.js?v=1.1.60";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -80,7 +80,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.58";
+} from "./sync-client.js?v=1.1.60";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -118,7 +118,10 @@ const DEFAULT_VIEW = "today";
 const QUICK_EXPENSE_HASH = "registrar-gasto";
 const PERIOD_CLOSE_NOTICE_DAYS = 5;
 const AUTH_STARTUP_TIMEOUT_MS = 8_000;
-const SESSION_CHECK_MANUAL_DELAY_MS = 3_000;
+// The loading screen (session check, sign-in) stays up at least this long, so it reads
+// as a short sequence of steps instead of a flash, and each step lights up this far apart.
+const LOADING_MIN_MS = 1_800;
+const LOADING_STEP_MS = 600;
 const LOCAL_STATE_POLL_DURATION_MS = 1_500;
 // Declared here, before the synchronous render() call further down (which runs
 // immediately at module init and can reach formatMoney/formatDate on the very first
@@ -301,7 +304,12 @@ let cloudState = {
   dirty: false
 };
 let dailyReminderTimer;
-let sessionCheckManualReady = false;
+// When the loading screen appeared (0 = not showing) and why: "startup" or "signin".
+// The first startup screen counts from page load, since index.html's copy was already up.
+let loadingShownSince = 0;
+let loadingReason = "startup";
+let loadingFirstShow = true;
+let loadingHoldTimer = 0;
 let lockConfig = loadLockConfig();
 let lockMode = lockConfig.enabled ? "unlock" : "";
 let lockDigits = "";
@@ -320,12 +328,6 @@ bindAppLock();
 syncHomeWidget();
 initializeWidgetQuickAddDeepLink();
 window.setTimeout(recoverAuthStartup, AUTH_STARTUP_TIMEOUT_MS);
-window.setTimeout(() => {
-  sessionCheckManualReady = true;
-  if (shouldShowSessionCheck()) {
-    render();
-  }
-}, SESSION_CHECK_MANUAL_DELAY_MS);
 (function pollLocalStateUntilStable(deadline) {
   const reloaded = loadState();
   if (JSON.stringify(reloaded) !== JSON.stringify(state)) {
@@ -1435,6 +1437,7 @@ function renderIcon(name) {
     // Two stacked cards: the single-card shape is already the "account" icon.
     card: '<rect x="2.5" y="8" width="15" height="11" rx="2"/><path d="M2.5 11.5h15"/><path d="M6.5 8V6.5A1.5 1.5 0 0 1 8 5h12a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 16h-2.5"/>',
     close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
+    check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     lock: '<rect x="5" y="10.5" width="14" height="9.5" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/><circle cx="12" cy="15" r="1.4" fill="currentColor" stroke="none"/>',
     eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>',
     "eye-off": '<path d="M3 3l18 18"/><path d="M10.6 5.7A9.9 9.9 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a15.6 15.6 0 0 1-3.4 4.2M6.6 6.6C4 8.3 2.5 12 2.5 12S6 18.5 12 18.5a9.6 9.6 0 0 0 3.4-.6"/><path d="M9.9 10a3 3 0 0 0 4.2 4.2"/>'
@@ -1524,10 +1527,28 @@ function cloudStillResolving() {
 }
 
 function shouldShowSessionCheck() {
-  if (!cloudState.sessionReady) {
+  if (!cloudState.sessionReady || (!state.profile.completed && cloudStillResolving())) {
     return true;
   }
-  return !state.profile.completed && cloudStillResolving();
+  return loadingHoldRemaining() > 0;
+}
+
+// The work is done but the loading screen has not been up for LOADING_MIN_MS yet: keep it
+// and come back when it has. There is no manual way out; recoverAuthStartup() still ends a
+// stuck startup check on its own after AUTH_STARTUP_TIMEOUT_MS.
+function loadingHoldRemaining() {
+  if (!loadingShownSince) {
+    return 0;
+  }
+  const left = loadingShownSince + LOADING_MIN_MS - Date.now();
+  if (left <= 0) {
+    loadingShownSince = 0;
+    loadingReason = "startup";
+    return 0;
+  }
+  clearTimeout(loadingHoldTimer);
+  loadingHoldTimer = window.setTimeout(render, left);
+  return left;
 }
 
 function shouldShowAuthGate() {
@@ -1581,13 +1602,35 @@ function profileNeedsOnboarding() {
   return !state.profile.completed && !cloudStillResolving();
 }
 
+// Real steps, in the order the work happens. Each lights up LOADING_STEP_MS after the
+// previous one; the last keeps spinning until the work actually ends. Delays are offset by
+// the time already elapsed, so a re-render mid-way does not restart the sequence.
 function renderSessionCheck() {
+  if (!loadingShownSince) {
+    loadingShownSince = loadingFirstShow && loadingReason === "startup" ? Date.now() - performance.now() : Date.now();
+  }
+  loadingFirstShow = false;
+  const elapsed = Date.now() - loadingShownSince;
+  const signin = loadingReason === "signin";
+  const steps = signin
+    ? ["Verificando tu correo", "Trayendo tus datos de la nube", "Calculando tu dinero libre"]
+    : ["Comprobando tu sesión", "Trayendo tus datos", "Calculando tu dinero libre"];
   return `
-    <main class="session-check" aria-busy="true" aria-live="polite">
-      <section class="startup-fallback-card">
-        <h1>Comprobando tu sesión</h1>
-        <p>Estamos verificando automáticamente si ya tienes una sesión iniciada. Si la red tarda, puedes entrar al acceso y la nube seguirá intentando después.</p>
-        ${sessionCheckManualReady ? `<button class="btn secondary" type="button" data-action="recover-auth">Continuar al acceso</button>` : ""}
+    <main class="session-check" aria-busy="true">
+      <section class="startup-fallback-card loading-card">
+        <h1>${signin ? "Entrando a tu cuenta" : "Preparando todo"}</h1>
+        <ol class="loading-steps">
+          ${steps
+            .map((label, index) => {
+              const on = index * LOADING_STEP_MS - elapsed;
+              const done = index < steps.length - 1 ? (index + 1) * LOADING_STEP_MS - elapsed : null;
+              return `<li class="loading-step" style="--step-on:${on}ms;${done === null ? "" : `--step-done:${done}ms`}"${done === null ? ' data-last="true"' : ""}>
+                <span class="loading-step-mark" aria-hidden="true"><span class="loading-step-spin"></span>${done === null ? "" : `<span class="loading-step-check">${renderIcon("check")}</span>`}</span>
+                <span>${label}</span>
+              </li>`;
+            })
+            .join("")}
+        </ol>
       </section>
     </main>
   `;
@@ -5692,7 +5735,6 @@ function handleAction(event) {
     "copy-period-report",
     "download-period-report",
     "export-movements-csv",
-    "recover-auth",
     "open-diagnosis",
     "close-diagnosis",
     "start-quick-classify",
@@ -5863,7 +5905,6 @@ function handleAction(event) {
     "copy-period-report": copyPeriodReport,
     "download-period-report": downloadPeriodReport,
     "export-movements-csv": downloadMovementsCsv,
-    "recover-auth": recoverAuthStartup,
     "open-diagnosis": () => {
       diagnosisValidation = { field: "", message: "" };
       state.showDiagnosis = true;
@@ -6632,6 +6673,8 @@ async function handleCloudLoginSubmit(event) {
   cloudState.status = "syncing";
   cloudState.sessionReady = false;
   cloudState.error = "";
+  loadingReason = "signin";
+  loadingShownSince = 0;
   render();
 
   const stopWithNotice = (notice) => {
@@ -6686,13 +6729,11 @@ async function handleCloudLoginSubmit(event) {
 
 async function handleCloudSignOut() {
   // Sign out is instantaneous from the user's point of view: drop straight to the
-  // access screen, no "Comprobando tu sesión" detour. That screen (and its impatience
-  // escape hatch, "Continuar al acceso") exists for STARTUP session checks, where
-  // letting the user in while the check is still pending is the right fallback. During
-  // sign-out it was the wrong fallback: cloudState.signedIn was still true while the
-  // save+signOut network calls were in flight, so tapping that same button re-entered
-  // the still-authenticated app for a few seconds before the background work finished
-  // and yanked them back out — exactly the "entra un momento y despues sale" a friend
+  // access screen, no "Comprobando tu sesión" detour. That screen used to have an
+  // impatience escape hatch ("Continuar al acceso"), and during sign-out
+  // cloudState.signedIn was still true while the save+signOut network calls were in
+  // flight, so tapping it re-entered the still-authenticated app for a few seconds
+  // before the background work finished and yanked them back out — exactly the "entra un momento y despues sale" a friend
   // reported. Clearing local session state up front removes the whole window where
   // that could happen; the cloud save/sign-out below is best-effort cleanup after.
   clearTimeout(cloudSaveTimer);

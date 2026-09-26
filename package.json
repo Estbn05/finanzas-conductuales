@@ -1,6 +1,6 @@
 {
   "name": "finanzas-conductuales",
-  "version": "1.1.58",
+  "version": "1.1.60",
   "description": "Aplicacion personal de finanzas basada en principios de economia conductual.",
   "private": true,
   "type": "module",

@@ -33,12 +33,12 @@
       content="App personal de finanzas conductuales con monitoreo diario, presupuesto por periodos y simulador de ahorro."
     >
     <title>Finanzas Conductuales</title>
-    <link rel="manifest" href="manifest.webmanifest?v=1.1.58">
-    <link rel="icon" href="assets/icon.svg?v=1.1.58" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png?v=1.1.58">
-    <link rel="stylesheet" href="styles.css?v=1.1.58">
+    <link rel="manifest" href="manifest.webmanifest?v=1.1.60">
+    <link rel="icon" href="assets/icon.svg?v=1.1.60" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png?v=1.1.60">
+    <link rel="stylesheet" href="styles.css?v=1.1.60">
     <script>
-      const APP_VERSION = "1.1.58";
+      const APP_VERSION = "1.1.60";
       const APP_CACHE_NAME = `finanzas-conductuales-${APP_VERSION}`;
       const hadServiceWorkerController = Boolean(navigator.serviceWorker?.controller);
 
@@ -107,9 +107,14 @@
     <div id="live-alert" class="visually-hidden" role="alert" aria-atomic="true"></div>
     <div id="app" class="app-shell">
       <main class="startup-fallback">
-        <section class="startup-fallback-card">
-          <h1>Comprobando tu sesión</h1>
-          <p>Estamos verificando automáticamente si ya tienes una sesión iniciada.</p>
+        <!-- Same markup app.js's renderSessionCheck() starts with, so nothing jumps when it takes over. -->
+        <section class="startup-fallback-card loading-card">
+          <h1>Preparando todo</h1>
+          <ol class="loading-steps">
+            <li class="loading-step" style="--step-on:0ms;--step-done:600ms"><span class="loading-step-mark" aria-hidden="true"><span class="loading-step-spin"></span><span class="loading-step-check"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span></span><span>Comprobando tu sesión</span></li>
+            <li class="loading-step" style="--step-on:600ms;--step-done:1200ms"><span class="loading-step-mark" aria-hidden="true"><span class="loading-step-spin"></span><span class="loading-step-check"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span></span><span>Trayendo tus datos</span></li>
+            <li class="loading-step" style="--step-on:1200ms"><span class="loading-step-mark" aria-hidden="true"><span class="loading-step-spin"></span></span><span>Calculando tu dinero libre</span></li>
+          </ol>
         </section>
       </main>
     </div>

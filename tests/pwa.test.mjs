@@ -855,7 +855,8 @@ test("authentication gates onboarding and signed-in users can close their sessio
   assert.ok(app.includes("function profileNeedsOnboarding()"));
   assert.ok(app.includes("function cloudStillResolving()"));
   assert.ok(app.includes('cloudState.status === "checking" || cloudState.status === "syncing"'));
-  assert.ok(app.includes("return !state.profile.completed && cloudStillResolving();"));
+  assert.ok(app.includes("if (!cloudState.sessionReady || (!state.profile.completed && cloudStillResolving())) {"));
+  assert.ok(app.includes("return loadingHoldRemaining() > 0;"));
   assert.ok(app.includes("return !state.profile.completed && !cloudStillResolving();"));
   assert.ok(app.includes("const LOCAL_STATE_POLL_DURATION_MS = 1_500;"));
   assert.ok(app.includes("function pollLocalStateUntilStable(deadline)"));
@@ -865,18 +866,18 @@ test("authentication gates onboarding and signed-in users can close their sessio
   assert.ok(app.includes("function renderAuthGate()"));
   assert.ok(app.includes("AUTH_STARTUP_TIMEOUT_MS = 8_000"));
   assert.ok(app.includes("function recoverAuthStartup()"));
-  assert.ok(app.includes('data-action="recover-auth"'));
-  assert.ok(app.includes('"recover-auth": recoverAuthStartup'));
+  // No manual way out of the loading screen: the automatic timeout above ends it.
+  assert.equal(app.includes("recover-auth"), false);
+  assert.ok(app.includes("window.setTimeout(recoverAuthStartup, AUTH_STARTUP_TIMEOUT_MS);"));
   assert.equal(app.includes('data-action="reload-app"'), false);
-  assert.ok(app.includes("if (!cloudState.sessionReady) {"));
   // Offline-first: signedIn=false must not gate the app when local data already
   // proves this device was previously authenticated — only a real sign-out (which
   // wipes local data via clearLocalUserState()) should show the login wall.
   const authGateFn = app.slice(app.indexOf("function shouldShowAuthGate()"), app.indexOf("function profileNeedsOnboarding()"));
   assert.ok(authGateFn.includes("if (!cloudState.sessionReady || cloudState.signedIn) {"));
   assert.ok(authGateFn.includes("return !hasMeaningfulLocalData(state);"));
-  assert.ok(app.includes("Estamos verificando automáticamente si ya tienes una sesión iniciada."));
-  assert.ok(app.includes("Continuar al acceso"));
+  assert.ok(app.includes('"Comprobando tu sesión", "Trayendo tus datos", "Calculando tu dinero libre"'));
+  assert.equal(app.includes("Continuar al acceso</button>"), false);
   assert.equal(app.includes("Estamos cargando tu cuenta y tus datos antes de mostrar el formulario inicial."), false);
   const renderFunction = app.slice(app.indexOf("function render()"), app.indexOf("function renderNavItem"));
   assert.ok(renderFunction.indexOf("if (shouldShowSessionCheck())") < renderFunction.indexOf("if (shouldShowAuthGate())"));
@@ -1001,7 +1002,7 @@ test("static startup fallback retries automatically without manual controls", as
   assert.equal(html.includes("registration.unregister()"), false);
   assert.ok(html.includes("caches.delete(key)"));
   assert.ok(html.includes("Comprobando tu sesión"));
-  assert.ok(html.includes("Estamos verificando automáticamente si ya tienes una sesión iniciada."));
+  assert.ok(html.includes('<ol class="loading-steps">'));
   assert.ok(html.includes("loadScript(`vendor/supabase-2.108.1.min.js?v=${APP_VERSION}`)"));
   assert.ok(html.includes("window.setTimeout(finish, timeoutMs)"));
   assert.equal(html.includes("cdn.jsdelivr.net/npm/@supabase/supabase-js"), false);
