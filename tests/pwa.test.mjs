@@ -214,7 +214,7 @@ test("movements combines expenses and extra income and can sort the full history
   assert.ok(app.includes("function nextMonthStartKey(dateValue = todayKey())"));
   assert.ok(app.includes("function minDateKey(a, b)"));
   assert.ok(app.includes("function maxDateKey(a, b)"));
-  assert.ok(app.includes("const monthStart = monthStartKey(todayKey())"));
+  assert.ok(app.includes("const long = datesInWindow(summary.window.start, summary.window.end).length > 35;"));
   assert.ok(app.includes("if (date < start || date >= end)"));
   assert.ok(app.includes("function weekdayOffset(dateValue)"));
   assert.ok(app.includes("transactionsForSummary(summary).reduce"));
@@ -335,8 +335,8 @@ test("period prediction, period close and merchant rules are exposed in the app 
   assert.ok(app.includes("predictionAmountLabel"));
   assert.ok(app.includes("predictionPaceText"));
   assert.ok(app.includes("function renderPeriodCloseCard"));
-  assert.ok(app.includes('data-action="save-period-close"'));
-  assert.ok(app.includes("function savePeriodClosure"));
+  // Closing is automatic now (see snapshotCurrentPeriod and its smoke test).
+  assert.ok(app.includes("function snapshotCurrentPeriod"));
   assert.ok(stateModel.includes("periodClosures: []"));
   assert.ok(app.includes("normalizePeriodClosures"));
   assert.ok(app.includes("function renderMerchantRulesPanel"));

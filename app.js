@@ -18,7 +18,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.31";
+} from "./finance-core.js?v=1.1.33";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -59,7 +59,7 @@ import {
   decidePushSync,
   hasMeaningfulLocalData,
   uid
-} from "./state-model.js?v=1.1.31";
+} from "./state-model.js?v=1.1.33";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -74,7 +74,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.31";
+} from "./sync-client.js?v=1.1.33";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -191,6 +191,8 @@ let snackbarTimer;
 let nativeNotificationPermission = "";
 // Last style sent to Android for the status bar icons (see syncSystemBarsStyle).
 let systemBarsStyle = "";
+// 0 = the current period in Movimientos, -1 the one before, and so on.
+let movementsPeriodOffset = 0;
 let planSheet = "";
 let pendingJobRemovalId = "";
 let pendingBackupRestoreId = "";
@@ -358,6 +360,7 @@ function saveState(options = {}) {
   }
   state.meta.cloudUserEmail = cloudState.email || state.meta?.cloudUserEmail || "";
   ensurePeriodIncomeApplication();
+  snapshotCurrentPeriod();
   persist(STORAGE_KEY, state);
   scheduleDailyReminder();
   syncHomeWidget();
@@ -1852,7 +1855,6 @@ function renderBudget(plan) {
 }
 
 function renderPeriodCloseCard(summary = budgetSummary(), plan = calculatePlan(), report = periodCloseReport(plan, summary)) {
-  const closedLine = renderPeriodCloseSavedLine(report.closure);
   const freeClass = report.freeFinal < 0 ? "negative" : "";
 
   return `
@@ -1862,7 +1864,6 @@ function renderPeriodCloseCard(summary = budgetSummary(), plan = calculatePlan()
           <p class="eyebrow">Cierre de periodo</p>
           <h2>${report.isFinal ? "Resultado listo para guardar" : "Prepara el próximo plan"}</h2>
         </div>
-        ${closedLine}
       </div>
       <div class="period-close-metrics">
         <div><span>${report.isFinal ? "Libre final" : "Libre si cerrarás hoy"}</span><strong class="${freeClass}">${formatMoney(report.freeFinal)}</strong></div>
@@ -1935,7 +1936,7 @@ function renderPeriodCloseScreen(plan = calculatePlan()) {
       ${renderPeriodReportCard(summary, plan, report)}
 
       <div class="period-close-actions">
-        <button class="btn primary" type="button" data-action="save-period-close">${report.closure ? "Actualizar cierre" : report.isFinal ? "Guardar cierre final" : "Guardar pre-cierre"}</button>
+        <p class="period-close-auto-note">No tienes que guardar nada: cuando termine el periodo, este resumen queda en Progreso.</p>
         <button class="btn ghost" type="button" data-view="budget">Volver al plan</button>
       </div>
     </section>
@@ -2015,13 +2016,6 @@ function renderPeriodReportModal(plan = calculatePlan()) {
       </section>
     </div>
   `;
-}
-
-function renderPeriodCloseSavedLine(closure) {
-  if (!closure) {
-    return "";
-  }
-  return `<span class="period-close-saved">Guardado ${formatShortDate(String(closure.closedAt || "").slice(0, 10) || todayKey())}</span>`;
 }
 
 function periodCloseReport(plan = calculatePlan(), summary = budgetSummary()) {
@@ -3043,17 +3037,55 @@ function renderChoicePills(name, options, selected) {
   `;
 }
 
+// Movimientos used to show only the current period: "how much did I spend on groceries
+// last month?" had no answer inside the app. The period being viewed is the current one
+// shifted back `movementsPeriodOffset` times, using the real period boundaries (months
+// are not all the same length).
+function movementsViewSummary(summary = budgetSummary()) {
+  let window = summary.window;
+  for (let step = 0; step > movementsPeriodOffset; step -= 1) {
+    window = getBudgetWindow(state.profile, previousDay(window.start));
+  }
+  return window === summary.window ? summary : { ...summary, window };
+}
+
+function hasMovementsBefore(dateKey) {
+  return (
+    (state.transactions || []).some((transaction) => String(transaction.date || "").slice(0, 10) < dateKey) ||
+    (state.budgetExtras || []).some((extra) => String(extra.date || "").slice(0, 10) < dateKey)
+  );
+}
+
+function renderMovementsPeriodNav(view) {
+  // The dates are right below, in the calendar's title; this only says where you are.
+  const label =
+    movementsPeriodOffset === 0
+      ? "Este periodo"
+      : movementsPeriodOffset === -1
+        ? "Periodo anterior"
+        : `Hace ${-movementsPeriodOffset} periodos`;
+  const canGoBack = hasMovementsBefore(view.window.start);
+  return `
+    <div class="movements-period-nav">
+      <button type="button" data-action="movements-prev-period" aria-label="Periodo anterior" ${canGoBack ? "" : "disabled"}>&lsaquo;</button>
+      <span>${label}</span>
+      <button type="button" data-action="movements-next-period" aria-label="Periodo siguiente" ${movementsPeriodOffset === 0 ? "disabled" : ""}>&rsaquo;</button>
+    </div>
+  `;
+}
+
 function renderMovements() {
-  const summary = budgetSummary();
+  const summary = movementsViewSummary();
   const movements = movementsForSummary(summary);
   const movementCountLabel = movements.length === 1 ? "movimiento" : "movimientos";
-  const pendingCount = unclassifiedTransactionsForSummary(summary).length;
+  const pendingCount = movementsPeriodOffset === 0 ? unclassifiedTransactionsForSummary(summary).length : 0;
   return `
     <section class="screen-view movements-view" aria-label="Movimientos">
       <div class="screen-title-row movements-heading">
         <div><p class="eyebrow">Historial del periodo</p><h1>Movimientos</h1></div>
         <span class="period-chip">${movements.length} ${movementCountLabel}</span>
       </div>
+      ${renderMovementsPeriodNav(summary)}
       ${
         pendingCount > 0
           ? `<button class="classify-banner" type="button" data-action="start-quick-classify">
@@ -3162,10 +3194,13 @@ function renderExpenseCalendarDay(day, maxDaily) {
 }
 
 function expenseCalendarForSummary(summary = budgetSummary()) {
-  const monthStart = monthStartKey(todayKey());
-  const monthEnd = nextMonthStartKey(monthStart);
-  const start = maxDateKey(summary.window.start, monthStart);
-  const end = minDateKey(summary.window.end, monthEnd);
+  // Whole period, except semester/yearly ones (too long for a grid): those show the month
+  // of the last day that already happened.
+  const long = datesInWindow(summary.window.start, summary.window.end).length > 35;
+  const anchor = minDateKey(todayKey(), previousDay(summary.window.end));
+  const monthStart = monthStartKey(anchor);
+  const start = long ? maxDateKey(summary.window.start, monthStart) : summary.window.start;
+  const end = long ? minDateKey(summary.window.end, nextMonthStartKey(monthStart)) : summary.window.end;
   const totals = transactionsForSummary(summary).reduce((acc, transaction) => {
     const date = String(transaction.date || todayKey()).slice(0, 10);
     if (date < start || date >= end) {
@@ -3643,7 +3678,7 @@ function progressTopExceededCategories(closures, limit = 3) {
 }
 
 function renderProgressView() {
-  const closures = (state.periodClosures || []).slice().sort((a, b) => (a.windowStart < b.windowStart ? 1 : -1));
+  const closures = finishedPeriodClosures();
 
   if (!closures.length) {
     return `
@@ -3652,8 +3687,8 @@ function renderProgressView() {
           <div><p class="eyebrow">Historial entre periodos</p><h1>Progreso</h1></div>
         </div>
         <div class="empty-state actionable-empty">
-          <p>Aún no has cerrado ningún periodo. Cuando guardes tu primer cierre, aquí verás cómo cambia tu resultado con el tiempo.</p>
-          <button class="btn primary" type="button" data-view="periodClose">Ver cierre de periodo</button>
+          <p>Cuando termine tu primer periodo, aquí verás cómo te fue y cómo cambia tu resultado de un periodo a otro. No tienes que hacer nada: se guarda solo.</p>
+          <button class="btn primary" type="button" data-view="periodClose">Ver cómo va este periodo</button>
         </div>
         ${renderBehaviorInsights()}
       </section>
@@ -5039,6 +5074,8 @@ function handleAction(event) {
     "open-expense",
     "toggle-quick-expense-advanced",
     "filter-movements-by-date",
+    "movements-prev-period",
+    "movements-next-period",
     "clear-movements-date-filter",
     "close-expense",
     "show-auth-form",
@@ -5099,6 +5136,14 @@ function handleAction(event) {
       transactionHistoryDate = transactionHistoryDate === date ? "" : date;
     },
     "clear-movements-date-filter": () => {
+      transactionHistoryDate = "";
+    },
+    "movements-prev-period": () => {
+      movementsPeriodOffset -= 1;
+      transactionHistoryDate = "";
+    },
+    "movements-next-period": () => {
+      movementsPeriodOffset = Math.min(0, movementsPeriodOffset + 1);
       transactionHistoryDate = "";
     },
     "show-auth-form": () => {
@@ -5259,7 +5304,6 @@ function handleAction(event) {
       removeBudgetExtra(id);
       editingExtraId = "";
     },
-    "save-period-close": savePeriodClosure,
     "remove-merchant-rule": () => removeMerchantRule(id),
     "request-reminder-permission": requestReminderPermission,
     "send-test-reminder": sendTestReminder,
@@ -6176,7 +6220,33 @@ function removeCalendarEvent(id) {
   state.lastAlert = event ? `${event.title} salio del calendario.` : "Evento eliminado.";
 }
 
-function savePeriodClosure() {
+// The period close used to be saved only by hand, and the final one only on the period's
+// last day: the next day the old period could no longer be closed, so Progreso stayed
+// empty for almost everyone. A snapshot of the current period is now kept up to date on
+// every save; when the period ends, the last one taken while it was current remains as
+// its close. It cannot be rebuilt afterwards (balances and categories move on), which is
+// why it is taken continuously instead.
+function snapshotCurrentPeriod() {
+  if (!state.profile.completed) {
+    return;
+  }
+  const closure = buildPeriodClosure();
+  const others = (state.periodClosures || []).filter((item) => item.id !== closure.id);
+  state.periodClosures = [closure, ...others]
+    .sort((a, b) => (a.windowStart < b.windowStart ? 1 : a.windowStart > b.windowStart ? -1 : 0))
+    .slice(0, 12);
+}
+
+// Periods that already ended; the current one is still in progress.
+function finishedPeriodClosures() {
+  const today = todayKey();
+  return (state.periodClosures || [])
+    .filter((closure) => closure.windowEnd <= today)
+    .slice()
+    .sort((a, b) => (a.windowStart < b.windowStart ? 1 : -1));
+}
+
+function buildPeriodClosure() {
   const summary = budgetSummary();
   const plan = calculatePlan();
   const prediction = periodPrediction();
@@ -6213,15 +6283,7 @@ function savePeriodClosure() {
     incomeCount: movements.filter((movement) => movement.kind === "income").length,
     status: report.status
   };
-  const existingIndex = (state.periodClosures || []).findIndex((item) => item.id === closure.id);
-  state.periodClosures = state.periodClosures || [];
-  if (existingIndex >= 0) {
-    state.periodClosures[existingIndex] = closure;
-  } else {
-    state.periodClosures.unshift(closure);
-  }
-  state.periodClosures = state.periodClosures.slice(0, 12);
-  state.lastAlert = `Cierre guardado: ${formatMoney(closure.freeFinal)} libres y ${closure.exceededCategories.length} excedidos.`;
+  return closure;
 }
 
 function currentPeriodReportText() {
@@ -7649,6 +7711,7 @@ function activateView(view) {
   }
   if (view !== state.activeView) {
     scrollToTop();
+    movementsPeriodOffset = 0;
   }
   state.activeView = view;
   menuOpen = false;

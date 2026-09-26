@@ -9989,3 +9989,34 @@ html .nav-item.is-primary .nav-number {
   color: #063229 !important;
   background: rgba(255, 255, 255, 0.55) !important;
 }
+
+/* Movimientos: move between periods. */
+.movements-period-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 14px;
+  color: var(--ds-muted);
+  font-weight: 600;
+}
+
+.movements-period-nav button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--ds-line-strong);
+  border-radius: 999px;
+  color: var(--ds-ink);
+  background: var(--ds-surface);
+  font: inherit;
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.movements-period-nav button:disabled {
+  opacity: 0.35;
+}
+
+.period-close-auto-note {
+  color: var(--ds-muted);
+}

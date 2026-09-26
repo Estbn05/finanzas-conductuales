@@ -654,6 +654,69 @@ test("switching sections goes back to the top, staying in one does not", async (
   }
 });
 
+function lastMonthDay() {
+  const firstOfMonth = new Date(`${todayKey().slice(0, 8)}01T12:00:00`);
+  firstOfMonth.setDate(0);
+  return firstOfMonth.toISOString().slice(0, 10);
+}
+
+// Regression: Movimientos only showed the current period, so older expenses could not
+// be looked at anywhere in the app.
+test("movimientos can go back to earlier periods and return", async () => {
+  const ui = await bootApp({
+    savedState: returningUserState({ transactions: [transaction({ id: "old", merchant: "Mercado viejo", date: lastMonthDay(), amount: 70_000 })] })
+  });
+  try {
+    await ui.click('[data-view="movements"]');
+    assert.doesNotMatch(ui.text(), /Mercado viejo/);
+    assert.equal(ui.$('[data-action="movements-next-period"]').disabled, true);
+
+    await ui.click('[data-action="movements-prev-period"]');
+    assert.match(ui.text(), /Mercado viejo/);
+    assert.match(ui.text(), /Periodo anterior/);
+    assert.equal(ui.$('[data-action="movements-prev-period"]').disabled, true, "nothing older to show");
+
+    await ui.click('[data-action="movements-next-period"]');
+    assert.doesNotMatch(ui.text(), /Mercado viejo/);
+  } finally {
+    ui.close();
+  }
+});
+
+// Regression: a period could only be closed by hand, and only on its last day, so
+// Progreso stayed empty for almost everyone.
+test("the current period is closed automatically, and only finished periods reach Progreso", async () => {
+  const ui = await bootApp({ savedState: returningUserState() });
+  let saved;
+  try {
+    await ui.click('[data-action="open-expense"]');
+    const form = ui.$("#transaction-form");
+    await ui.type(form.elements.namedItem("amount"), "25000");
+    form.requestSubmit();
+    await settle(ui.window);
+    saved = ui.saved();
+    const [current] = saved.periodClosures;
+    assert.equal(current.windowStart, `${todayKey().slice(0, 8)}01`);
+    assert.equal(current.spent, 25_000);
+
+    await ui.click('[data-view="progress"]');
+    assert.match(ui.text(), /Cuando termine tu primer periodo/, "the period in progress must not show as closed");
+  } finally {
+    ui.close();
+  }
+
+  // Same snapshot, once its period is over.
+  const ended = { ...saved.periodClosures[0], windowStart: "2000-01-01", windowEnd: "2000-02-01", id: "2000-01-01:2000-02-01" };
+  const later = await bootApp({ savedState: { ...saved, periodClosures: [ended] } });
+  try {
+    await later.click('[data-view="progress"]');
+    assert.doesNotMatch(later.text(), /Cuando termine tu primer periodo/);
+    assert.match(later.text(), /25\.000 gastado/);
+  } finally {
+    later.close();
+  }
+});
+
 // The boot code (render(), initializeCloudSync()) runs synchronously at module init, so
 // a module-level const/let declared below it is in its temporal dead zone for any boot
 // path that reaches it — this crashed the app three separate times. The smoke tests
