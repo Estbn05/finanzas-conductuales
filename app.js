@@ -16,7 +16,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.25";
+} from "./finance-core.js?v=1.1.27";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -42,6 +42,7 @@ import {
   normalizeDailyReminder,
   normalizeEventCategory,
   normalizeLiquidity,
+  normalizeIncomeLocation,
   normalizeLocation,
   normalizeMerchantRules,
   normalizePayday,
@@ -56,7 +57,7 @@ import {
   decidePushSync,
   hasMeaningfulLocalData,
   uid
-} from "./state-model.js?v=1.1.25";
+} from "./state-model.js?v=1.1.27";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -71,7 +72,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.25";
+} from "./sync-client.js?v=1.1.27";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -978,6 +979,8 @@ function renderIcon(name) {
     user: '<circle cx="12" cy="8.5" r="3.75"/><path d="M4.5 20c0-3.9 3.36-6.5 7.5-6.5s7.5 2.6 7.5 6.5"/>',
     trend: '<path d="M4 16.5 9.5 11l4 4 6.5-7"/><path d="M15.5 8h4.5v4.5"/>',
     search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.8-4.8"/>',
+    // Two stacked cards: the single-card shape is already the "account" icon.
+    card: '<rect x="2.5" y="8" width="15" height="11" rx="2"/><path d="M2.5 11.5h15"/><path d="M6.5 8V6.5A1.5 1.5 0 0 1 8 5h12a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 16h-2.5"/>',
     lock: '<rect x="5" y="10.5" width="14" height="9.5" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/><circle cx="12" cy="15" r="1.4" fill="currentColor" stroke="none"/>',
     eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>',
     "eye-off": '<path d="M3 3l18 18"/><path d="M10.6 5.7A9.9 9.9 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a15.6 15.6 0 0 1-3.4 4.2M6.6 6.6C4 8.3 2.5 12 2.5 12S6 18.5 12 18.5a9.6 9.6 0 0 0 3.4-.6"/><path d="M9.9 10a3 3 0 0 0 4.2 4.2"/>'
@@ -1341,6 +1344,7 @@ function renderHeader(plan) {
       <div class="money-location-list">
         <div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("account")}</span><span class="money-location-text"><span>Cuenta</span><strong>${formatMoney(liquidity.account)}</strong></span></div>
         <div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("cash")}</span><span class="money-location-text"><span>Efectivo</span><strong>${formatMoney(liquidity.cash)}</strong></span></div>
+        ${liquidity.credit > 0 ? renderCreditRow(liquidity) : ""}
         <div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("calculator")}</span><span class="money-location-text"><span>Total real</span><strong>${formatMoney(liquidity.total)}</strong></span></div>
         ${
           showUnclaimedLiquidity
@@ -2343,6 +2347,47 @@ function renderAddCategoryChoiceSheet() {
 // how much, and what for — where renderBudgetJobForm also asks for a frequency: this
 // reserves once for the current period (cadence "period"), which is what a one-off
 // "aparté esto ahora" actually means. Recurring reserves still go through the full form.
+function renderCreditRow(liquidity) {
+  return `<div class="money-location-row is-owed"><span class="money-location-icon" aria-hidden="true">${renderIcon("card")}</span><span class="money-location-text"><span>Tarjeta (ya lo debes)</span><strong>${liquidity.credit > 0 ? `-${formatMoney(liquidity.credit)}` : formatMoney(0)}</strong></span></div>`;
+}
+
+// Paying the card statement is NOT a new expense: it was recorded when the card was
+// used. Money only moves from the account to what is owed, so the real total does not
+// change. Recording it as an expense would count it twice.
+function renderCreditPaymentSheet() {
+  const liquidity = liquiditySummary();
+  return `
+    <div class="sheet-backdrop" role="presentation" data-action="close-plan-sheet">
+      <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="credit-sheet-title">
+        <div class="sheet-handle"></div>
+        <div class="sheet-heading">
+          <div><p class="eyebrow">Tarjeta</p><h2 id="credit-sheet-title">Registrar pago</h2></div>
+          <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">x</button>
+        </div>
+        <p class="setaside-note">Esto no es un gasto nuevo: ya lo registraste cuando usaste la tarjeta. Aquí solo bajas lo que debes y sale de tu cuenta o efectivo, así que tu total real no cambia.</p>
+        <form class="sheet-form" id="credit-payment-form">
+          <label>
+            ¿Cuánto pagaste?
+            <input name="amount" type="number" min="1000" step="1000" inputmode="numeric" placeholder="$0" required>
+          </label>
+          <div class="conversion-box">
+            <span>Debes ahora</span>
+            <strong>${formatMoney(liquidity.credit)}</strong>
+          </div>
+          <div class="sheet-field">
+            <span class="sheet-label">¿De dónde salió?</span>
+            ${renderChoicePills("source", [
+              { value: "account", label: `Cuenta · ${formatCompactMoney(liquidity.account)}` },
+              { value: "cash", label: `Efectivo · ${formatCompactMoney(liquidity.cash)}` }
+            ], "account")}
+          </div>
+          <button class="btn primary" type="submit">Registrar pago</button>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
 function renderSetAsideSheet() {
   const summary = budgetSummary();
   const reusable = state.budgetJobs.slice(0, 6);
@@ -2402,6 +2447,10 @@ function renderPlanSheet() {
 
   if (planSheet === "setaside") {
     return renderSetAsideSheet();
+  }
+
+  if (planSheet === "credit") {
+    return renderCreditPaymentSheet();
   }
 
   if (planSheet === "category") {
@@ -2864,10 +2913,7 @@ function renderQuickExpensePanel() {
           </div>
           <div class="quick-field">
             <span class="quick-label">Pagado con</span>
-            ${renderChoicePills("source", [
-              { value: "account", label: `Cuenta · ${formatCompactMoney(liquidity.account)}` },
-              { value: "cash", label: `Efectivo · ${formatCompactMoney(liquidity.cash)}` }
-            ], "account")}
+            ${renderChoicePills("source", expenseSourceOptions(liquidity), "account")}
           </div>
           <div class="expense-impact-preview" aria-live="polite">
             <span>Disponible antes de registrar</span>
@@ -2892,6 +2938,24 @@ function renderQuickExpensePanel() {
       </section>
     </div>
   `;
+}
+
+// The card shows what you ALREADY owe, not an available balance: the app does not know
+// the credit limit, and what is useful while recording is how much you have run up.
+function expenseSourceOptions(liquidity = liquiditySummary()) {
+  return [
+    { value: "account", label: `Cuenta · ${formatCompactMoney(liquidity.account)}` },
+    { value: "cash", label: `Efectivo · ${formatCompactMoney(liquidity.cash)}` },
+    { value: "credit", label: liquidity.credit > 0 ? `Tarjeta · debes ${formatCompactMoney(liquidity.credit)}` : "Tarjeta" }
+  ];
+}
+
+function movementSourceIcon(source) {
+  const key = normalizeLocation(source);
+  if (key === "cash") {
+    return "cash";
+  }
+  return key === "credit" ? "card" : "account";
 }
 
 function categoryChoiceOptions() {
@@ -3256,7 +3320,7 @@ function renderTransactionHistory(summary = budgetSummary(), sort = "recent", fi
             const unlabeled = !transaction.labeled || !transaction.category || transaction.category === FREE_CATEGORY_ID;
             return `
               <button class="history-row ${unlabeled ? "is-unclassified" : ""}" type="button" data-action="edit-transaction" data-id="${escapeAttr(transaction.id)}">
-                <span class="movement-type-icon ${normalizeLocation(transaction.source)}" aria-hidden="true">${renderIcon(normalizeLocation(transaction.source) === "cash" ? "cash" : "account")}</span>
+                <span class="movement-type-icon ${normalizeLocation(transaction.source)}" aria-hidden="true">${renderIcon(movementSourceIcon(transaction.source))}</span>
                 <span class="movement-copy">
                   <strong>${escapeHtml(transaction.merchant)}</strong>
                   <small>${transaction.description ? `${escapeHtml(transaction.description)} · ` : ""}${unlabeled ? "Sin clasificar" : escapeHtml(categoryName(transaction.category))} · ${locationLabel(transaction.source)}</small>
@@ -3299,10 +3363,7 @@ function renderTransactionEditor() {
           </div>
           <div class="sheet-field">
             <span class="sheet-label">Pagado con</span>
-            ${renderChoicePills("source", [
-              { value: "account", label: "Cuenta" },
-              { value: "cash", label: "Efectivo" }
-            ], normalizeLocation(transaction.source))}
+            ${renderChoicePills("source", expenseSourceOptions(), normalizeLocation(transaction.source))}
           </div>
           <label class="check-row">
             <input name="oneOff" type="checkbox" ${transaction.oneOff ? "checked" : ""}>
@@ -3402,7 +3463,7 @@ function renderExtraEditor() {
             ${renderChoicePills("location", [
               { value: "account", label: "Cuenta" },
               { value: "cash", label: "Efectivo" }
-            ], normalizeLocation(extra.location))}
+            ], normalizeIncomeLocation(extra.location))}
           </div>
           <label>
             Porcentaje para ahorro
@@ -3466,8 +3527,14 @@ function renderProfile(plan) {
         <div class="money-location-list">
           <div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("account")}</span><span class="money-location-text"><span>Cuenta</span><strong>${formatMoney(liquidity.account)}</strong></span></div>
           <div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("cash")}</span><span class="money-location-text"><span>Efectivo</span><strong>${formatMoney(liquidity.cash)}</strong></span></div>
+          ${renderCreditRow(liquidity)}
           <div class="money-location-row"><span class="money-location-icon" aria-hidden="true">${renderIcon("calculator")}</span><span class="money-location-text"><span>Total real</span><strong>${formatMoney(liquidity.total)}</strong></span></div>
         </div>
+        ${
+          liquidity.credit > 0
+            ? `<button class="btn ghost" type="button" data-action="open-credit-payment">Registrar pago de tarjeta</button>`
+            : `<small class="data-note">Cuando pagues algo con tarjeta, aquí verás cuánto debes y podrás anotar el pago.</small>`
+        }
       </article>
 
       <article class="data-section">
@@ -4025,7 +4092,7 @@ function renderDiagnosisPlanFields() {
 function renderDiagnosisBalancesFields() {
   const profile = state.profile;
   const liquidity = normalizeLiquidity(state.liquidity);
-  const available = liquidity.initialized ? liquidity : { account: 0, cash: 0 };
+  const available = liquidity.initialized ? liquidity : { account: 0, cash: 0, credit: 0 };
   return `
     <label>
       Dinero en cuenta
@@ -4036,6 +4103,11 @@ function renderDiagnosisBalancesFields() {
       Dinero en físico
       <input name="cash" type="number" step="1000" value="${available.cash}" data-allow-negative="true" required ${diagnosisInvalidAttr("cash")}>
       ${renderDiagnosisFieldError("cash")}
+    </label>
+    <label>
+      Lo que debes en la tarjeta
+      <input name="credit" type="number" min="0" step="1000" value="${available.credit}" required ${diagnosisInvalidAttr("credit")}>
+      ${renderDiagnosisFieldError("credit")}
     </label>
     <small class="balance-hint" data-liquidity-match-hint></small>
     <label>
@@ -4177,6 +4249,11 @@ function bindEvents() {
   if (setAsideForm) {
     bindSetAsidePreview(setAsideForm);
     setAsideForm.addEventListener("submit", handleSetAsideSubmit);
+  }
+
+  const creditPaymentForm = document.querySelector("#credit-payment-form");
+  if (creditPaymentForm) {
+    creditPaymentForm.addEventListener("submit", handleCreditPaymentSubmit);
   }
 
   const extraBudgetForm = document.querySelector("#extra-budget-form");
@@ -4692,7 +4769,7 @@ function bindDiagnosisPreview(form) {
     }
     const data = new FormData(form);
     const incomeAmount = numberFrom(data.get("incomeAmount"));
-    const total = (numberValue(data.get("account")) ?? 0) + (numberValue(data.get("cash")) ?? 0);
+    const total = (numberValue(data.get("account")) ?? 0) + (numberValue(data.get("cash")) ?? 0) - numberFrom(data.get("credit"));
     const requireMatch = shouldRequireOpeningBalanceMatch();
     if (!requireMatch) {
       hint.textContent = `Saldo real actual: ${formatMoney(total)}. Puede ser distinto del presupuesto base si ya registraste gastos o dinero extra.`;
@@ -4952,6 +5029,7 @@ function handleAction(event) {
     "open-category-sheet",
     "open-setaside-sheet",
     "open-extra-sheet",
+    "open-credit-payment",
     "close-plan-sheet",
     "request-remove-job",
     "cancel-remove-job",
@@ -5039,6 +5117,12 @@ function handleAction(event) {
         closeQuickExpense();
       }
       planSheet = "extra";
+      menuOpen = false;
+      predictionDetailsOpen = false;
+      periodReportOpen = false;
+    },
+    "open-credit-payment": () => {
+      planSheet = "credit";
       menuOpen = false;
       predictionDetailsOpen = false;
       periodReportOpen = false;
@@ -5332,6 +5416,7 @@ function submitDiagnosisForm(form) {
     state.liquidity = {
       account: numberValue(data.get("account")) ?? 0,
       cash: numberValue(data.get("cash")) ?? 0,
+      credit: numberFrom(data.get("credit")),
       initialized: true,
       updated_at: new Date().toISOString()
     };
@@ -5364,7 +5449,8 @@ function validateDiagnosisForm(form) {
     ["emergencySavings", "El ahorro actual para la simulación no puede estar vacio.", 0],
     // Balances may be negative (an overdraft); they only have to be filled in.
     ["account", "El dinero en cuenta no puede estar vacío.", -Infinity],
-    ["cash", "El dinero en físico no puede estar vacío.", -Infinity]
+    ["cash", "El dinero en físico no puede estar vacío.", -Infinity],
+    ["credit", "Escribe cuánto debes en la tarjeta (0 si nada).", 0]
   ];
 
   if (activeFields.has("name") && !cleanText(data.get("name"), "")) {
@@ -5516,7 +5602,7 @@ function handleExtraBudgetSubmit(event) {
       source: cleanText(data.get("source"), "Dinero extra"),
       amount,
       date: cleanDate(data.get("date"), todayKey()),
-      location: normalizeLocation(data.get("location"))
+      location: normalizeIncomeLocation(data.get("location"))
     },
     allFree ? 0 : numberFrom(data.get("savingsPercent"))
   );
@@ -5665,11 +5751,46 @@ function handleExtraEditSubmit(event) {
     source: cleanText(data.get("source"), "Dinero extra"),
     amount,
     date: cleanDate(data.get("date"), extra.date),
-    location: normalizeLocation(data.get("location")),
+    location: normalizeIncomeLocation(data.get("location")),
     savingsPercent: clamp(numberFrom(data.get("savingsPercent")), 0, 100)
   });
   state.lastAlert = `${extra.source} quedo actualizado y el saldo se ajusto.`;
   editingExtraId = "";
+  saveState();
+  render();
+}
+
+// Paying the card moves money from a real source to what is owed. It creates no
+// transaction: the expense was recorded when the card was used; recording it again would
+// count it twice and charge its category a second time.
+function handleCreditPaymentSubmit(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  const amount = numberFrom(data.get("amount"));
+  const source = normalizeIncomeLocation(data.get("source"));
+  const owed = liquiditySummary().credit;
+
+  if (amount <= 0) {
+    showNoticeSnackbar("El pago debe ser mayor que cero.", { kind: "error" });
+    return;
+  }
+  if (owed <= 0) {
+    showNoticeSnackbar("No tienes nada pendiente en la tarjeta.", { kind: "error" });
+    return;
+  }
+
+  // Paying more than owed clears the card and only takes what was actually owed.
+  const applied = Math.min(amount, owed);
+  adjustLiquidity(source, -applied, "credit-payment");
+  adjustLiquidity("credit", applied, "credit-payment");
+
+  planSheet = "";
+  const overdraft = overdraftNotice(source);
+  state.lastAlert =
+    applied < amount
+      ? `Pagaste ${formatMoney(applied)}, que era todo lo que debías. Tu tarjeta queda en cero.`
+      : `Pago de ${formatMoney(applied)} registrado. Ahora debes ${formatMoney(owed - applied)}.`;
+  showNoticeSnackbar(overdraft ? `${state.lastAlert} ${overdraft}` : state.lastAlert, { renderNow: false });
   saveState();
   render();
 }
@@ -5696,7 +5817,7 @@ function validateTransactionDraft({ amount, category }) {
 function overdraftNotice(source) {
   const liquidity = normalizeLiquidity(state.liquidity);
   const key = normalizeLocation(source);
-  if (!liquidity.initialized || liquidity[key] >= 0) {
+  if (!liquidity.initialized || key === "credit" || liquidity[key] >= 0) {
     return "";
   }
   return `${locationLabel(key)} quedó en ${formatMoney(liquidity[key])}. Si no cuadra, corrige el saldo en Datos.`;
@@ -6596,8 +6717,8 @@ function updateBudgetExtra(extra, next) {
   const window = budgetSummary().window;
   const oldAppliesNow = dateIsInWindow(extra.date, window);
   const nextAppliesNow = dateIsInWindow(next.date, window);
-  const oldLocation = normalizeLocation(extra.location);
-  const nextLocation = normalizeLocation(next.location);
+  const oldLocation = normalizeIncomeLocation(extra.location);
+  const nextLocation = normalizeIncomeLocation(next.location);
   const liquidityDeltas = { account: 0, cash: 0 };
 
   if (oldAppliesNow) {
@@ -7261,13 +7382,15 @@ function liquiditySummary(summary = budgetSummary()) {
     return {
       account: summary.freeRemaining,
       cash: 0,
+      credit: 0,
       total: summary.freeRemaining,
       initialized: false
     };
   }
   return {
     ...liquidity,
-    total: liquidity.account + liquidity.cash
+    // Minus what is owed on the card (see budgetSummary's liquidityTotal).
+    total: liquidity.account + liquidity.cash - liquidity.credit
   };
 }
 
@@ -7295,7 +7418,13 @@ function adjustLiquidity(location, delta, reason) {
   }
 
   const liquidity = normalizeLiquidity(state.liquidity);
-  liquidity[key] += amount;
+  if (key === "credit") {
+    // An expense arrives as a negative delta; on the card it raises what is owed, hence
+    // the flipped sign. Refunding or paying (positive delta) lowers it, never below 0.
+    liquidity.credit = Math.max(0, liquidity.credit - amount);
+  } else {
+    liquidity[key] += amount;
+  }
   liquidity.initialized = true;
   liquidity.updated_at = new Date().toISOString();
   state.liquidity = liquidity;
@@ -7596,7 +7725,11 @@ function positionAfterDigitCount(value, digitCount) {
 // una categoria que el usuario llamara "Gas" recibia el id `gas` y podia heredar
 // $30.000 semanales que nunca escribio.
 function locationLabel(location) {
-  return normalizeLocation(location) === "cash" ? "Efectivo" : "Cuenta";
+  const key = normalizeLocation(location);
+  if (key === "cash") {
+    return "Efectivo";
+  }
+  return key === "credit" ? "Tarjeta" : "Cuenta";
 }
 
 function cadenceLabel(cadence) {

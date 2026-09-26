@@ -149,8 +149,13 @@ export function budgetSummary(state, today) {
   const totalSpent = Object.values(spent).reduce((sum, amount) => sum + Number(amount || 0), 0);
   const freeImpactSpent = freeSpent + categoryOverspent;
   const window = budgetWindow(state.profile, today);
+  // What is owed on the card is subtracted: that money is already spoken for even while
+  // it sits in the account. Otherwise paying by card would not lower free money, and the
+  // app would report more than the user has right after spending.
   const liquidityTotal = state.liquidity?.initialized
-    ? Number(state.liquidity.account || 0) + Number(state.liquidity.cash || 0)
+    ? Number(state.liquidity.account || 0) +
+      Number(state.liquidity.cash || 0) -
+      Math.max(0, Number(state.liquidity.credit || 0))
     : 0;
   // Real money in account/cash that no category currently claims. Purely
   // informational (never summed into freeRemaining below): it's what "Saldo extra

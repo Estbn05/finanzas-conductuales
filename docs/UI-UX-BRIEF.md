@@ -537,6 +537,26 @@ La logica conserva ideas conductuales que hoy no forman parte visible del Inicio
 
 Antes de devolverlas a la interfaz, conviene validar si ayudan al usuario principal o si aumentan complejidad. Pueden funcionar mejor como una seccion opcional de acompañamiento que como tarjetas permanentes del Inicio.
 
+### Gastos mayores que el saldo
+
+Registrar un gasto nunca se bloquea por saldo: la app anota lo que ya paso, no autoriza
+compras. Un sobregiro, plata prestada o un saldo desactualizado son reales, y negarse a
+anotarlos empujaba a falsear el monto. El saldo de Cuenta o Efectivo puede quedar en
+negativo; el aviso va en el snackbar de siempre, sin rojo, con la forma de corregirlo en
+Datos. Lo que si sigue validando el dinero libre son las decisiones (reservar, apartar).
+
+### Tarjeta de credito como forma de pago
+
+Distinto de la seccion de Deudas que se elimino (ver 13): no es una pantalla de
+prestamos ni un plan de pago. Es una tercera fuente al registrar un gasto, junto a
+Cuenta y Efectivo. Un gasto con tarjeta no baja el saldo de la cuenta: sube lo que
+debes, y el "total real" resta eso, asi el dinero libre baja al gastar, que es lo cierto.
+Pagar el extracto mueve plata de la cuenta a la tarjeta sin crear un gasto nuevo, porque
+contarlo dos veces seria el error facil. Un ingreso nunca puede caer en la tarjeta.
+
+En la interfaz: una pastilla mas en "Pagado con", una fila en los saldos de Inicio que
+solo aparece cuando debes algo, y en Datos la fila fija con "Registrar pago de tarjeta".
+
 ## 14. Lo que no debe hacer el rediseño
 
 - No convertir Inicio en un dashboard saturado.

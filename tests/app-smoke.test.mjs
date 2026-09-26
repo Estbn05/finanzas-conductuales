@@ -489,6 +489,62 @@ test("editing balances keeps a negative account negative instead of flipping its
   }
 });
 
+// Paying by card raises what you owe instead of lowering the account; paying the
+// statement moves money from the account to the card without a second expense.
+test("card: an expense raises what you owe, the statement payment clears it without counting twice", async () => {
+  const ui = await bootApp({ savedState: returningUserState() });
+  try {
+    await ui.click('[data-action="open-expense"]');
+    const form = ui.$("#transaction-form");
+    await ui.type(form.elements.namedItem("amount"), "100000");
+    await ui.click('#transaction-form [data-choice-value="credit"]');
+    form.requestSubmit();
+    await settle(ui.window);
+
+    let saved = ui.saved();
+    assert.equal(saved.transactions[0].source, "credit");
+    assert.equal(saved.liquidity.account, 1_500_000, "a card expense must not touch the account");
+    assert.equal(saved.liquidity.credit, 100_000);
+    assert.match(ui.text(), /Tarjeta \(ya lo debes\)/);
+    assert.match(ui.text(), /Total real\s*\$\s?1\.400\.000/);
+
+    await ui.click('[data-view="profile"]');
+    await ui.click('[data-action="open-credit-payment"]');
+    const pay = ui.$("#credit-payment-form");
+    await ui.type(pay.elements.namedItem("amount"), "100000");
+    pay.requestSubmit();
+    await settle(ui.window);
+
+    saved = ui.saved();
+    assert.equal(saved.transactions.length, 1, "paying the card is not a new expense");
+    assert.equal(saved.liquidity.account, 1_400_000);
+    assert.equal(saved.liquidity.credit, 0);
+    assert.match(ui.text(), /Total real\s*\$\s?1\.400\.000/, "paying the card must not change the real total");
+  } finally {
+    ui.close();
+  }
+});
+
+test("card: undoing a card expense lowers what you owe", async () => {
+  const ui = await bootApp({ savedState: returningUserState() });
+  try {
+    await ui.click('[data-action="open-expense"]');
+    const form = ui.$("#transaction-form");
+    await ui.type(form.elements.namedItem("amount"), "40000");
+    await ui.click('#transaction-form [data-choice-value="credit"]');
+    form.requestSubmit();
+    await settle(ui.window);
+    assert.equal(ui.saved().liquidity.credit, 40_000);
+
+    await ui.click('[data-action="undo-snackbar"]');
+    assert.equal(ui.saved().transactions.length, 0);
+    assert.equal(ui.saved().liquidity.credit, 0);
+    assert.equal(ui.saved().liquidity.account, 1_500_000);
+  } finally {
+    ui.close();
+  }
+});
+
 // The boot code (render(), initializeCloudSync()) runs synchronously at module init, so
 // a module-level const/let declared below it is in its temporal dead zone for any boot
 // path that reaches it — this crashed the app three separate times. The smoke tests

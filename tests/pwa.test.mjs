@@ -144,7 +144,7 @@ test("mobile-first shell prioritizes free money and fast expense registration", 
   assert.equal(fullTodayView.includes("Patron dominante"), false);
 
   assert.ok(app.includes('class="bottom-nav-icon plus-icon"'));
-  assert.ok(app.includes('renderIcon(normalizeLocation(transaction.source) === "cash" ? "cash" : "account")'));
+  assert.ok(app.includes("renderIcon(movementSourceIcon(transaction.source))"));
   assert.ok(styles.includes(".bottom-nav"));
   assert.ok(styles.includes(".quick-expense-panel"));
   assert.ok(styles.includes("Design system v3"));
@@ -1347,8 +1347,12 @@ test("savings remains advisory and debt features are removed", async () => {
   assert.ok(app.includes("suggestedPeriodSavings"));
   assert.ok(core.includes("savingsCapacityGap"));
   assert.ok(core.includes("savingsReserved"));
+  // The removed Deudas section (loans, payoff plans) must not come back. Paying by card
+  // is different and allowed: one more source under "Pagado con" and a row in the
+  // balances list, never a view of its own. See docs/UI-UX-BRIEF.md.
   assert.equal(/debt|deuda/i.test(app), false);
   assert.equal(/debt|deuda/i.test(core), false);
+  assert.equal(app.includes('data-view="credit"'), false);
 });
 
 test("mockup system covers progressive plan, correction and special states", async () => {

@@ -966,3 +966,17 @@ test("the period a user onboards in is settled: their typed balance is not toppe
   );
   assert.equal(nextPayday.deposit, 1_200_000);
 });
+
+test("what is owed on the card comes out of the real total", () => {
+  const summary = budgetSummary(
+    {
+      profile: { incomeType: "fixed", incomeCadence: "monthly", incomeAmount: 1_000_000, periodStart: "2026-06-01" },
+      liquidity: { account: 800_000, cash: 50_000, credit: 150_000, initialized: true },
+      budgetJobs: [],
+      transactions: [],
+      budgetExtras: []
+    },
+    "2026-06-10"
+  );
+  assert.equal(summary.liquidityTotal, 700_000);
+});

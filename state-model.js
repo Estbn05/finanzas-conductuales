@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.25";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.27";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
@@ -39,7 +39,7 @@ export const DIAGNOSIS_SECTIONS = {
     icon: "wallet",
     title: "Saldos",
     subtitle: "Dinero disponible hoy",
-    fields: ["account", "cash", "emergencySavings"]
+    fields: ["account", "cash", "credit", "emergencySavings"]
   }
 };
 
@@ -141,7 +141,19 @@ export function csvField(value) {
   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
+// Where an expense can come from. "credit" is not money you have but money you now owe:
+// paying by card raises what you owe instead of lowering the account.
 export function normalizeLocation(value) {
+  if (value === "cash") {
+    return "cash";
+  }
+  return value === "credit" ? "credit" : "account";
+}
+
+// Money coming IN (pay, extra income) can only land in the account or in cash: nobody
+// deposits income onto a credit card. Keeps a stray "credit" from turning income into
+// something owed.
+export function normalizeIncomeLocation(value) {
   return value === "cash" ? "cash" : "account";
 }
 
@@ -369,7 +381,7 @@ export function normalizeBudgetExtras(extras, today) {
     source: cleanText(extra.source || extra.name, "Dinero extra"),
     amount: Number(extra.amount || 0),
     date: cleanDate(extra.date, today),
-    location: normalizeLocation(extra.location),
+    location: normalizeIncomeLocation(extra.location),
     allocation: extra.allocation || null,
     updated_at: extra.updated_at || extra.date || ""
   }));
@@ -381,6 +393,8 @@ export function normalizeLiquidity(liquidity) {
     // something to round up to zero on the next load.
     account: numberValue(liquidity?.account) ?? 0,
     cash: numberValue(liquidity?.cash) ?? 0,
+    // What is owed on the card: never below zero, paying more than owed leaves it at 0.
+    credit: Math.max(0, numberValue(liquidity?.credit) ?? 0),
     initialized: Boolean(liquidity?.initialized),
     updated_at: liquidity?.updated_at || ""
   };

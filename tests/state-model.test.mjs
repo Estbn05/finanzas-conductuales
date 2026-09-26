@@ -8,6 +8,9 @@ import {
   merchantKey,
   csvField,
   merchantRuleMatches,
+  normalizeIncomeLocation,
+  normalizeLiquidity,
+  normalizeLocation,
   normalizeTransactions,
   describeSyncStatus,
   relativeTimeEs,
@@ -190,4 +193,18 @@ test("a 'Libre' movement is never marked as classified when loaded", () => {
   assert.equal(free.labeled, false);
   assert.equal(food.labeled, true);
   assert.equal(none.labeled, false);
+});
+
+test("expenses may come from the card, income never lands on it", () => {
+  assert.equal(normalizeLocation("credit"), "credit");
+  assert.equal(normalizeIncomeLocation("credit"), "account");
+  assert.equal(normalizeIncomeLocation("cash"), "cash");
+});
+
+test("what is owed on the card is never negative; account and cash may be", () => {
+  const liquidity = normalizeLiquidity({ account: -20_000, cash: "5000", credit: -300, initialized: true });
+  assert.equal(liquidity.account, -20_000);
+  assert.equal(liquidity.cash, 5_000);
+  assert.equal(liquidity.credit, 0);
+  assert.equal(normalizeLiquidity({}).credit, 0);
 });
