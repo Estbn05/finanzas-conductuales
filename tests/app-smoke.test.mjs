@@ -357,6 +357,87 @@ test("screen readers hear the expense confirmation without #app being a live reg
   }
 });
 
+// A coffee should take one field: the amount. Merchant is optional.
+test("an expense can be registered with just the amount, and never teaches a merchant rule", async () => {
+  const ui = await bootApp({
+    savedState: returningUserState({ budgetJobs: [{ id: "cafe", name: "Café", amount: 100_000, cadence: "monthly" }] })
+  });
+  try {
+    await ui.click('[data-action="open-expense"]');
+    const form = ui.$("#transaction-form");
+    assert.equal(form.elements.namedItem("merchant").required, false);
+    await ui.type(form.elements.namedItem("amount"), "8000");
+    form.requestSubmit();
+    await settle(ui.window);
+
+    const [saved] = ui.saved().transactions;
+    assert.equal(saved.merchant, "Gasto");
+    assert.equal(saved.amount, 8_000);
+
+    // Classifying that unnamed expense must not make "gasto" suggest Café from now on.
+    await ui.click('[data-view="movements"]');
+    await ui.click('[data-action="start-quick-classify"]');
+    await ui.click('[data-action="quick-classify"][data-category="cafe"]');
+    assert.equal(ui.saved().transactions[0].category, "cafe");
+    assert.deepEqual(ui.saved().merchantRules ?? [], []);
+  } finally {
+    ui.close();
+  }
+});
+
+async function openExtraSheetFromExpense(ui) {
+  await ui.click('[data-action="open-expense"]');
+  await ui.click('.quick-income-link[data-action="open-extra-sheet"]');
+  assert.equal(ui.$("#transaction-form"), null, "the expense sheet should give way to the extra-money sheet");
+  const form = ui.$("#extra-budget-form");
+  assert.ok(form, "the extra-money sheet did not open");
+  return form;
+}
+
+// Registering extra money used to take two chained sheets and was only reachable from
+// Plan. Now: one sheet, reachable from Registrar, with the savings proposal inline.
+test("extra money: one sheet from Registrar, savings suggestion previewed and applied", async () => {
+  const ui = await bootApp({ savedState: returningUserState() });
+  try {
+    const form = await openExtraSheetFromExpense(ui);
+    form.elements.namedItem("source").value = "Bono";
+    await ui.type(form.elements.namedItem("amount"), "300000");
+    assert.match(ui.$("[data-extra-savings]").textContent, /60\.000/);
+    assert.match(ui.$("[data-extra-free]").textContent, /240\.000/);
+
+    form.requestSubmit(form.querySelector('[value="split"]'));
+    await settle(ui.window);
+
+    assert.equal(ui.$("#extra-budget-form"), null, "no second sheet should follow");
+    const [extra] = ui.saved().budgetExtras;
+    assert.equal(extra.amount, 300_000);
+    assert.equal(extra.allocation.savingsAmount, 60_000);
+    assert.equal(ui.saved().liquidity.account, 1_800_000);
+    assert.ok(ui.saved().budgetJobs.some((job) => job.name === "Ahorro"));
+    assert.match(ui.text(), /2\.240\.000/);
+  } finally {
+    ui.close();
+  }
+});
+
+test("extra money: 'Dejar todo libre' adds it all to free money without separating savings", async () => {
+  const ui = await bootApp({ savedState: returningUserState() });
+  try {
+    const form = await openExtraSheetFromExpense(ui);
+    form.elements.namedItem("source").value = "Venta";
+    await ui.type(form.elements.namedItem("amount"), "300000");
+    form.requestSubmit(form.querySelector('[value="all-free"]'));
+    await settle(ui.window);
+
+    const [extra] = ui.saved().budgetExtras;
+    assert.equal(extra.allocation.savingsAmount, 0);
+    assert.equal(ui.saved().budgetJobs.length, 0);
+    assert.match(ui.text(), /2\.300\.000/);
+  } finally {
+    ui.close();
+  }
+});
+
 // The boot code (render(), initializeCloudSync()) runs synchronously at module init, so
 // a module-level const/let declared below it is in its temporal dead zone for any boot
 // path that reaches it — this crashed the app three separate times. The smoke tests

@@ -16,8 +16,9 @@ import {
   predictUntilNextPeriod as getPeriodPrediction,
   resolvePeriodIncome,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.22";
+} from "./finance-core.js?v=1.1.24";
 import {
+  DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
   DIAGNOSIS_SECTIONS,
   JOB_CADENCE_VALUES,
@@ -31,6 +32,7 @@ import {
   filterMerchantRulesForJobs,
   isTemplateBudgetJobs,
   merchantKey,
+  isPlaceholderMerchant,
   merchantRuleMatches,
   csvField,
   migrateState,
@@ -54,7 +56,7 @@ import {
   decidePushSync,
   hasMeaningfulLocalData,
   uid
-} from "./state-model.js?v=1.1.22";
+} from "./state-model.js?v=1.1.24";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -69,7 +71,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.22";
+} from "./sync-client.js?v=1.1.24";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -129,7 +131,6 @@ const MONEY_INPUT_MAX_DIGITS = 12;
 const BACK_CLOSE_SELECTORS = [
   '[data-action="close-transaction-editor"]',
   '[data-action="close-extra-editor"]',
-  '[data-action="cancel-extra-allocation"]',
   '[data-action="close-quick-classify"]',
   '[data-action="cancel-delete-account"]',
   '[data-action="cancel-remove-job"]',
@@ -186,7 +187,6 @@ let transactionHistoryDate = "";
 let snackbar = null;
 let snackbarTimer;
 let nativeNotificationPermission = "";
-let pendingExtraAllocation = null;
 let planSheet = "";
 let pendingJobRemovalId = "";
 let pendingBackupRestoreId = "";
@@ -544,7 +544,6 @@ function applyRemoteState(remoteState, remoteUpdatedAt, alert) {
   saveLocalBackup("antes de bajar nube");
   state = migrateState(remoteState, todayKey(), DEFAULT_VIEW);
   state.showDiagnosis = false;
-  pendingExtraAllocation = null;
   editingTransactionId = "";
   editingExtraId = "";
   clearSnackbar({ renderNow: false });
@@ -627,7 +626,6 @@ function restoreLocalBackup(id) {
     cloudUserEmail: cloudState.email
   };
   state.showDiagnosis = false;
-  pendingExtraAllocation = null;
   editingTransactionId = "";
   editingExtraId = "";
   clearSnackbar({ renderNow: false });
@@ -748,7 +746,6 @@ function hasOpenUserInput() {
       planSheet ||
       state.showDiagnosis ||
       profileNeedsOnboarding() ||
-      pendingExtraAllocation ||
       editingTransactionId ||
       editingExtraId ||
       quickClassifyQueue.length ||
@@ -858,7 +855,6 @@ function render() {
     ${predictionDetailsOpen ? renderPredictionDetailsModal() : ""}
     ${periodReportOpen ? renderPeriodReportModal(plan) : ""}
     ${profileNeedsOnboarding() || state.showDiagnosis ? renderDiagnosisModal() : ""}
-    ${pendingExtraAllocation ? renderExtraAllocationModal() : ""}
     ${renderSnackbar()}
   `;
 
@@ -2423,6 +2419,11 @@ function renderPlanSheet() {
     `;
   }
 
+  // One sheet: origin, amount, where it landed, AND the savings suggestion. The brief's
+  // flow E ("antes de sumarlo, la app propone separar un porcentaje") used to take a
+  // second sheet after "Continuar"; the proposal now sits right under the amount, with
+  // the suggestion preselected and "Dejar todo libre" one tap away.
+  const target = savingsAllocationTarget();
   return `
     <div class="sheet-backdrop" role="presentation" data-action="close-plan-sheet">
       <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="extra-sheet-title">
@@ -2442,8 +2443,17 @@ function renderPlanSheet() {
               { value: "cash", label: "Efectivo" }
             ], "account")}
           </div>
-          <button class="btn primary" type="submit">Continuar</button>
-          <button class="btn ghost" type="button" data-action="close-plan-sheet">Cancelar</button>
+          <div class="extra-suggestion-card" aria-live="polite">
+            <span>Una sugerencia antes de sumarlo</span>
+            <strong data-extra-savings>${formatMoney(0)}</strong>
+            <p>para ${escapeHtml(target.label)}. Los <b data-extra-free>${formatMoney(0)}</b> restantes quedan libres. No mueve dinero de tu cuenta.</p>
+          </div>
+          <label>
+            <span>Porcentaje para ${escapeHtml(target.label)} <output data-extra-percent>20%</output></span>
+            <input name="savingsPercent" type="range" min="0" max="100" step="5" value="20" data-extra-range>
+          </label>
+          <button class="btn primary" type="submit" name="intent" value="split">Sumar dinero extra</button>
+          <button class="btn ghost" type="submit" name="intent" value="all-free">Dejar todo libre</button>
         </form>
       </section>
     </div>
@@ -2840,8 +2850,8 @@ function renderQuickExpensePanel() {
             <input name="amount" type="number" min="1000" step="1000" inputmode="numeric" placeholder="$0" value="${draft.amount ? escapeAttr(draft.amount) : ""}" required>
           </label>
           <label>
-            Comercio
-            <input name="merchant" type="text" maxlength="42" placeholder="Ej. Tienda, Terpel" value="${escapeAttr(draft.merchant || "")}" required>
+            Comercio opcional
+            <input name="merchant" type="text" maxlength="42" placeholder="Ej. Tienda, Terpel" value="${escapeAttr(draft.merchant || "")}">
           </label>
           ${renderMerchantRuleSuggestion(draft.merchant || "")}
           <label>
@@ -2877,6 +2887,7 @@ function renderQuickExpensePanel() {
             </label>
           </div>
           <button class="btn primary quick-submit" type="submit">Registrar gasto</button>
+          <button class="quick-income-link" type="button" data-action="open-extra-sheet">¿Te entró plata? Regístrala aquí</button>
         </form>
       </section>
     </div>
@@ -4078,43 +4089,6 @@ function renderCategoryBars(plan, limit) {
   `;
 }
 
-function renderExtraAllocationModal() {
-  const draft = pendingExtraAllocation;
-  const percent = clamp(Number(draft.savingsPercent ?? 20), 0, 100);
-  const savingsAmount = Math.round(Number(draft.amount || 0) * percent / 100);
-  const freeAmount = Number(draft.amount || 0) - savingsAmount;
-  const target = savingsAllocationTarget();
-
-  return `
-    <div class="sheet-backdrop" role="presentation" data-action="cancel-extra-allocation">
-      <section class="bottom-sheet extra-suggestion-sheet" role="dialog" aria-modal="true" aria-labelledby="extra-allocation-title">
-        <div class="sheet-handle"></div>
-        <div class="sheet-heading">
-          <div><span class="extra-badge">Dinero extra</span><h2 id="extra-allocation-title">Antes de sumarlo</h2></div>
-          <button class="icon-btn muted" type="button" data-action="cancel-extra-allocation" aria-label="Cerrar">x</button>
-        </div>
-        <div class="extra-origin-summary">
-          <strong>${formatMoney(draft.amount)}</strong>
-          <span>${escapeHtml(draft.source)} · ${locationLabel(draft.location)}</span>
-        </div>
-        <form class="sheet-form" id="extra-allocation-form">
-          <div class="extra-suggestion-card">
-            <span>Una sugerencia antes de decidir</span>
-            <strong data-allocation-savings>${formatMoney(savingsAmount)}</strong>
-            <p>para ${escapeHtml(target.label)} (${percent}%). Los <b data-allocation-free>${formatMoney(freeAmount)}</b> restantes quedarian libres.</p>
-          </div>
-          <label>
-            Porcentaje para ${escapeHtml(target.label)}
-            <input name="savingsPercent" type="range" min="0" max="100" step="5" value="${percent}" data-extra-allocation-range>
-          </label>
-          <button class="btn primary" type="submit">Separar ${formatCompactMoney(savingsAmount)} y sumar</button>
-          <button class="btn ghost" type="button" data-action="extra-all-free">Dejar todo libre</button>
-        </form>
-      </section>
-    </div>
-  `;
-}
-
 function renderSnackbar() {
   if (!snackbar) {
     return "";
@@ -4207,6 +4181,7 @@ function bindEvents() {
 
   const extraBudgetForm = document.querySelector("#extra-budget-form");
   if (extraBudgetForm) {
+    bindExtraSheetPreview(extraBudgetForm);
     extraBudgetForm.addEventListener("submit", handleExtraBudgetSubmit);
   }
 
@@ -4225,12 +4200,6 @@ function bindEvents() {
   if (extraEditForm) {
     bindExtraEditPreview(extraEditForm);
     extraEditForm.addEventListener("submit", handleExtraEditSubmit);
-  }
-
-  const extraAllocationForm = document.querySelector("#extra-allocation-form");
-  if (extraAllocationForm) {
-    bindExtraAllocationPreview(extraAllocationForm);
-    extraAllocationForm.addEventListener("submit", handleExtraAllocationSubmit);
   }
 
   const smartForm = document.querySelector("#smart-form");
@@ -4413,12 +4382,6 @@ function closeTopDialog() {
   }
   if (pendingJobRemovalId) {
     pendingJobRemovalId = "";
-    render();
-    return true;
-  }
-  if (pendingExtraAllocation) {
-    pendingExtraAllocation = null;
-    state.lastAlert = "Dinero extra sin guardar.";
     render();
     return true;
   }
@@ -4770,23 +4733,29 @@ function bindDiagnosisPreview(form) {
   updatePreview();
 }
 
-function bindExtraAllocationPreview(form) {
-  const range = form.querySelector("[data-extra-allocation-range]");
-  const savingsNode = form.querySelector("[data-allocation-savings]");
-  const freeNode = form.querySelector("[data-allocation-free]");
-  if (!range || !savingsNode || !freeNode || !pendingExtraAllocation) {
+function bindExtraSheetPreview(form) {
+  const amountInput = form.elements.namedItem("amount");
+  const range = form.querySelector("[data-extra-range]");
+  const savingsNode = form.querySelector("[data-extra-savings]");
+  const freeNode = form.querySelector("[data-extra-free]");
+  const percentNode = form.querySelector("[data-extra-percent]");
+  if (!amountInput || !range || !savingsNode || !freeNode) {
     return;
   }
 
   const update = () => {
     const percent = clamp(Number(range.value), 0, 100);
-    const amount = Number(pendingExtraAllocation.amount || 0);
+    const amount = numberFrom(amountInput.value);
     const savingsAmount = Math.round(amount * percent / 100);
     savingsNode.textContent = formatMoney(savingsAmount);
     freeNode.textContent = formatMoney(amount - savingsAmount);
+    if (percentNode) {
+      percentNode.textContent = `${percent}%`;
+    }
   };
 
   range.addEventListener("input", update);
+  amountInput.addEventListener("input", update);
   update();
 }
 
@@ -5005,7 +4974,6 @@ function handleAction(event) {
     "close-diagnosis",
     "start-quick-classify",
     "close-quick-classify",
-    "cancel-extra-allocation",
     "request-reminder-permission",
     "send-test-reminder",
     "register-calendar-event",
@@ -5065,6 +5033,10 @@ function handleAction(event) {
       periodReportOpen = false;
     },
     "open-extra-sheet": () => {
+      // Also reachable from the expense sheet ("¿Te entró plata?"), so swap sheets.
+      if (quickExpenseOpen) {
+        closeQuickExpense();
+      }
       planSheet = "extra";
       menuOpen = false;
       predictionDetailsOpen = false;
@@ -5186,11 +5158,6 @@ function handleAction(event) {
     },
     "save-period-close": savePeriodClosure,
     "remove-merchant-rule": () => removeMerchantRule(id),
-    "extra-all-free": () => applyPendingExtraAllocation(0),
-    "cancel-extra-allocation": () => {
-      pendingExtraAllocation = null;
-      state.lastAlert = "Dinero extra sin guardar.";
-    },
     "request-reminder-permission": requestReminderPermission,
     "send-test-reminder": sendTestReminder,
     "register-calendar-event": () => startCalendarEventExpense(id),
@@ -5537,73 +5504,58 @@ function handleExtraBudgetSubmit(event) {
   const data = new FormData(event.currentTarget);
   const amount = numberFrom(data.get("amount"));
   if (amount <= 0) {
-    state.lastAlert = "El dinero extra debe ser mayor que cero.";
-    saveState();
-    render();
+    showNoticeSnackbar("El dinero extra debe ser mayor que cero.", { kind: "error" });
     return;
   }
 
-  const source = cleanText(data.get("source"), "Dinero extra");
-  const location = normalizeLocation(data.get("location"));
-  const date = cleanDate(data.get("date"), todayKey());
-  pendingExtraAllocation = {
-    source,
-    amount,
-    date,
-    location,
-    savingsPercent: 20
-  };
+  const allFree = event.submitter?.value === "all-free";
+  applyExtraIncome(
+    {
+      source: cleanText(data.get("source"), "Dinero extra"),
+      amount,
+      date: cleanDate(data.get("date"), todayKey()),
+      location: normalizeLocation(data.get("location"))
+    },
+    allFree ? 0 : numberFrom(data.get("savingsPercent"))
+  );
   planSheet = "";
-  state.lastAlert = "Antes de sumarlo, decide cuanto va a ahorro y cuanto queda libre.";
-  render();
-}
-
-function handleExtraAllocationSubmit(event) {
-  event.preventDefault();
-  const data = new FormData(event.currentTarget);
-  applyPendingExtraAllocation(numberFrom(data.get("savingsPercent")));
   saveState();
   render();
 }
 
-function applyPendingExtraAllocation(rawPercent) {
-  if (!pendingExtraAllocation) {
-    return;
-  }
-
+function applyExtraIncome(draft, rawPercent) {
   const percent = clamp(Number(rawPercent || 0), 0, 100);
-  const savingsAmount = Math.round(Number(pendingExtraAllocation.amount || 0) * percent / 100);
-  const freeAmount = Number(pendingExtraAllocation.amount || 0) - savingsAmount;
+  const savingsAmount = Math.round(Number(draft.amount || 0) * percent / 100);
+  const freeAmount = Number(draft.amount || 0) - savingsAmount;
   const now = new Date().toISOString();
   const currentWindow = budgetSummary().window;
-  const appliesNow = pendingExtraAllocation.date >= currentWindow.start && pendingExtraAllocation.date < currentWindow.end;
+  const appliesNow = draft.date >= currentWindow.start && draft.date < currentWindow.end;
   let savingsJob = null;
 
   if (appliesNow) {
-    adjustLiquidity(pendingExtraAllocation.location, pendingExtraAllocation.amount, "extra");
+    adjustLiquidity(draft.location, draft.amount, "extra");
     savingsJob = applySavingsAllocation(savingsAmount, now);
   }
 
   const extra = {
     id: uid("extra"),
-    source: pendingExtraAllocation.source,
-    amount: pendingExtraAllocation.amount,
-    date: pendingExtraAllocation.date,
-    location: pendingExtraAllocation.location,
+    source: draft.source,
+    amount: draft.amount,
+    date: draft.date,
+    location: draft.location,
     allocation: {
       savingsPercent: percent,
       savingsAmount: appliesNow ? savingsAmount : 0,
-      freeAmount: appliesNow ? freeAmount : pendingExtraAllocation.amount,
+      freeAmount: appliesNow ? freeAmount : draft.amount,
       savingsJobId: savingsJob?.id || ""
     },
     updated_at: now
   };
   state.budgetExtras.push(extra);
-  const summary = budgetSummary();
   state.lastAlert = appliesNow
-    ? `${extra.source} sumo ${formatMoney(extra.amount)}: ${formatMoney(extra.allocation.savingsAmount)} a ahorro y ${formatMoney(extra.allocation.freeAmount)} libre.`
-    : `${extra.source} quedo guardado, pero esa fecha pertenece a otro periodo.`;
-  pendingExtraAllocation = null;
+    ? `${extra.source} sumó ${formatMoney(extra.amount)}: ${formatMoney(extra.allocation.savingsAmount)} a ahorro y ${formatMoney(extra.allocation.freeAmount)} libre.`
+    : `${extra.source} quedó guardado, pero esa fecha pertenece a otro periodo.`;
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
 }
 
 function handleTransactionSubmit(event) {
@@ -5611,7 +5563,7 @@ function handleTransactionSubmit(event) {
   const data = new FormData(event.currentTarget);
   const plan = calculatePlan();
   const amount = numberFrom(data.get("amount"));
-  const merchant = cleanText(data.get("merchant"), "Compra");
+  const merchant = cleanText(data.get("merchant"), DEFAULT_MERCHANT);
   const description = cleanText(data.get("description"), "");
   const category = String(data.get("category"));
   const budgeted = data.get("budgeted") === "on";
@@ -6020,7 +5972,6 @@ function clearLocalUserState() {
   authMode = "";
   menuOpen = false;
   quickExpenseOpen = false;
-  pendingExtraAllocation = null;
   planSheet = "";
   pendingJobRemovalId = "";
   editingTransactionId = "";
@@ -7418,7 +7369,7 @@ function findMerchantRule(merchant) {
 function rememberMerchantRule(transaction) {
   const key = merchantKey(transaction?.merchant);
   const category = transaction?.category || "";
-  if (key.length < 3 || !category || category === FREE_CATEGORY_ID || !state.budgetJobs.some((job) => job.id === category)) {
+  if (key.length < 3 || isPlaceholderMerchant(key) || !category || category === FREE_CATEGORY_ID || !state.budgetJobs.some((job) => job.id === category)) {
     return;
   }
 

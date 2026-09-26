@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const ASSET_VERSION = "1.1.22";
+const ASSET_VERSION = "1.1.24";
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
@@ -1043,7 +1043,6 @@ test("background re-renders never wipe a form the user is filling in", async () 
     "planSheet",
     "state.showDiagnosis",
     "profileNeedsOnboarding()",
-    "pendingExtraAllocation",
     "editingTransactionId",
     "editingExtraId",
     "quickClassifyQueue.length",

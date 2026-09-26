@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.22";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.24";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
@@ -13,6 +13,18 @@ export const LEGACY_TEMPLATE_BUDGET_JOBS = [
 ];
 
 export const JOB_CADENCE_VALUES = Object.keys(JOB_CADENCES);
+
+// Name stored when an expense is registered without a merchant (the field is optional so
+// a coffee takes one field, not two). "Compra" was the default in older versions.
+export const DEFAULT_MERCHANT = "Gasto";
+const PLACEHOLDER_MERCHANT_KEYS = new Set(["gasto", "compra"]);
+
+// A placeholder name says nothing about where the money went, so it must never teach a
+// merchant rule: otherwise classifying one unnamed expense would make the app suggest
+// that category for every future unnamed expense.
+export function isPlaceholderMerchant(name) {
+  return PLACEHOLDER_MERCHANT_KEYS.has(merchantKey(name));
+}
 
 export const DEFAULT_REMINDER_TIME = "20:00";
 
@@ -174,7 +186,7 @@ export function normalizeTransactions(transactions, today) {
     ...transaction,
     id: transaction.id || uid("tx"),
     date: cleanDate(transaction.date, today),
-    merchant: cleanText(transaction.merchant, "Compra"),
+    merchant: cleanText(transaction.merchant, DEFAULT_MERCHANT),
     description: cleanText(transaction.description, ""),
     amount: Number(transaction.amount || 0),
     category: transaction.category || "",

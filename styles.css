@@ -9929,3 +9929,17 @@ html[data-theme="dark"] .btn.primary:disabled,
   flex: none;
   min-height: 44px;
 }
+
+/* "¿Te entró plata?": a quiet way from the expense sheet to the extra-money sheet. */
+.quick-income-link {
+  justify-self: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  background: none;
+  color: var(--ds-primary-strong);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

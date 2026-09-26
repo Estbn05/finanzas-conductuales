@@ -4,6 +4,7 @@ import {
   decideLoginSync,
   decidePushSync,
   hasMeaningfulLocalData,
+  isPlaceholderMerchant,
   merchantKey,
   csvField,
   merchantRuleMatches,
@@ -165,4 +166,13 @@ test("a failed save is a problem the user is told about, with their data reassur
 
 test("being offline wins over a stale error: the fix is the connection, not a retry", () => {
   assert.equal(describeSyncStatus({ ...online, online: false, status: "error" }, "", NOW).tone, "offline");
+});
+
+test("the default names for an unnamed expense are placeholders, real merchants are not", () => {
+  for (const name of ["Gasto", "gasto", "Compra", " GASTO "]) {
+    assert.equal(isPlaceholderMerchant(name), true, name);
+  }
+  for (const name of ["Gastos varios", "Panadería", "Tienda"]) {
+    assert.equal(isPlaceholderMerchant(name), false, name);
+  }
 });
