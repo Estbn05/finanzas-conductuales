@@ -1,8 +1,20 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { VERSIONED_FILES } from "../scripts/bump-version.mjs";
 
-const ASSET_VERSION = "1.1.24";
+// Single source of truth; `npm run bump` rewrites every copy.
+const { version: ASSET_VERSION } = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+
+test("every hard-coded version matches package.json (use `npm run bump`)", async () => {
+  const versionLike = /(?:\?v=|APP_VERSION = "|\$\{CACHE_PREFIX\})(\d+\.\d+\.\d+)/g;
+  for (const file of VERSIONED_FILES) {
+    const source = await readFile(new URL(`../${file}`, import.meta.url), "utf8");
+    const found = [...source.matchAll(versionLike)].map((match) => match[1]);
+    assert.ok(found.length > 0, `${file} has no version reference`);
+    assert.deepEqual([...new Set(found)], [ASSET_VERSION], `${file} is out of sync`);
+  }
+});
 
 test("manifest has mobile install metadata and required PNG icons", async () => {
   const manifest = JSON.parse(await readFile(new URL("../manifest.webmanifest", import.meta.url), "utf8"));
