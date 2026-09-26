@@ -390,13 +390,6 @@ export function spendByCategory(state, today) {
     }, {});
 }
 
-export function monthlyLabeledSpend(state, today) {
-  const window = budgetWindow(state.profile, today);
-  return state.transactions
-    .filter((transaction) => transaction.labeled && isDateInWindow(transaction.date, window))
-    .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
-}
-
 export function isLargeUnbudgetedPurchase(amount, expenses) {
   return Number(amount || 0) >= Number(expenses || 0) * LARGE_PURCHASE_RATIO;
 }
@@ -494,6 +487,28 @@ export function findLoggedIncome(ledger, today) {
 // to the real "account" balance (0 when nothing is due). For fixed income, periodStart
 // doubles as the payday: the income is deposited once, the day the period begins —
 // unless the user already rejected it ("aún no me pagan") or it was already logged.
+// Onboarding asks "¿Cuánto tienes hoy?", so the balance typed there already includes this
+// period's pay if it arrived. Without settling the current period, resolvePeriodIncome()
+// saw an unpaid period and deposited the income on top: paid biweekly, signing up 5 days
+// after payday with $500.000 typed, the user started at $1.700.000. The period is logged
+// as applied with amount 0 (nothing was deposited, so undoing takes nothing back); the
+// next payday still deposits as usual.
+export function settlePeriodIncomeAtOnboarding(profile, today, nowIso = new Date().toISOString()) {
+  const window = budgetWindow(profile, today);
+  return {
+    periodIncomeStatus: {
+      windowStart: window.start,
+      applied: true,
+      rejected: false,
+      bannerDismissed: true,
+      amount: 0,
+      location: "account",
+      appliedAt: nowIso
+    },
+    periodIncomeApplied: [{ windowStart: window.start, windowEnd: window.end, status: "applied", amount: 0, appliedAt: nowIso }]
+  };
+}
+
 export function resolvePeriodIncome(state, today, nowIso = new Date().toISOString()) {
   const window = budgetWindow(state.profile, today);
   const ledger = state.periodIncomeApplied || [];

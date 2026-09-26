@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ (API 31) usa estas reglas en vez de allowBackup/fullBackupContent.
+  Se excluye todo: esta app guarda tokens de sesion de Supabase y el detalle de los
+  gastos del usuario en el localStorage del WebView. Nada de eso debe salir del
+  dispositivo en una copia de seguridad ni en una transferencia a otro telefono; la
+  copia real de los datos es la de la nube, que exige iniciar sesion.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>

@@ -8,6 +8,7 @@ import {
   merchantKey,
   csvField,
   merchantRuleMatches,
+  normalizeTransactions,
   describeSyncStatus,
   relativeTimeEs,
   remoteChangedSinceLastSync,
@@ -175,4 +176,18 @@ test("the default names for an unnamed expense are placeholders, real merchants 
   for (const name of ["Gastos varios", "Panadería", "Tienda"]) {
     assert.equal(isPlaceholderMerchant(name), false, name);
   }
+});
+
+test("a 'Libre' movement is never marked as classified when loaded", () => {
+  const [free, food, none] = normalizeTransactions(
+    [
+      { id: "a", amount: 1, category: "free", labeled: true },
+      { id: "b", amount: 1, category: "food" },
+      { id: "c", amount: 1, category: "", labeled: true }
+    ],
+    "2026-06-10"
+  );
+  assert.equal(free.labeled, false);
+  assert.equal(food.labeled, true);
+  assert.equal(none.labeled, false);
 });

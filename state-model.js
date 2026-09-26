@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.24";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.25";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
@@ -190,7 +190,8 @@ export function normalizeTransactions(transactions, today) {
     description: cleanText(transaction.description, ""),
     amount: Number(transaction.amount || 0),
     category: transaction.category || "",
-    labeled: Boolean(transaction.category || transaction.labeled),
+    // Loading used to re-mark every "Libre" movement as classified, undoing addTransaction.
+    labeled: Boolean(transaction.category) && transaction.category !== FREE_CATEGORY_ID,
     budgeted: Boolean(transaction.budgeted),
     oneOff: Boolean(transaction.oneOff || transaction.excludeFromPrediction),
     source: normalizeLocation(transaction.source),

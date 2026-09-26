@@ -13,7 +13,8 @@ import {
   freeShareOfBudget,
   isSavingsJob,
   predictUntilNextPeriod,
-  resolvePeriodIncome
+  resolvePeriodIncome,
+  settlePeriodIncomeAtOnboarding
 } from "../finance-core.js";
 
 // El saldo real (cuenta + efectivo, seguido en app.js via adjustLiquidity) es un
@@ -938,4 +939,30 @@ test("emergency progress stays between 0 and 100 even with no income on file", (
     makeState({ profile: { monthlyIncome: 0, incomeAmount: 0, committedExpenses: 0, emergencySavings: 50_000_000 }, budgetJobs: [] })
   );
   assert.equal(plan.emergencyProgress, 100);
+});
+
+// Regression: onboarding asks for today's balance, which already includes this period's
+// pay. Paid biweekly, signing up 5 days after payday with $500.000 typed used to deposit
+// the $1.200.000 income on top.
+test("the period a user onboards in is settled: their typed balance is not topped up", () => {
+  const profile = { incomeCadence: "biweekly", incomeAmount: 1_200_000, periodStart: "2026-06-05" };
+  const settled = settlePeriodIncomeAtOnboarding(incomeState(profile).profile, "2026-06-10", NOW);
+  const now = resolvePeriodIncome(incomeState(profile, settled), "2026-06-10", NOW);
+  assert.equal(now.deposit, 0);
+
+  // Moving the payday inside the same real period must not sneak the deposit back in.
+  const edited = resolvePeriodIncome(
+    incomeState({ ...profile, periodStart: "2026-06-07" }, { periodIncomeStatus: now.periodIncomeStatus, periodIncomeApplied: now.periodIncomeApplied }),
+    "2026-06-10",
+    NOW
+  );
+  assert.equal(edited.deposit, 0);
+
+  // The next payday still deposits on its own.
+  const nextPayday = resolvePeriodIncome(
+    incomeState(profile, { periodIncomeStatus: now.periodIncomeStatus, periodIncomeApplied: now.periodIncomeApplied }),
+    "2026-06-19",
+    NOW
+  );
+  assert.equal(nextPayday.deposit, 1_200_000);
 });

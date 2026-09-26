@@ -6738,7 +6738,7 @@ select[data-invalid="true"] {
   --ds-subtle: #6a716a;
   --ds-line: #e6ddd0;
   --ds-line-strong: #d6c8b7;
-  --ds-primary: #15906f;
+  --ds-primary: #127d61;
   --ds-primary-strong: #0b6f5b;
   --ds-primary-soft: #def5ea;
   --ds-mint: #69d5b5;
@@ -7618,9 +7618,9 @@ textarea,
     --ds-surface: #fffdf8;
     --ds-surface-strong: #ffffff;
     --ds-ink: #202622;
-    --ds-muted: #727a74;
+    --ds-muted: #5f665f;
     --ds-line: #e6ddd0;
-    --ds-primary: #15906f;
+    --ds-primary: #127d61;
     --ds-primary-strong: #0b6f5b;
     --ds-primary-soft: #def5ea;
     --field-bg: #ffffff;

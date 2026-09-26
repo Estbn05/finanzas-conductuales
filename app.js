@@ -12,11 +12,11 @@ import {
   isSavingsJob,
   getPeriodIncome,
   getMonthlyIncome,
-  monthlyLabeledSpend as getMonthlyLabeledSpend,
   predictUntilNextPeriod as getPeriodPrediction,
   resolvePeriodIncome,
+  settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.24";
+} from "./finance-core.js?v=1.1.25";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -56,7 +56,7 @@ import {
   decidePushSync,
   hasMeaningfulLocalData,
   uid
-} from "./state-model.js?v=1.1.24";
+} from "./state-model.js?v=1.1.25";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -71,7 +71,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.24";
+} from "./sync-client.js?v=1.1.25";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -4633,6 +4633,7 @@ function handleOnboardingSubmit(event) {
     initialized: true,
     updated_at: now
   };
+  Object.assign(state, settlePeriodIncomeAtOnboarding(profileDraft, todayKey(), now));
   state.budgetJobs = jobs;
   state.wins.push({
     id: uid("win"),
@@ -6685,7 +6686,8 @@ function addTransaction({ merchant, description = "", amount, category, budgeted
     description: cleanText(description, ""),
     amount,
     category,
-    labeled: Boolean(category),
+    // "Libre" is the absence of a category, so it never counts as classified.
+    labeled: Boolean(category) && category !== FREE_CATEGORY_ID,
     budgeted,
     oneOff,
     source: location,
@@ -7398,10 +7400,6 @@ function rememberMerchantRule(transaction) {
 
 function spendByCategory() {
   return getSpendByCategory(state, todayKey());
-}
-
-function monthlyLabeledSpend() {
-  return getMonthlyLabeledSpend(state, todayKey());
 }
 
 function futureFreedom(plan) {

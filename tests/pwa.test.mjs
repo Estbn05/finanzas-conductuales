@@ -654,6 +654,16 @@ test("biometric unlock layers on top of the PIN with a native BiometricPrompt pl
   // the Supabase refresh token stored in the clear) to the user's Google Drive, outside
   // any control the PIN lock has.
   assert.ok(manifest.includes('android:allowBackup="false"'));
+  // ...but on Android 12+ device-to-device transfer ignores allowBackup and follows
+  // dataExtractionRules, which must exclude every domain in both sections.
+  assert.ok(manifest.includes('android:dataExtractionRules="@xml/data_extraction_rules"'));
+  const extractionRules = await readFile(new URL("../android/app/src/main/res/xml/data_extraction_rules.xml", import.meta.url), "utf8");
+  for (const section of ["cloud-backup", "device-transfer"]) {
+    const body = extractionRules.slice(extractionRules.indexOf(`<${section}>`), extractionRules.indexOf(`</${section}>`));
+    for (const domain of ["root", "database", "sharedpref", "file", "external"]) {
+      assert.ok(body.includes(`<exclude domain="${domain}" />`), `${section} must exclude ${domain}`);
+    }
+  }
 
   // JS: biometric is an optional layer, PIN remains the fallback.
   assert.ok(app.includes("function nativeBiometric()"));
