@@ -146,6 +146,7 @@ En pantallas anchas conviene mantener visible una barra lateral compacta con las
    - cuanto tiene en cuenta y efectivo;
    - para que suele separar dinero.
 4. La aplicacion muestra el dinero libre resultante.
+5. Una guia corta (7 pasos) recorre Inicio: la pantalla se oscurece y solo queda iluminada la parte que se explica (dinero libre, Registrar, Apartar dinero, Lo que vas usando, Plan, Movimientos, Menu). Se puede saltar en cualquier momento, sale una sola vez (tambien en otros dispositivos de la misma cuenta) y se repite desde Datos > Ajustes. Tono: que hace cada cosa, sin culpa ("si te pasas no pasa nada").
 
 **Objetivo UX:** lograr el primer valor rapidamente sin pedir desde el comienzo datos psicologicos o financieros avanzados.
 

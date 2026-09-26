@@ -18,7 +18,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.52";
+} from "./finance-core.js?v=1.1.54";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -64,7 +64,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.52";
+} from "./state-model.js?v=1.1.54";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -80,7 +80,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.52";
+} from "./sync-client.js?v=1.1.54";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -227,6 +227,47 @@ let lockForgotBusy = false;
 // A local-only user asked to create an account / sign in from inside the app.
 let accountRequested = false;
 const PRIVACY_POLICY_URL = "https://estbn05.github.io/finanzas-conductuales/privacy-policy.html";
+// The guided tour while it is open: { steps, position }.
+let tour = null;
+let tourLayoutFrame = 0;
+// What each step of the tour lights up (first visible match) and says.
+const TOUR_STEPS = [
+  {
+    targets: [".money-bar"],
+    title: "Tu dinero libre",
+    text: "Es lo que puedes gastar sin tocar lo que reservaste para tus categorías. Es la cifra que más importa: mírala antes de comprar."
+  },
+  {
+    targets: [".bottom-nav .is-register", '.sidebar [data-action="open-expense"]'],
+    title: "Registrar un gasto",
+    text: "Cada vez que gastes, tócalo aquí. Con el monto basta; el comercio y la categoría son opcionales."
+  },
+  {
+    targets: [".setaside-action"],
+    title: "Apartar dinero",
+    text: "Guarda plata para algo puntual, como un regalo o un remedio. Deja de contar como libre, pero no se mueve de tu cuenta."
+  },
+  {
+    targets: [".home-view .category-bars", ".home-view .home-section-heading"],
+    title: "Lo que vas usando",
+    text: "Cada categoría muestra cuánto llevas de su límite. Si te pasas no pasa nada: te lo mostramos para que ajustes con calma."
+  },
+  {
+    targets: ['.bottom-nav [data-view="budget"]', '.sidebar [data-view="budget"]'],
+    title: "Plan",
+    text: "Crea y ajusta categorías, registra dinero extra y mira cómo te fue en los periodos anteriores."
+  },
+  {
+    targets: ['.bottom-nav [data-view="movements"]', '.sidebar [data-view="movements"]'],
+    title: "Movimientos",
+    text: "Todo lo que registraste, periodo por periodo. Toca un gasto para corregirlo o cambiarle la categoría."
+  },
+  {
+    targets: ['.bottom-nav [data-action="toggle-menu"]', '.sidebar [data-view="profile"]'],
+    title: "Menú",
+    text: "Ahorro, gastos planeados y Datos: tus saldos, el PIN, las copias y los ajustes. Desde Datos puedes volver a ver esta guía."
+  }
+];
 let planSheet = "";
 let pendingJobRemovalId = "";
 let pendingBackupRestoreId = "";
@@ -1056,6 +1097,7 @@ function render() {
   `;
 
   bindEvents();
+  if (tour) scheduleTourLayout();
 }
 
 function renderDailyReminderPanel() {
@@ -1100,6 +1142,158 @@ function renderDailyReminderPanel() {
       </article>
 
   `;
+}
+
+// ------------------------------------------------------------------ guided tour
+// A first look at Inicio for new users: the screen dims and only the part being explained
+// stays lit, with a card next to it. Shown once after onboarding, replayable from Datos.
+// It lives outside #app (render() rebuilds #app), marks #app inert while open, and
+// re-measures its target after every render, scroll and resize.
+
+function tourTarget(step) {
+  for (const selector of step.targets) {
+    const el = document.querySelector(selector);
+    if (el && el.getClientRects().length && window.getComputedStyle(el).visibility !== "hidden") return el;
+  }
+  return null;
+}
+
+// Steps whose target is not on screen (no categories yet, desktop layout...) are skipped.
+function tourStepIndexes() {
+  return TOUR_STEPS.map((step, index) => (tourTarget(step) ? index : -1)).filter((index) => index >= 0);
+}
+
+function startTour() {
+  if (tour || lockMode) return;
+  if (state.activeView !== DEFAULT_VIEW) {
+    activateView(DEFAULT_VIEW);
+    render();
+  }
+  menuOpen = false;
+  const steps = tourStepIndexes();
+  if (!steps.length) return;
+  tour = { steps, position: 0 };
+  const layer = document.createElement("div");
+  layer.id = "app-tour";
+  layer.className = "tour-layer";
+  layer.innerHTML = `
+    <div class="tour-blocker"></div>
+    <div class="tour-spotlight" aria-hidden="true"></div>
+    <section class="tour-card" role="dialog" aria-modal="true" aria-labelledby="tour-title" aria-describedby="tour-text">
+      <p class="tour-count" data-tour-count></p>
+      <h2 id="tour-title" data-tour-title></h2>
+      <p id="tour-text" data-tour-text></p>
+      <div class="tour-actions">
+        <button class="btn ghost tour-skip" type="button" data-tour-skip>Saltar guía</button>
+        <button class="btn ghost" type="button" data-tour-back>Atrás</button>
+        <button class="btn primary" type="button" data-tour-next>Siguiente</button>
+      </div>
+    </section>
+  `;
+  document.body.append(layer);
+  app.inert = true;
+  layer.querySelector("[data-tour-skip]").addEventListener("click", () => endTour());
+  layer.querySelector("[data-tour-back]").addEventListener("click", () => moveTour(-1));
+  layer.querySelector("[data-tour-next]").addEventListener("click", () => moveTour(1));
+  // The tour lives outside #app, whose keydown handler it cannot rely on.
+  layer.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      endTour();
+    }
+  });
+  window.addEventListener("resize", scheduleTourLayout);
+  window.addEventListener("scroll", scheduleTourLayout, { passive: true });
+  showTourStep();
+}
+
+function moveTour(delta) {
+  if (!tour) return;
+  const next = tour.position + delta;
+  if (next < 0) return;
+  if (next >= tour.steps.length) {
+    endTour();
+    return;
+  }
+  tour.position = next;
+  showTourStep();
+}
+
+function showTourStep() {
+  const layer = document.getElementById("app-tour");
+  if (!tour || !layer) return;
+  const step = TOUR_STEPS[tour.steps[tour.position]];
+  const last = tour.position === tour.steps.length - 1;
+  layer.querySelector("[data-tour-count]").textContent = `${tour.position + 1} de ${tour.steps.length}`;
+  layer.querySelector("[data-tour-title]").textContent = step.title;
+  layer.querySelector("[data-tour-text]").textContent = step.text;
+  layer.querySelector("[data-tour-back]").hidden = tour.position === 0;
+  layer.querySelector("[data-tour-skip]").hidden = last;
+  layer.querySelector("[data-tour-next]").textContent = last ? "Empezar a usarla" : "Siguiente";
+  const target = tourTarget(step);
+  if (target && window.getComputedStyle(target).position !== "fixed" && !target.closest(".bottom-nav, .sidebar")) {
+    try {
+      target.scrollIntoView({ block: "center" });
+    } catch {}
+  }
+  layoutTour();
+  layer.querySelector("[data-tour-next]").focus({ preventScroll: true });
+}
+
+function scheduleTourLayout() {
+  cancelAnimationFrame(tourLayoutFrame);
+  tourLayoutFrame = requestAnimationFrame(layoutTour);
+}
+
+// Places the lit hole over the target and the card below it, or above if it does not fit.
+function layoutTour() {
+  const layer = document.getElementById("app-tour");
+  if (!tour || !layer) return;
+  const target = tourTarget(TOUR_STEPS[tour.steps[tour.position]]);
+  const spotlight = layer.querySelector(".tour-spotlight");
+  const card = layer.querySelector(".tour-card");
+  if (!target) {
+    spotlight.style.cssText = "left:50%;top:50%;width:0;height:0";
+    card.style.top = "";
+    card.style.bottom = "24px";
+    return;
+  }
+  const pad = 8;
+  const rect = target.getBoundingClientRect();
+  const top = Math.max(4, rect.top - pad);
+  const left = Math.max(4, rect.left - pad);
+  const width = Math.min(window.innerWidth - left - 4, rect.width + pad * 2);
+  const height = rect.height + pad * 2;
+  spotlight.style.cssText = `left:${left}px;top:${top}px;width:${width}px;height:${height}px`;
+  const gap = 14;
+  const cardHeight = card.offsetHeight || 220;
+  const below = window.innerHeight - (top + height) - gap;
+  const above = top - gap - 16;
+  if (below >= cardHeight + 16) {
+    card.style.top = `${top + height + gap}px`;
+    card.style.bottom = "";
+  } else if (above >= cardHeight) {
+    card.style.top = `${top - gap - cardHeight}px`;
+    card.style.bottom = "";
+  } else {
+    // Fits neither side of a tall target: pin it low, over the least important part.
+    card.style.top = "";
+    card.style.bottom = "16px";
+  }
+}
+
+function endTour() {
+  if (!tour) return;
+  tour = null;
+  document.getElementById("app-tour")?.remove();
+  app.inert = false;
+  window.removeEventListener("resize", scheduleTourLayout);
+  window.removeEventListener("scroll", scheduleTourLayout);
+  if (!state.settings.tourDone) {
+    state.settings = { ...state.settings, tourDone: true, updated_at: new Date().toISOString() };
+    saveState();
+  }
+  scrollToTop();
 }
 
 function renderThemeSwitcher() {
@@ -3867,8 +4061,9 @@ function renderProfile(plan) {
       </article>
 
       <article class="data-section settings-section">
-        <div class="data-section-heading"><span class="data-icon">${renderIcon("menu")}</span><div><strong>Ajustes</strong><small>Apariencia y recordatorio diario</small></div></div>
+        <div class="data-section-heading"><span class="data-icon">${renderIcon("menu")}</span><div><strong>Ajustes</strong><small>Apariencia, guía y recordatorio diario</small></div></div>
         ${renderThemeSwitcher()}
+        <button class="btn ghost" type="button" data-action="start-tour">Ver la guía de la app</button>
       </article>
       ${renderDailyReminderPanel()}
 
@@ -5076,10 +5271,14 @@ function handleOnboardingSubmit(event) {
     text: "Creaste tu primer plan y viste cuánto puedes gastar."
   });
   state.lastAlert = "Plan listo. Registra tu primer gasto cuando ocurra.";
-  showNoticeSnackbar(state.lastAlert, { renderNow: false });
   activateView(DEFAULT_VIEW);
   saveState();
   render();
+  if (!state.settings.tourDone) {
+    startTour();
+  } else {
+    showNoticeSnackbar(state.lastAlert);
+  }
 }
 
 function onboardingCategories(data, profile, updatedAt) {
@@ -5469,6 +5668,10 @@ function handleAction(event) {
       cloudState.error = "";
     },
     "use-without-account": () => startLocalOnly(),
+    "start-tour": () => {
+      activateView(DEFAULT_VIEW);
+      requestAnimationFrame(() => startTour());
+    },
     "request-account": () => {
       accountRequested = true;
       menuOpen = false;
@@ -6753,6 +6956,11 @@ function syncHomeWidget() {
 }
 
 function handleHardwareBackButton() {
+  if (tour) {
+    if (tour.position > 0) moveTour(-1);
+    else endTour();
+    return;
+  }
   // The onboarding "Atrás" button has no data-action (it's bound directly in
   // bindOnboardingFlowV2), so it never matches BACK_CLOSE_SELECTORS below. Without this,
   // the hardware back button skipped straight to exitApp() on any onboarding step,

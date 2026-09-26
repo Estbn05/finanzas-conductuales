@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.52";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.54";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
@@ -472,6 +472,8 @@ export function createDefaultState(today, defaultView) {
       // Empty means "follow the system". Forcing "light" here made the app fight the
       // prefers-color-scheme rules on a phone set to dark mode.
       theme: "",
+      // The guided tour of Inicio was seen (finished or skipped): do not show it again.
+      tourDone: false,
       updated_at: now
     },
     budgetExtras: [],
@@ -520,6 +522,7 @@ export function migrateState(savedState, today, defaultView) {
         savedState.settings?.theme === "dark" || savedState.settings?.theme === "light"
           ? savedState.settings.theme
           : defaults.settings.theme,
+      tourDone: Boolean(savedState.settings?.tourDone),
       updated_at: savedState.settings?.updated_at || defaults.settings.updated_at
     },
     transactions: normalizeTransactions(savedState.transactions || defaults.transactions, today),

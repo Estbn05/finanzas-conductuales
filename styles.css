@@ -7911,3 +7911,91 @@ html[data-theme="dark"] .conversion-box strong {
   background: var(--ds-primary-soft);
   font-weight: 800;
 }
+
+/* Guided tour: everything dims except the part being explained. The lit hole is a box
+   whose huge shadow is the dim layer, so the target underneath stays exactly as it is. */
+.tour-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+}
+
+.tour-blocker {
+  position: absolute;
+  inset: 0;
+}
+
+.tour-spotlight {
+  position: fixed;
+  border-radius: 18px;
+  box-shadow:
+    0 0 0 3px rgb(var(--rgb-mint) / 0.9),
+    0 0 0 200vmax rgb(var(--rgb-black) / 0.72);
+  pointer-events: none;
+  transition:
+    left 260ms ease,
+    top 260ms ease,
+    width 260ms ease,
+    height 260ms ease;
+}
+
+.tour-card {
+  position: fixed;
+  right: 16px;
+  left: 16px;
+  display: grid;
+  gap: 8px;
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 18px;
+  border: 1px solid var(--ds-line);
+  border-radius: var(--ds-radius-lg);
+  color: var(--ds-ink);
+  background: var(--ds-surface-strong);
+  box-shadow: var(--ds-shadow-md);
+  transition: top 260ms ease;
+}
+
+.tour-card h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.tour-card p {
+  margin: 0;
+  color: var(--ds-muted);
+  line-height: 1.45;
+}
+
+.tour-card .tour-count {
+  color: var(--ds-primary-strong);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tour-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+.tour-actions .tour-skip {
+  margin-right: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-spotlight,
+  .tour-card {
+    transition: none;
+  }
+}
+
+.tour-actions .btn {
+  width: auto;
+  min-height: 44px;
+  padding: 0 16px;
+}

@@ -885,6 +885,77 @@ test("extra money at the category limit adds everything as free instead of an 11
   }
 });
 
+// jsdom does no layout, so every element looks invisible to the tour; pretend they render.
+function withLayout(window) {
+  window.Element.prototype.getClientRects = function getClientRects() {
+    return [{ top: 0, left: 0, width: 100, height: 40 }];
+  };
+  window.Element.prototype.scrollIntoView = () => {};
+}
+
+async function nextFrame(ui) {
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  await settle(ui.window);
+}
+
+test("the guided tour walks Inicio step by step, and finishing it is remembered", async () => {
+  const ui = await bootApp({
+    savedState: returningUserState({ budgetJobs: [{ id: "mercado", name: "Mercado", amount: 300_000, cadence: "monthly" }] }),
+    beforeBoot: withLayout
+  });
+  let saved;
+  try {
+    await ui.click('[data-view="profile"]');
+    await ui.click('[data-action="start-tour"]');
+    await nextFrame(ui);
+    const layer = ui.$("#app-tour");
+    assert.ok(layer, "the tour did not open");
+    assert.equal(ui.$("#app").inert, true, "the app behind should not be reachable");
+    assert.equal(layer.querySelector("[data-tour-title]").textContent, "Tu dinero libre");
+    assert.equal(layer.querySelector("[data-tour-count]").textContent, "1 de 7");
+    assert.equal(layer.querySelector("[data-tour-back]").hidden, true);
+
+    for (let i = 1; i < 7; i += 1) layer.querySelector("[data-tour-next]").click();
+    assert.equal(layer.querySelector("[data-tour-title]").textContent, "Menú");
+    assert.equal(layer.querySelector("[data-tour-next]").textContent, "Empezar a usarla");
+    layer.querySelector("[data-tour-back]").click();
+    assert.equal(layer.querySelector("[data-tour-title]").textContent, "Movimientos");
+    layer.querySelector("[data-tour-next]").click();
+    layer.querySelector("[data-tour-next]").click();
+
+    assert.equal(ui.$("#app-tour"), null);
+    assert.equal(ui.$("#app").inert, false);
+    saved = ui.saved();
+    assert.equal(saved.settings.tourDone, true);
+  } finally {
+    ui.close();
+  }
+
+  const again = await bootApp({ savedState: saved, beforeBoot: withLayout });
+  try {
+    assert.equal(again.saved().settings.tourDone, true, "tourDone did not survive a reload");
+  } finally {
+    again.close();
+  }
+});
+
+test("the tour skips steps with nothing to show and closes with Escape", async () => {
+  const ui = await bootApp({ savedState: returningUserState(), beforeBoot: withLayout });
+  try {
+    await ui.click('[data-view="profile"]');
+    await ui.click('[data-action="start-tour"]');
+    await nextFrame(ui);
+    // No categories yet: "Lo que vas usando" still has its heading to point at, so 7 steps.
+    assert.match(ui.$("[data-tour-count]").textContent, /de 7$/);
+    ui.$("[data-tour-next]").dispatchEvent(new ui.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await settle(ui.window);
+    assert.equal(ui.$("#app-tour"), null);
+    assert.equal(ui.saved().settings.tourDone, true);
+  } finally {
+    ui.close();
+  }
+});
+
 // The boot code (render(), initializeCloudSync()) runs synchronously at module init, so
 // a module-level const/let declared below it is in its temporal dead zone for any boot
 // path that reaches it — this crashed the app three separate times. The smoke tests
