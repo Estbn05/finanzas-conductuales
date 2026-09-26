@@ -9845,3 +9845,87 @@ html[data-theme="dark"] .btn.primary:disabled,
   white-space: nowrap !important;
   border: 0 !important;
 }
+
+/* Cloud sync status: a quiet line in the menu, a banner only when a save failed. */
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 0.8rem;
+  color: var(--ds-muted);
+}
+
+.sync-status-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 50%;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--ds-primary-strong);
+  background: var(--ds-primary-soft);
+}
+
+.sync-status--pending .sync-status-icon,
+.sync-status--offline .sync-status-icon {
+  color: var(--ds-amber);
+  background: var(--ds-amber-soft);
+}
+
+.sync-status--problem {
+  color: var(--ds-danger);
+  font-weight: 700;
+}
+
+.sync-status--problem .sync-status-icon {
+  color: var(--ds-danger);
+  background: var(--ds-danger-soft);
+}
+
+.sync-problem-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 2px 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(186, 74, 66, 0.28);
+  border-radius: 12px;
+  color: var(--ds-ink);
+  background: var(--ds-danger-soft);
+}
+
+.sync-problem-banner > div {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sync-problem-banner strong {
+  font-size: 0.86rem;
+  color: var(--ds-danger);
+}
+
+.sync-problem-banner span {
+  font-size: 0.78rem;
+}
+
+.sync-problem-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 50%;
+  font-weight: 800;
+  color: #fffdf8;
+  background: var(--ds-danger);
+}
+
+.sync-problem-banner .btn {
+  flex: none;
+  min-height: 44px;
+}

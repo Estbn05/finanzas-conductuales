@@ -7,6 +7,8 @@ import {
   merchantKey,
   csvField,
   merchantRuleMatches,
+  describeSyncStatus,
+  relativeTimeEs,
   remoteChangedSinceLastSync,
   uid
 } from "../state-model.js";
@@ -122,4 +124,45 @@ test("generated ids keep their prefix and do not collide", () => {
   for (const id of ids) {
     assert.ok(id.startsWith("tx-"));
   }
+});
+
+const NOW = Date.parse("2026-09-25T12:00:00.000Z");
+const online = { configured: true, signedIn: true, online: true };
+
+test("relative time reads naturally in Spanish", () => {
+  assert.equal(relativeTimeEs("2026-09-25T11:59:40.000Z", NOW), "hace un momento");
+  assert.equal(relativeTimeEs("2026-09-25T11:55:00.000Z", NOW), "hace 5 min");
+  assert.equal(relativeTimeEs("2026-09-25T09:00:00.000Z", NOW), "hace 3 h");
+  assert.equal(relativeTimeEs("2026-09-24T11:00:00.000Z", NOW), "hace 1 día");
+  assert.equal(relativeTimeEs("2026-09-20T12:00:00.000Z", NOW), "hace 5 días");
+  assert.equal(relativeTimeEs("", NOW), "");
+});
+
+test("there is nothing to say about sync without a cloud account", () => {
+  assert.equal(describeSyncStatus({ ...online, configured: false, status: "local" }, "", NOW), null);
+  assert.equal(describeSyncStatus({ ...online, signedIn: false, status: "signed-out" }, "", NOW), null);
+});
+
+test("a saved state says when it was last saved", () => {
+  const status = describeSyncStatus({ ...online, status: "synced" }, "2026-09-25T11:55:00.000Z", NOW);
+  assert.equal(status.tone, "ok");
+  assert.equal(status.label, "Guardado en la nube");
+  assert.equal(status.detail, "hace 5 min");
+});
+
+test("an upload in flight reads as saving", () => {
+  for (const state of ["pending", "syncing", "checking"]) {
+    assert.equal(describeSyncStatus({ ...online, status: state }, "", NOW).tone, "pending");
+  }
+});
+
+// Regression: a failed save was invisible once inside the app.
+test("a failed save is a problem the user is told about, with their data reassured", () => {
+  const status = describeSyncStatus({ ...online, status: "error" }, "2026-09-20T12:00:00.000Z", NOW);
+  assert.equal(status.tone, "problem");
+  assert.match(status.detail, /siguen seguros en este teléfono/);
+});
+
+test("being offline wins over a stale error: the fix is the connection, not a retry", () => {
+  assert.equal(describeSyncStatus({ ...online, online: false, status: "error" }, "", NOW).tone, "offline");
 });

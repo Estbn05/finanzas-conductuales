@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.21";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.22";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
@@ -550,4 +550,58 @@ export function decidePushSync(localState, remote) {
     remoteChangedSinceLastSync(localState, remote)
     ? "download"
     : "upload";
+}
+
+// "hace un momento" / "hace 5 min" / "hace 3 h" / "hace 2 días", or "" when there is no
+// usable timestamp (never synced, or a server clock ahead of the phone's).
+export function relativeTimeEs(isoValue, now = Date.now()) {
+  const time = Date.parse(isoValue || "");
+  if (!Number.isFinite(time)) {
+    return "";
+  }
+  const minutes = Math.floor((now - time) / 60_000);
+  if (minutes < 1) {
+    return "hace un momento";
+  }
+  if (minutes < 60) {
+    return `hace ${minutes} min`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `hace ${hours} h`;
+  }
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "hace 1 día" : `hace ${days} días`;
+}
+
+// What the user should be told about cloud backup, in plain words. Returns null when
+// there is nothing to say (no cloud configured, or not signed in). `tone`:
+//   "ok"      saved; shown quietly in the menu only
+//   "pending" an upload is in flight
+//   "offline" no network; the separate offline banner already covers the main screen
+//   "problem" the last save failed; the only tone that earns a banner on the main screen
+// Sync failures used to be completely invisible once inside the app, so a user could go
+// days believing they had a cloud backup they didn't.
+export function describeSyncStatus({ configured, signedIn, status, online }, lastSyncedAt, now = Date.now()) {
+  if (!configured || !signedIn) {
+    return null;
+  }
+  if (!online) {
+    return {
+      tone: "offline",
+      label: "Sin conexión",
+      detail: "Tus cambios quedan en este teléfono y se suben cuando vuelva la conexión."
+    };
+  }
+  if (status === "error") {
+    return {
+      tone: "problem",
+      label: "No se pudo guardar en la nube",
+      detail: "Tus datos siguen seguros en este teléfono."
+    };
+  }
+  if (status === "pending" || status === "syncing" || status === "checking") {
+    return { tone: "pending", label: "Guardando en la nube…", detail: "" };
+  }
+  return { tone: "ok", label: "Guardado en la nube", detail: relativeTimeEs(lastSyncedAt, now) };
 }

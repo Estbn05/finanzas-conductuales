@@ -16,7 +16,7 @@ import {
   predictUntilNextPeriod as getPeriodPrediction,
   resolvePeriodIncome,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.21";
+} from "./finance-core.js?v=1.1.22";
 import {
   DEFAULT_REMINDER_TIME,
   DIAGNOSIS_SECTIONS,
@@ -50,10 +50,11 @@ import {
   numberFrom,
   numberValue,
   decideLoginSync,
+  describeSyncStatus,
   decidePushSync,
   hasMeaningfulLocalData,
   uid
-} from "./state-model.js?v=1.1.21";
+} from "./state-model.js?v=1.1.22";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -68,7 +69,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.21";
+} from "./sync-client.js?v=1.1.22";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -832,6 +833,7 @@ function render() {
         </nav>
         ${renderThemeSwitcher()}
         <div class="menu-tools">
+          ${renderSyncStatusLine()}
           <button class="btn primary" type="button" data-action="open-diagnosis">Editar mi plan</button>
           <button class="btn ghost" type="button" data-action="cloud-sign-out">Cerrar sesión</button>
           ${menuAlertText() ? `<div class="menu-notice" role="status">${escapeHtml(menuAlertText())}</div>` : ""}
@@ -840,6 +842,7 @@ function render() {
     </aside>
     <main class="main-panel">
       ${renderConnectionBanner()}
+      ${renderSyncProblemBanner()}
       ${state.activeView === "today" ? renderHeader(plan) : ""}
       ${renderView(plan)}
     </main>
@@ -997,6 +1000,54 @@ function renderBrandMark() {
         <circle class="brand-ring-core" cx="24" cy="24" r="5.6"/>
       </svg>
     </span>
+  `;
+}
+
+function currentSyncStatus() {
+  return describeSyncStatus(
+    {
+      configured: cloudState.configured,
+      signedIn: cloudState.signedIn,
+      status: cloudState.status,
+      online: navigator.onLine !== false
+    },
+    state.meta?.cloudUpdatedAt
+  );
+}
+
+// The quiet, always-there answer to "¿esto está respaldado?", in the menu only: the brief
+// asks for clear sync states without filling the main screen with technical indicators.
+// Tone is spelled out in words and an icon, never color alone.
+function renderSyncStatusLine() {
+  const status = currentSyncStatus();
+  if (!status) {
+    return "";
+  }
+  const icons = { ok: "✓", pending: "↻", offline: "•", problem: "!" };
+  return `
+    <p class="sync-status sync-status--${status.tone}">
+      <span class="sync-status-icon" aria-hidden="true">${icons[status.tone]}</span>
+      <span>${escapeHtml(status.label)}${status.detail && status.tone === "ok" ? ` · ${escapeHtml(status.detail)}` : ""}</span>
+    </p>
+  `;
+}
+
+// Only a failed save earns space on the main screen. Offline already has its own banner,
+// and "saving…"/"saved" are not something the user needs to act on.
+function renderSyncProblemBanner() {
+  const status = currentSyncStatus();
+  if (status?.tone !== "problem") {
+    return "";
+  }
+  return `
+    <div class="sync-problem-banner" role="alert">
+      <span class="sync-problem-icon" aria-hidden="true">!</span>
+      <div>
+        <strong>${escapeHtml(status.label)}</strong>
+        <span>${escapeHtml(status.detail)}</span>
+      </div>
+      <button class="btn ghost" type="button" data-action="retry-cloud-sync">Reintentar</button>
+    </div>
   `;
 }
 
@@ -4960,7 +5011,8 @@ function handleAction(event) {
     "register-calendar-event",
     "open-lock-setup",
     "open-lock-disable",
-    "set-theme"
+    "set-theme",
+    "retry-cloud-sync"
   ]);
 
   const actions = {
@@ -5160,6 +5212,9 @@ function handleAction(event) {
     },
     "enable-biometric": () => enableBiometric(),
     "disable-biometric": () => disableBiometric(),
+    "retry-cloud-sync": () => {
+      pushCloudState();
+    },
     "set-theme": () => {
       state.settings = {
         ...(state.settings || {}),
