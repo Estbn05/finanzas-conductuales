@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.61";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.63";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
@@ -191,6 +191,10 @@ export function normalizeBudgetJobs(jobs) {
     cadence: JOB_CADENCE_VALUES.includes(job.cadence) ? job.cadence : "monthly",
     topUps: Array.isArray(job.topUps)
       ? job.topUps.filter((topUp) => topUp && typeof topUp.windowStart === "string" && Number(topUp.amount) > 0)
+      : [],
+    // Money taken back out of the category's fund with "Liberar" (see jobFund).
+    released: Array.isArray(job.released)
+      ? job.released.filter((release) => release && typeof release.windowStart === "string" && Number(release.amount) > 0)
       : [],
     updated_at: job.updated_at || ""
   }));

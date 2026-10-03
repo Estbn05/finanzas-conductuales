@@ -1849,6 +1849,16 @@ p {
   font-size: 0.75rem;
 }
 
+/* "Liberar $X apartado": hands a category's fund back to Libre. Full-width and 44px
+   tall so it's an easy, deliberate tap, but ghost-styled so it doesn't compete with the
+   card's numbers. */
+.plan-category-card .category-release-btn {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 10px;
+  font-size: 0.86rem;
+}
+
 .category-menu-btn {
   width: 32px;
   height: 28px;

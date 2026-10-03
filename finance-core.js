@@ -16,8 +16,9 @@ export const JOB_CADENCES = {
   semester: { label: "semestral" },
   yearly: { label: "anual" },
   period: { label: "una vez por periodo" },
-  // Set aside once: counts only in the period it was created in (job.windowStart).
-  once: { label: "solo este periodo" }
+  // Money set aside with "Apartar dinero": a fund that stays reserved across periods
+  // until it is spent or released (see jobFund).
+  once: { label: "apartado" }
 };
 
 export function calculatePlan(state, today) {
@@ -34,9 +35,9 @@ export function calculatePlan(state, today) {
     Math.max(0, summary.income - protectedExpenses - summary.savingsReserved - summary.freeImpactSpent)
   );
   const suggestedPeriodSavings = Math.round(
-    Math.min(Math.max(0, idealPeriodSavings - summary.savingsRemaining), availableAdditional)
+    Math.min(Math.max(0, idealPeriodSavings - summary.savingsRemainingThisPeriod), availableAdditional)
   );
-  const projectedPeriodSavings = summary.savingsRemaining + suggestedPeriodSavings;
+  const projectedPeriodSavings = summary.savingsRemainingThisPeriod + suggestedPeriodSavings;
   const savingsCapacityGap = Math.max(0, idealPeriodSavings - projectedPeriodSavings);
   const savings = Math.round(projectedPeriodSavings / summary.months);
   const expenses = Math.max(0, income - savings);
@@ -105,39 +106,122 @@ export function getPeriodWeeks(profile) {
   return INCOME_CADENCES[getIncomeCadence(profile)].weeks;
 }
 
-// What a category reserves in the period starting at `windowStart`. "Apartar dinero" is a
-// one-off: a new name becomes a "once" category, and money set aside onto an existing
-// category is a top-up for this period only. Both used to be added to a recurring
-// "period" amount, so $50.000 set aside once was reserved again in every later period
-// and the savings category grew with every extra income. Without `windowStart` (a form
-// preview, onboarding) the base amount is returned.
-export function budgetAmountForJob(job, profile, windowStart) {
-  const topUps = windowStart
-    ? (job.topUps || [])
-        .filter((topUp) => topUp.windowStart === windowStart)
-        .reduce((sum, topUp) => sum + Number(topUp.amount || 0), 0)
-    : 0;
+// "Apartar dinero" builds a fund: money set aside stays reserved, period after period,
+// until it is spent or released ("Liberar"). A new name becomes a "once" category whose
+// own amount is its first contribution; money set aside onto an existing category is a
+// top-up. It used to expire with the period it was set aside in, so $300.000 put aside
+// for three months of gasolina silently went back to "libre" a month later — and a
+// quincenal user could never plan anything further than 15 days out (SOAT, matrícula).
+//
+// The fund is never re-added each period (an older bug reserved $50.000 set aside once
+// again in every later period). Instead each past period's spending on the category,
+// beyond what its recurring limit already covered, draws the fund down.
+function fundEvents(job) {
+  const events = (job.topUps || []).map((topUp) => ({ windowStart: topUp.windowStart || "", amount: Number(topUp.amount || 0) }));
   if (job.cadence === "once") {
-    const counts = !windowStart || !job.windowStart || job.windowStart === windowStart;
-    return (counts ? Math.round(Number(job.amount || 0)) : 0) + topUps;
+    events.push({ windowStart: job.windowStart || "", amount: Number(job.amount || 0) });
   }
-  return recurringBudgetAmount(job, profile) + topUps;
+  (job.released || []).forEach((release) => events.push({ windowStart: release.windowStart || "", amount: -Number(release.amount || 0) }));
+  return events;
 }
 
-// One-off categories and top-ups from earlier periods no longer reserve anything; drop
-// them so they stop cluttering the plan and counting toward the 10-category limit.
-// `retired` keeps each dropped category's name, so older movements still say what they
-// were for instead of "Sin categoría".
-export function pruneExpiredOneOffs(budgetJobs, windowStart) {
+export function hasFund(job) {
+  return job.cadence === "once" || (job.topUps || []).length > 0;
+}
+
+// The fund as of the period starting at `windowStart`: `carried` is what was left when
+// that period began, `added` the net set aside (or released) during it. Spending beyond
+// the recurring limit in a past period draws from the fund, never below zero; the
+// current period's spending is left to the caller, like any category's.
+export function jobFund(job, profile, transactions, windowStart) {
+  const events = fundEvents(job);
+  if (!events.length || !windowStart) {
+    return { carried: 0, added: 0, total: 0 };
+  }
+  const recurring = job.cadence === "once" ? 0 : recurringBudgetAmount(job, profile);
+  const past = events.filter((event) => event.windowStart && event.windowStart < windowStart);
+  const firstStart = past.reduce((earliest, event) => (!earliest || event.windowStart < earliest ? event.windowStart : earliest), "");
+
+  const spentByWindow = new Map();
+  if (firstStart) {
+    const windowOf = new Map();
+    for (const transaction of transactions || []) {
+      if (!transaction.labeled || transaction.category !== job.id) continue;
+      const date = String(transaction.date || "").slice(0, 10);
+      if (date < firstStart || date >= windowStart) continue;
+      if (!windowOf.has(date)) windowOf.set(date, budgetWindow(profile, date).start);
+      const start = windowOf.get(date);
+      spentByWindow.set(start, (spentByWindow.get(start) || 0) + Number(transaction.amount || 0));
+    }
+  }
+
+  let carried = 0;
+  const starts = [...new Set([...past.map((event) => event.windowStart), ...spentByWindow.keys()])].sort();
+  for (const start of starts) {
+    carried += past.filter((event) => event.windowStart === start).reduce((sum, event) => sum + event.amount, 0);
+    carried = Math.max(0, carried);
+    carried = Math.max(0, carried - Math.max(0, (spentByWindow.get(start) || 0) - recurring));
+  }
+
+  const added = events
+    .filter((event) => !event.windowStart || event.windowStart >= windowStart)
+    .reduce((sum, event) => sum + event.amount, 0);
+  // What earlier periods' spending took out of the fund, so the card can say so instead
+  // of its "usado" counter (this period only) reading as if the fund had been reset.
+  const pastNet = past.reduce((sum, event) => sum + event.amount, 0);
+  return {
+    carried: Math.round(carried),
+    added: Math.round(added),
+    total: Math.round(Math.max(0, carried + added)),
+    usedBefore: Math.round(Math.max(0, pastNet - carried))
+  };
+}
+
+// What a category reserves in the period starting at `windowStart`: its recurring limit
+// plus whatever its fund holds. Without `windowStart` (a form preview, onboarding) the
+// base amount is returned. Pass `transactions` so earlier periods' spending can draw the
+// fund down; without them the fund is taken as untouched.
+export function budgetAmountForJob(job, profile, windowStart, transactions = []) {
+  if (!windowStart) {
+    return job.cadence === "once" ? Math.round(Number(job.amount || 0)) : recurringBudgetAmount(job, profile);
+  }
+  const recurring = job.cadence === "once" ? 0 : recurringBudgetAmount(job, profile);
+  return recurring + jobFund(job, profile, transactions, windowStart).total;
+}
+
+// The part of that reserve paid out of THIS period's income: the recurring limit plus
+// what was set aside during the period. A fund carried over was paid for by earlier
+// periods, so it must not shrink this period's cupo a second time.
+function incomeFundedAmount(job, profile, windowStart, transactions) {
+  const recurring = job.cadence === "once" ? 0 : recurringBudgetAmount(job, profile);
+  const fund = jobFund(job, profile, transactions, windowStart);
+  return recurring + Math.max(0, Math.min(fund.total, fund.added));
+}
+
+// A fund that has been spent or released and has nothing left is dropped at a new
+// period, so it stops cluttering the plan and counting toward the 10-category limit. One
+// that still holds money is kept, period after period, until it is used. `retired`
+// keeps each dropped category's name, so older movements still say what they were for.
+export function pruneExpiredOneOffs(budgetJobs, windowStart, profile, transactions) {
   const retired = [];
   const kept = [];
   for (const job of budgetJobs || []) {
-    if (job.cadence === "once" && job.windowStart && job.windowStart !== windowStart) {
+    if (!hasFund(job)) {
+      kept.push(job);
+      continue;
+    }
+    const fund = jobFund(job, profile, transactions, windowStart);
+    const touchedThisPeriod = fundEvents(job).some((event) => !event.windowStart || event.windowStart >= windowStart);
+    if (fund.total > 0 || touchedThisPeriod) {
+      kept.push(job);
+      continue;
+    }
+    if (job.cadence === "once") {
       retired.push({ id: job.id, name: job.name });
       continue;
     }
-    const topUps = (job.topUps || []).filter((topUp) => topUp.windowStart === windowStart);
-    kept.push(topUps.length === (job.topUps || []).length ? job : { ...job, topUps });
+    // A recurring category whose extra fund ran out: keep the category, drop the history.
+    kept.push({ ...job, topUps: [], released: [] });
   }
   return { budgetJobs: kept, retired };
 }
@@ -172,19 +256,29 @@ export function budgetSummary(state, today) {
   const jobBudgets = state.budgetJobs.map((job) => ({
     id: job.id,
     isSavings: isSavingsJob(job),
-    budget: budgetAmountForJob(job, state.profile, window.start),
+    budget: budgetAmountForJob(job, state.profile, window.start, state.transactions),
+    fromIncome: incomeFundedAmount(job, state.profile, window.start, state.transactions),
     spent: spent[job.id] || 0
   }));
   const reserved = jobBudgets.reduce((sum, job) => sum + job.budget, 0);
+  // What this period's income has to cover. Funds carried over from earlier periods are
+  // still reserved (above) but were already paid for, so they don't shrink the cupo.
+  const incomeReserved = jobBudgets.reduce((sum, job) => sum + job.fromIncome, 0);
+  const carriedReserved = reserved - incomeReserved;
   const savingsReserved = jobBudgets.filter((job) => job.isSavings).reduce((sum, job) => sum + job.budget, 0);
   const savingsRemaining = jobBudgets
     .filter((job) => job.isSavings)
     .reduce((sum, job) => sum + Math.max(0, job.budget - job.spent), 0);
+  // Only what this period set aside for savings counts toward this period's suggestion;
+  // savings carried from earlier periods must not make the advisor ask for less now.
+  const savingsRemainingThisPeriod = jobBudgets
+    .filter((job) => job.isSavings)
+    .reduce((sum, job) => sum + Math.max(0, Math.min(job.fromIncome, job.budget - job.spent)), 0);
   const expenseReserved = reserved - savingsReserved;
   const reservedSpent = jobBudgets.reduce((sum, job) => sum + Math.min(job.spent, job.budget), 0);
   const reservedRemaining = jobBudgets.reduce((sum, job) => sum + Math.max(0, job.budget - job.spent), 0);
   const categoryOverspent = jobBudgets.reduce((sum, job) => sum + Math.max(0, job.spent - job.budget), 0);
-  const freeBudget = Math.max(0, income - reserved);
+  const freeBudget = Math.max(0, income - incomeReserved);
   const freeSpent = spent[FREE_CATEGORY_ID] || 0;
   const totalSpent = Object.values(spent).reduce((sum, amount) => sum + Number(amount || 0), 0);
   const freeImpactSpent = freeSpent + categoryOverspent;
@@ -230,8 +324,11 @@ export function budgetSummary(state, today) {
     extraIncome,
     income,
     reserved,
+    incomeReserved,
+    carriedReserved,
     savingsReserved,
     savingsRemaining,
+    savingsRemainingThisPeriod,
     expenseReserved,
     reservedSpent,
     reservedRemaining,
@@ -246,7 +343,7 @@ export function budgetSummary(state, today) {
     usesLiquidityBasedFree,
     incomeApplied,
     freeRemaining,
-    overReserved: Math.max(0, reserved - income),
+    overReserved: Math.max(0, incomeReserved - income),
     months: getPeriodMonths(state.profile),
     weeks: getPeriodWeeks(state.profile),
     cadence: getIncomeCadence(state.profile),
@@ -302,6 +399,8 @@ export function predictUntilNextPeriod(state, today) {
     extraIncome: summary.extraIncome,
     freeBudget: summary.freeBudget,
     reserved: summary.reserved,
+    incomeReserved: summary.incomeReserved,
+    carriedReserved: summary.carriedReserved,
     overReserved: summary.overReserved,
     freeSpent: summary.freeSpent,
     categoryOverspent: summary.categoryOverspent,
@@ -356,7 +455,7 @@ function freeImpactForPrediction(state, summary, today) {
 
   const categoryOverspent = (state.budgetJobs || []).reduce((sum, job) => {
     const used = spent[job.id] || 0;
-    const budget = budgetAmountForJob(job, state.profile, window.start);
+    const budget = budgetAmountForJob(job, state.profile, window.start, state.transactions);
     return sum + Math.max(0, used - budget);
   }, 0);
   const observedFreeSpent = (spent[FREE_CATEGORY_ID] || 0) + categoryOverspent;
@@ -407,7 +506,7 @@ export function categoryStatus(state, today) {
   const windowStart = budgetWindow(state.profile, today).start;
   return state.budgetJobs.map((job) => {
     const used = spent[job.id] || 0;
-    const budget = budgetAmountForJob(job, state.profile, windowStart);
+    const budget = budgetAmountForJob(job, state.profile, windowStart, state.transactions);
     const ratio = budget ? (used / budget) * 100 : 0;
     return {
       id: job.id,

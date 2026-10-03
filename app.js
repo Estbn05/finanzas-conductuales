@@ -12,13 +12,14 @@ import {
   findLoggedIncome,
   freeShareOfBudget,
   isSavingsJob,
+  jobFund,
   getPeriodIncome,
   getMonthlyIncome,
   predictUntilNextPeriod as getPeriodPrediction,
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.61";
+} from "./finance-core.js?v=1.1.63";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -64,7 +65,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.61";
+} from "./state-model.js?v=1.1.63";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -80,7 +81,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.61";
+} from "./sync-client.js?v=1.1.63";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -248,7 +249,7 @@ const TOUR_STEPS = [
   {
     targets: [".setaside-action"],
     title: "Apartar dinero",
-    text: "Guarda plata para algo puntual, como un regalo o un remedio. Deja de contar como libre, pero no se mueve de tu cuenta."
+    text: "Guarda plata para algo, como un regalo o la gasolina de varios meses. Queda apartada hasta que la uses o la liberes, y no se mueve de tu cuenta."
   },
   {
     targets: [".home-view .category-bars", ".home-view .home-section-heading"],
@@ -1918,7 +1919,11 @@ function renderReservedBreakdown(mode) {
       return { name: category.name, budget, spent, counted: mode === "remaining" ? Math.max(0, budget - spent) : budget };
     })
     .filter((row) => row.counted > 0);
-  const total = rows.reduce((sum, row) => sum + row.counted, 0);
+  // In "budget" mode the row reads Presupuesto − Reservado = Libre, but a fund carried
+  // over from earlier periods was paid for by earlier income, not this budget; leave it
+  // out of the subtraction (still listed per category) so the math adds up.
+  const carried = mode === "budget" ? Number(budgetSummary().carriedReserved || 0) : 0;
+  const total = rows.reduce((sum, row) => sum + row.counted, 0) - carried;
   const items = rows.map((row) => [
     escapeHtml(row.name),
     mode === "remaining"
@@ -1935,7 +1940,9 @@ function renderReservedBreakdown(mode) {
     items,
     mode === "remaining"
       ? "Lo que todavía te queda por gastar en cada categoría. Baja a medida que la usas y no sale de tu cuenta."
-      : "Lo que separaste en cada categoría este periodo; no cuenta como libre."
+      : carried > 0
+        ? `Lo que separaste en cada categoría; no cuenta como libre. ${formatMoney(carried)} de eso lo apartaste en periodos anteriores, así que no resta de este presupuesto.`
+        : "Lo que separaste en cada categoría este periodo; no cuenta como libre."
   );
 }
 
@@ -2134,8 +2141,8 @@ function renderPredictionDetailsModal() {
         </div>
         <div class="formula-list">
           <p class="formula-heading">Calculo</p>
-          <p><strong>dinero_libre_inicial</strong> = ingreso_del_periodo + extras - dinero_reservado_en_categorias</p>
-          <code>${formatMoney(summary.baseIncome)} + ${formatMoney(prediction.extraIncome)} - ${formatMoney(prediction.reserved)} = ${formatMoney(prediction.freeBudget)}</code>
+          <p><strong>dinero_libre_inicial</strong> = ingreso_del_periodo + extras - reservado_este_periodo${prediction.carriedReserved > 0 ? ` (lo apartado de periodos anteriores, ${formatMoney(prediction.carriedReserved)}, ya salió de ingresos pasados)` : ""}</p>
+          <code>${formatMoney(summary.baseIncome)} + ${formatMoney(prediction.extraIncome)} - ${formatMoney(prediction.incomeReserved)} = ${formatMoney(prediction.freeBudget)}</code>
           <p><strong>gasto_libre_real</strong> = gastos_sin_categoria + excesos_de_categorias</p>
           <code>${formatMoney(prediction.freeSpent)} + ${formatMoney(prediction.categoryOverspent)} = ${formatMoney(prediction.actualFreeImpactSpent)}</code>
           ${prediction.ignoredOneOffSpent > 0 ? `<p><strong>gasto_unico</strong> = ${formatMoney(prediction.ignoredOneOffSpent)}. Baja el libre hoy, pero no se usa para ritmo diario.</p>` : ""}
@@ -2950,7 +2957,7 @@ function renderAddCategoryChoiceSheet() {
           <span aria-hidden="true">$</span>
           <div class="add-category-row-text">
             <strong>Apartar dinero</strong>
-            <small>Una vez, en este periodo — para algo puntual</small>
+            <small>Una vez, y queda guardado hasta que lo uses — gasolina para varios meses, el SOAT</small>
           </div>
         </button>
         <button class="add-category-row" type="button" data-action="open-category-sheet">
@@ -3022,7 +3029,7 @@ function renderSetAsideSheet() {
           <div><p class="eyebrow">Tu plata</p><h2 id="setaside-sheet-title">Apartar dinero</h2></div>
           <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">${renderIcon("close")}</button>
         </div>
-        <p class="setaside-note">Guardas esta plata para algo, y deja de contar como libre. Tu cuenta y tu efectivo siguen igual: aquí no se mueve dinero de verdad.</p>
+        <p class="setaside-note">Queda apartado hasta que lo uses o lo liberes, aunque pasen varios periodos, y deja de contar como libre. Tu cuenta y tu efectivo siguen igual: aquí no se mueve dinero de verdad.</p>
         <form class="sheet-form setaside-form" id="setaside-form">
           <label>
             ¿Cuánto quieres apartar?
@@ -3159,7 +3166,17 @@ function categoryIconFor(name) {
 
 function renderBudgetJob(job) {
   const spent = spendByCategory()[job.id] || 0;
-  const budget = getBudgetAmountForJob(job, state.profile, budgetSummary().window.start);
+  const windowStart = budgetSummary().window.start;
+  const budget = getBudgetAmountForJob(job, state.profile, windowStart, state.transactions);
+  const fund = jobFund(job, state.profile, state.transactions, windowStart);
+  const isFundOnly = job.cadence === "once";
+  // What can still be released: the fund, net of anything already spent from it this
+  // period beyond the recurring limit.
+  const recurring = isFundOnly ? 0 : getBudgetAmountForJob(job, state.profile);
+  const releasable = Math.max(0, Math.min(fund.total, budget - Math.max(spent, recurring)));
+  const subtitle = isFundOnly
+    ? `Apartado · ${formatMoney(fund.total)}${fund.usedBefore > 0 ? ` · ya usaste ${formatMoney(fund.usedBefore)} antes` : ""}`
+    : `${capitalize(cadenceLabel(job.cadence))} · ${formatMoney(job.amount)}${fund.total > 0 ? ` + ${formatMoney(fund.total)} apartado` : ""}`;
   const ratio = budget ? (spent / budget) * 100 : 0;
   const band = ratio > 90 ? "danger" : ratio > 65 ? "warning" : "good";
   const remaining = Math.max(0, budget - spent);
@@ -3172,7 +3189,7 @@ function renderBudgetJob(job) {
           <span class="category-card-icon" aria-hidden="true">${renderIcon(categoryIconFor(job.name))}</span>
           <div>
             <strong>${escapeHtml(job.name)}</strong>
-            <span>${capitalize(cadenceLabel(job.cadence))} · ${formatMoney(job.amount)}${budget > getBudgetAmountForJob(job, state.profile) ? ` + ${formatMoney(budget - getBudgetAmountForJob(job, state.profile))} apartado este periodo` : ""}</span>
+            <span>${subtitle}</span>
           </div>
         </div>
         <button class="category-menu-btn" type="button" data-action="request-remove-job" data-id="${escapeAttr(job.id)}" aria-label="Eliminar ${escapeAttr(job.name)}">&middot;&middot;&middot;</button>
@@ -3184,6 +3201,11 @@ function renderBudgetJob(job) {
         <span><strong>${formatMoney(spent)}</strong> usado</span>
         <span class="category-status">${status} · ${formatCompactMoney(remaining)} restante</span>
       </div>
+      ${
+        releasable > 0
+          ? `<button class="btn ghost category-release-btn" type="button" data-action="release-fund" data-id="${escapeAttr(job.id)}">Liberar ${formatMoney(releasable)} apartado</button>`
+          : ""
+      }
     </article>
   `;
 }
@@ -5837,6 +5859,7 @@ function handleAction(event) {
     "close-plan-sheet": () => {
       planSheet = "";
     },
+    "release-fund": () => releaseFund(id),
     "request-remove-job": () => {
       pendingJobRemovalId = id;
     },
@@ -7652,8 +7675,10 @@ function findSavingsJob() {
   return matches.find((job) => job.cadence === "period") || matches[0];
 }
 
-// Sets money aside for THIS period only: a top-up on an existing category, or a new
-// "once" category that expires with the period.
+// Sets money aside into a fund that stays reserved across periods until it's spent or
+// released: a top-up on an existing category, or a new "once" category. Each entry
+// records the period it was made in so earlier periods' spending can draw it down
+// (finance-core jobFund) instead of it being reserved again every period.
 function setAsideForThisPeriod(job, name, amount, updatedAt) {
   const windowStart = budgetSummary().window.start;
   if (job) {
@@ -7739,6 +7764,36 @@ function handleSetAsideSubmit(event) {
   showNoticeSnackbar(state.lastAlert, { renderNow: false });
   saveState();
   render();
+}
+
+// "Liberar": hands what's left of a category's fund back to Libre. A set-aside-only
+// category with nothing spent this period is removed outright; otherwise the release is
+// recorded so this period's spending on it keeps its category, and the emptied fund is
+// dropped at the next period like any other.
+function releaseFund(jobId) {
+  const job = state.budgetJobs.find((item) => item.id === jobId);
+  if (!job) {
+    return;
+  }
+  const windowStart = budgetSummary().window.start;
+  const spent = spendByCategory()[job.id] || 0;
+  const fund = jobFund(job, state.profile, state.transactions, windowStart);
+  const recurring = job.cadence === "once" ? 0 : getBudgetAmountForJob(job, state.profile);
+  const budget = recurring + fund.total;
+  const amount = Math.max(0, Math.min(fund.total, budget - Math.max(spent, recurring)));
+  if (amount <= 0) {
+    return;
+  }
+
+  if (job.cadence === "once" && spent === 0) {
+    state.budgetJobs = state.budgetJobs.filter((item) => item.id !== jobId);
+    state.retiredCategoryNames = { ...(state.retiredCategoryNames || {}), [job.id]: job.name };
+  } else {
+    job.released = [...(job.released || []), { windowStart, amount }];
+    job.updated_at = new Date().toISOString();
+  }
+  state.lastAlert = `Liberaste ${formatMoney(amount)} de ${job.name}. Vuelve a contar como libre.`;
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
 }
 
 function reduceSavingsAllocation(jobId, amount) {
@@ -8217,7 +8272,15 @@ function ensurePeriodIncomeApplication() {
 }
 
 function retireExpiredOneOffs() {
-  const { budgetJobs, retired } = pruneExpiredOneOffs(state.budgetJobs, getBudgetWindow(state.profile, todayKey()).start);
+  const windowStart = getBudgetWindow(state.profile, todayKey()).start;
+  // A set-aside saved without the period it was made in would count as made "now" in
+  // every period (re-reserving it forever); pin it to this one.
+  state.budgetJobs.forEach((job) => {
+    if (job.cadence === "once" && !job.windowStart) {
+      job.windowStart = windowStart;
+    }
+  });
+  const { budgetJobs, retired } = pruneExpiredOneOffs(state.budgetJobs, windowStart, state.profile, state.transactions);
   if (budgetJobs.length === state.budgetJobs.length && budgetJobs.every((job, index) => job === state.budgetJobs[index])) {
     return;
   }
@@ -8610,7 +8673,7 @@ function cadenceLabel(cadence) {
     semester: "semestral",
     yearly: "anual",
     period: "por periodo",
-    once: "solo este periodo"
+    once: "apartado"
   };
   return labels[cadence] || labels.monthly;
 }

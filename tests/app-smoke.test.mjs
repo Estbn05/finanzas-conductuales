@@ -589,8 +589,10 @@ async function setAside(ui, name, amount) {
   await settle(ui.window);
 }
 
-// Regression: setting money aside once reserved it again in every later period.
-test("apartar dinero reserves for this period only, and expires with it", async () => {
+// Regression (real case): money set aside for several months of gasolina went back to
+// "libre" when the first month ended. A set-aside now stays until spent or released —
+// without ever being re-reserved in full each period (the older bug).
+test("apartar dinero stays reserved into the next period, and Liberar hands it back", async () => {
   const ui = await bootApp({
     savedState: returningUserState({ budgetJobs: [{ id: "mercado", name: "Mercado", amount: 200_000, cadence: "period" }] })
   });
@@ -609,7 +611,7 @@ test("apartar dinero reserves for this period only, and expires with it", async 
     ui.close();
   }
 
-  // Same data, one period later: the one-offs are gone, the name survives for old movements.
+  // Same data, a later period, nothing spent: both set-asides are still there, intact.
   const lastPeriod = "2000-01-01";
   const nextPeriod = await bootApp({
     savedState: {
@@ -622,12 +624,20 @@ test("apartar dinero reserves for this period only, and expires with it", async 
     }
   });
   try {
-    nextPeriod.window.document.querySelector('[data-view="budget"]').click();
-    await settle(nextPeriod.window);
+    await nextPeriod.click('[data-view="budget"]');
     const after = nextPeriod.saved();
-    assert.deepEqual(after.budgetJobs.map((job) => job.id), ["mercado"]);
-    assert.deepEqual(after.budgetJobs[0].topUps, []);
-    assert.ok(Object.values(after.retiredCategoryNames).includes("Remedios"));
+    assert.deepEqual(after.budgetJobs.map((job) => job.id).sort(), ["mercado", "remedios"]);
+    assert.equal(after.budgetJobs.find((job) => job.id === "mercado").topUps.length, 1);
+    // Nothing spent from it yet, so no "ya usaste … antes" note — just the fund.
+    assert.match(nextPeriod.text(), /Apartado · \$\s?50\.000 ···/);
+    assert.doesNotMatch(nextPeriod.text(), /ya usaste/);
+    assert.match(nextPeriod.text(), /\+ \$\s?30\.000 apartado/);
+
+    await nextPeriod.click('[data-action="release-fund"][data-id="remedios"]');
+    const released = nextPeriod.saved();
+    assert.deepEqual(released.budgetJobs.map((job) => job.id), ["mercado"], "nothing spent: Liberar removes the set-aside");
+    assert.ok(Object.values(released.retiredCategoryNames).includes("Remedios"));
+    assert.match(nextPeriod.text(), /Liberaste \$\s?50\.000 de Remedios/);
   } finally {
     nextPeriod.close();
   }

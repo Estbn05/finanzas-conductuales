@@ -13,6 +13,7 @@ import {
   isLargeUnbudgetedPurchase,
   freeShareOfBudget,
   isSavingsJob,
+  jobFund,
   predictUntilNextPeriod,
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding
@@ -982,38 +983,92 @@ test("what is owed on the card comes out of the real total", () => {
   assert.equal(summary.liquidityTotal, 700_000);
 });
 
-// Regression: "Apartar dinero" used to add to a recurring "per period" amount, so money
-// set aside once was reserved again in every later period.
-test("a one-off set-aside reserves only in its own period", () => {
-  const profile = { incomeCadence: "monthly", incomeAmount: 1_000_000, periodStart: "2026-06-01" };
-  const remedios = { id: "remedios", name: "Remedios", amount: 50_000, cadence: "once", windowStart: "2026-06-01" };
-  assert.equal(budgetAmountForJob(remedios, profile, "2026-06-01"), 50_000);
-  assert.equal(budgetAmountForJob(remedios, profile, "2026-07-01"), 0);
+const FUND_PROFILE = { incomeCadence: "monthly", incomeAmount: 1_000_000, periodStart: "2026-06-01" };
 
-  const mercado = {
-    id: "mercado",
-    name: "Mercado",
-    amount: 200_000,
-    cadence: "period",
-    topUps: [{ windowStart: "2026-06-01", amount: 30_000 }]
-  };
-  assert.equal(budgetAmountForJob(mercado, profile, "2026-06-01"), 230_000);
-  assert.equal(budgetAmountForJob(mercado, profile, "2026-07-01"), 200_000, "the top-up leaked into the next period");
+function spentOn(category, date, amount) {
+  return { id: `${category}-${date}`, date, amount, category, labeled: true };
+}
 
-  const june = { profile, liquidity: { account: 0, cash: 0 }, budgetJobs: [remedios, mercado], transactions: [], budgetExtras: [] };
-  assert.equal(budgetSummary(june, "2026-06-10").reserved, 280_000);
-  assert.equal(budgetSummary(june, "2026-07-10").reserved, 200_000);
+// Regression (real case): $300.000 set aside for about three months of gasolina went back
+// to "libre" when the first month ended. A set-aside is a fund: it stays reserved,
+// period after period, and only spending draws it down.
+test("money set aside stays reserved across periods until it is spent", () => {
+  const gasolina = { id: "gasolina", name: "Gasolina", amount: 300_000, cadence: "once", windowStart: "2026-06-01" };
+  const transactions = [spentOn("gasolina", "2026-06-15", 100_000), spentOn("gasolina", "2026-07-20", 120_000)];
+
+  assert.equal(budgetAmountForJob(gasolina, FUND_PROFILE, "2026-06-01", transactions), 300_000);
+  assert.equal(budgetAmountForJob(gasolina, FUND_PROFILE, "2026-07-01", transactions), 200_000, "June's tanqueo draws the fund down");
+  assert.equal(budgetAmountForJob(gasolina, FUND_PROFILE, "2026-08-01", transactions), 80_000);
+
+  const august = { profile: FUND_PROFILE, budgetJobs: [gasolina], transactions, budgetExtras: [] };
+  assert.equal(budgetSummary(august, "2026-08-10").reservedRemaining, 80_000);
+
+  // The card's "usado" counts this period only, so it says what earlier periods used
+  // ("ya usaste $220.000 antes") — otherwise $0 used reads as if the fund had reset.
+  assert.equal(jobFund(gasolina, FUND_PROFILE, transactions, "2026-06-01").usedBefore, 0);
+  assert.equal(jobFund(gasolina, FUND_PROFILE, transactions, "2026-07-01").usedBefore, 100_000);
+  assert.equal(jobFund(gasolina, FUND_PROFILE, transactions, "2026-08-01").usedBefore, 220_000);
 });
 
-test("expired one-offs are dropped at a new period, keeping their names", () => {
-  const jobs = [
-    { id: "remedios", name: "Remedios", amount: 50_000, cadence: "once", windowStart: "2026-06-01" },
-    { id: "mercado", name: "Mercado", amount: 200_000, cadence: "period", topUps: [{ windowStart: "2026-06-01", amount: 30_000 }] },
-    { id: "viaje", name: "Viaje", amount: 90_000, cadence: "once", windowStart: "2026-07-01" }
-  ];
-  const { budgetJobs, retired } = pruneExpiredOneOffs(jobs, "2026-07-01");
-  assert.deepEqual(budgetJobs.map((job) => job.id), ["mercado", "viaje"]);
-  assert.deepEqual(budgetJobs[0].topUps, []);
-  assert.deepEqual(retired, [{ id: "remedios", name: "Remedios" }]);
-  assert.equal(pruneExpiredOneOffs(jobs, "2026-06-01").budgetJobs[1], jobs[1], "nothing to prune must keep the same objects");
+// The older bug this replaced: money set aside once was reserved again, in full, in
+// every later period. A fund is never re-added — it only shrinks.
+test("a set-aside is never re-reserved in full each period", () => {
+  const remedios = { id: "remedios", name: "Remedios", amount: 50_000, cadence: "once", windowStart: "2026-06-01" };
+  const mercado = { id: "mercado", name: "Mercado", amount: 200_000, cadence: "period", topUps: [{ windowStart: "2026-06-01", amount: 30_000 }] };
+  // June: Mercado spends its 200k limit plus 20k of the 30k extra.
+  const transactions = [spentOn("mercado", "2026-06-10", 220_000)];
+
+  assert.equal(budgetAmountForJob(mercado, FUND_PROFILE, "2026-06-01", transactions), 230_000);
+  assert.equal(budgetAmountForJob(mercado, FUND_PROFILE, "2026-07-01", transactions), 210_000, "only the unspent 10k extra carries over");
+  assert.equal(budgetAmountForJob(remedios, FUND_PROFILE, "2026-09-01", transactions), 50_000, "unspent stays put, not multiplied");
+
+  const july = { profile: FUND_PROFILE, budgetJobs: [remedios, mercado], transactions, budgetExtras: [] };
+  assert.equal(budgetSummary(july, "2026-07-10").reserved, 260_000);
+});
+
+// A fund carried over was paid for by earlier income. It must not shrink this period's
+// cupo again, and spending it must not count as overspending.
+test("a carried-over fund neither shrinks this period's cupo nor counts as overspending", () => {
+  const viaje = { id: "viaje", name: "Viaje", amount: 400_000, cadence: "once", windowStart: "2026-06-01" };
+  const state = {
+    profile: { ...FUND_PROFILE, incomeType: "variable" },
+    budgetJobs: [viaje],
+    transactions: [spentOn("viaje", "2026-07-12", 150_000)],
+    budgetExtras: []
+  };
+  const july = budgetSummary(state, "2026-07-15");
+  assert.equal(july.carriedReserved, 400_000);
+  assert.equal(july.incomeReserved, 0);
+  assert.equal(july.freeBudget, 1_000_000, "July's income is all still available");
+  assert.equal(july.categoryOverspent, 0);
+  assert.equal(july.freeRemaining, 1_000_000);
+  assert.equal(july.overReserved, 0);
+});
+
+test("savings carried from earlier periods don't lower this period's savings suggestion", () => {
+  const ahorro = { id: "ahorro", name: "Ahorro", amount: 600_000, cadence: "once", windowStart: "2026-06-01" };
+  const withFund = makeState({ budgetJobs: [ahorro] });
+  withFund.profile = { ...withFund.profile, incomeAmount: 6_000_000, periodStart: "2026-06-01" };
+  const without = makeState({ budgetJobs: [] });
+  without.profile = { ...without.profile, incomeAmount: 6_000_000, periodStart: "2026-06-01" };
+  assert.equal(
+    calculatePlan(withFund, "2026-07-10").suggestedPeriodSavings,
+    calculatePlan(without, "2026-07-10").suggestedPeriodSavings
+  );
+});
+
+test("released money leaves the fund, and empty funds are dropped at a new period", () => {
+  const regalo = { id: "regalo", name: "Regalo", amount: 80_000, cadence: "once", windowStart: "2026-06-01", released: [{ windowStart: "2026-06-01", amount: 80_000 }] };
+  const gasolina = { id: "gasolina", name: "Gasolina", amount: 300_000, cadence: "once", windowStart: "2026-06-01" };
+  const mercado = { id: "mercado", name: "Mercado", amount: 200_000, cadence: "period", topUps: [{ windowStart: "2026-06-01", amount: 30_000 }] };
+  const transactions = [spentOn("mercado", "2026-06-10", 230_000)];
+
+  assert.equal(budgetAmountForJob(regalo, FUND_PROFILE, "2026-06-01", transactions), 0);
+
+  const jobs = [regalo, gasolina, mercado];
+  const { budgetJobs, retired } = pruneExpiredOneOffs(jobs, "2026-07-01", FUND_PROFILE, transactions);
+  assert.deepEqual(budgetJobs.map((job) => job.id), ["gasolina", "mercado"], "the unspent gasolina fund survives");
+  assert.deepEqual(budgetJobs[1].topUps, [], "Mercado's spent extra is cleaned up, the category kept");
+  assert.deepEqual(retired, [{ id: "regalo", name: "Regalo" }]);
+  assert.equal(pruneExpiredOneOffs(jobs, "2026-06-01", FUND_PROFILE, transactions).budgetJobs[1], jobs[1], "nothing to prune keeps the same objects");
 });
