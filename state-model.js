@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.63";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.64";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
@@ -418,8 +418,24 @@ export function normalizeBudgetExtras(extras, today) {
   }));
 }
 
+// Fields this version doesn't know are kept, not dropped: they may come from a newer
+// version of the app on another device (synced through the cloud), and dropping them here
+// would delete them for everyone on the next upload. Older versions dropped `credit` this
+// way before the card existed. Only keys deliberately retired from older versions are
+// left behind.
+const RETIRED_STATE_KEYS = new Set(["debts", "liquidityPeriodAnchor"]);
+
+function unknownFields(saved, known, retired = new Set()) {
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) {
+    return {};
+  }
+  return Object.fromEntries(Object.entries(saved).filter(([key]) => !(key in known) && !retired.has(key)));
+}
+
 export function normalizeLiquidity(liquidity) {
+  const known = { account: 0, cash: 0, credit: 0, initialized: 0, updated_at: 0 };
   return {
+    ...unknownFields(liquidity, known),
     // numberValue, not numberFrom: an overdraft is a real balance the app must keep, not
     // something to round up to zero on the next load.
     account: numberValue(liquidity?.account) ?? 0,
@@ -511,6 +527,7 @@ export function createDefaultState(today, defaultView) {
 export function migrateState(savedState, today, defaultView) {
   const defaults = createDefaultState(today, defaultView);
   const migrated = {
+    ...unknownFields(savedState, { ...defaults, updated_at: 0 }, RETIRED_STATE_KEYS),
     ...defaults,
     activeView: savedState.activeView || defaults.activeView,
     showDiagnosis: Boolean(savedState.showDiagnosis),

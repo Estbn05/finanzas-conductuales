@@ -224,3 +224,33 @@ test("a reloaded (compacted, then normalized) record still counts as unchanged",
   const merged = mergeStates(compactMergeBase(base), reloaded, laptop);
   assert.deepEqual(merged.transactions.map((t) => t.id), ["b"], "the deleted expense came back");
 });
+
+// A phone on an older version of the app must not delete what a newer version saved.
+// The sync path runs the cloud copy through migrateState() before merging (app.js), and
+// migrateState() used to rebuild the state from only the fields it knew: an older version
+// dropped `credit` that way before the card existed, and would drop any future field.
+test("fields from a newer app version survive migration and sync on an older one", async () => {
+  const { migrateState } = await import("../state-model.js");
+  const today = "2026-10-03";
+  const fromNewerVersion = {
+    profile: { completed: true, incomeAmount: 2_000_000 },
+    liquidity: { account: 500_000, cash: 0, credit: 120_000, initialized: true, creditLimit: 3_000_000 },
+    savingsGoals: [{ id: "soat", name: "SOAT", target: 450_000 }],
+    // Retired on purpose by older versions: still left behind.
+    debts: [{ id: "old", amount: 1 }],
+    liquidityPeriodAnchor: "2026-01-01"
+  };
+
+  const migrated = migrateState(fromNewerVersion, today, "today");
+  assert.deepEqual(migrated.savingsGoals, fromNewerVersion.savingsGoals);
+  assert.equal(migrated.liquidity.creditLimit, 3_000_000);
+  assert.equal(migrated.liquidity.credit, 120_000);
+  assert.equal("debts" in migrated, false);
+  assert.equal("liquidityPeriodAnchor" in migrated, false);
+
+  // This device (older version) edits, then syncs: the newer fields reach the upload.
+  const local = migrateState({ ...fromNewerVersion, transactions: [{ id: "t1", date: today, amount: 10_000, merchant: "Café" }] }, today, "today");
+  const merged = mergeStates(compactMergeBase(migrated), local, migrated);
+  assert.deepEqual(merged.savingsGoals, fromNewerVersion.savingsGoals);
+  assert.equal(merged.liquidity.creditLimit, 3_000_000);
+});
