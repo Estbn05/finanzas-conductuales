@@ -338,7 +338,11 @@ test("period prediction, period close and merchant rules are exposed in the app 
   assert.ok(app.includes("function rememberMerchantRule"));
   assert.ok(app.includes("function findMerchantRule"));
   assert.ok(stateModel.includes("merchantRules: []"));
-  assert.ok(app.includes("data-apply-merchant-rule"));
+  // A known merchant fills its usual category and payment on its own (no "Usar
+  // sugerencia" tap), and never overrides a choice made by hand.
+  assert.equal(app.includes("data-apply-merchant-rule"), false);
+  assert.ok(app.includes("function merchantRuleAppliedMarkup"));
+  assert.ok(app.includes("pickedByHand"));
   assert.ok(app.includes('data-action="remove-merchant-rule"'));
   assert.ok(styles.includes("Prediction, period close and merchant rules v28"));
   assert.ok(styles.includes(".prediction-card"));

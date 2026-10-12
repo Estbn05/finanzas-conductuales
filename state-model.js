@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.64";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.67";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
@@ -126,6 +126,74 @@ export function merchantRuleMatches(key, ruleKey) {
   const typed = ` ${key} `;
   const rule = ` ${ruleKey} `;
   return typed.includes(rule) || rule.includes(typed);
+}
+
+// Expenses the user keeps repeating — same place, same category, same way of paying —
+// offered as one-tap chips on "Registrar gasto". Typing the same Terpel tanqueo from
+// scratch every time was the main friction of recording by hand, and the reason people
+// stop recording at all. Only named merchants seen at least twice in the lookback count
+// (one-off purchases would just add noise); one chip per merchant, the habit it shows
+// most often, prefilled with the latest amount since prices drift.
+export function frequentExpenses(transactions, { today, validCategoryIds, limit = 4, lookbackDays = 90 } = {}) {
+  const todayKey = String(today || "").slice(0, 10);
+  const cutoff = todayKey ? shiftDateKey(todayKey, -lookbackDays) : "";
+  const validIds = validCategoryIds instanceof Set ? validCategoryIds : new Set(validCategoryIds || []);
+  const groups = new Map();
+
+  for (const transaction of transactions || []) {
+    const key = merchantKey(transaction?.merchant);
+    const date = String(transaction?.date || "").slice(0, 10);
+    const amount = Number(transaction?.amount || 0);
+    if (key.length < 3 || isPlaceholderMerchant(key) || !(amount > 0) || (cutoff && date < cutoff)) {
+      continue;
+    }
+    const category = validIds.has(transaction.category) ? transaction.category : FREE_CATEGORY_ID;
+    const source = normalizeLocation(transaction.source);
+    const groupKey = `${key}|${category}|${source}`;
+    const group = groups.get(groupKey) || { key, category, source, count: 0, lastDate: "", lastStamp: "", merchant: "", amount: 0 };
+    group.count += 1;
+    const stamp = `${date}|${transaction.updated_at || ""}`;
+    if (stamp >= group.lastStamp) {
+      group.lastStamp = stamp;
+      group.lastDate = date;
+      group.merchant = cleanText(transaction.merchant, "");
+      group.amount = Math.round(amount);
+    }
+    groups.set(groupKey, group);
+  }
+
+  const byMostUsed = (a, b) => b.count - a.count || b.lastStamp.localeCompare(a.lastStamp);
+  const perMerchant = new Map();
+  for (const group of [...groups.values()].sort(byMostUsed)) {
+    if (group.count >= 2 && !perMerchant.has(group.key)) {
+      perMerchant.set(group.key, group);
+    }
+  }
+  return [...perMerchant.values()]
+    .slice(0, limit)
+    .map(({ merchant, category, source, amount, count, lastDate }) => ({ merchant, category, source, amount, count, lastDate }));
+}
+
+// How the last expense was paid, so "Pagado con" starts there instead of always on
+// Cuenta: someone who pays almost everything in cash had to switch it on every single
+// expense.
+export function lastExpenseSource(transactions) {
+  let latest = null;
+  let latestStamp = "";
+  for (const transaction of transactions || []) {
+    const stamp = `${String(transaction?.date || "").slice(0, 10)}|${transaction?.updated_at || ""}`;
+    if (!latest || stamp >= latestStamp) {
+      latest = transaction;
+      latestStamp = stamp;
+    }
+  }
+  return latest ? normalizeLocation(latest.source) : "account";
+}
+
+function shiftDateKey(dateKey, days) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + days));
+  return date.toISOString().slice(0, 10);
 }
 
 // One CSV cell. Text the user typed (merchant, note, category) that starts with

@@ -15,6 +15,8 @@ import {
   normalizeTransactions,
   compactForStorage,
   describeSyncStatus,
+  frequentExpenses,
+  lastExpenseSource,
   relativeTimeEs,
   remoteChangedSinceLastSync,
   uid
@@ -232,4 +234,60 @@ test("the compact local save round-trips every expense exactly", () => {
   assert.ok(JSON.stringify(compact).length < JSON.stringify({ transactions: original }).length);
   assert.equal("source" in compact.transactions[0], false);
   assert.deepEqual(normalizeTransactions(compact.transactions, today), original.map((t) => (t.createdAt === t.updated_at ? (({ createdAt, ...rest }) => rest)(t) : t)));
+});
+
+const tx = (merchant, amount, date, category = "gasolina", source = "cash", updated_at = `${date}T12:00:00.000Z`) =>
+  ({ merchant, amount, date, category, source, updated_at });
+
+test("frequent expenses: repeated merchants become one-tap chips with the latest amount", () => {
+  const transactions = [
+    tx("Terpel", 70_000, "2026-09-01"),
+    tx("terpel ", 85_000, "2026-09-20"),
+    tx("Terpel", 80_000, "2026-10-05"),
+    tx("Tienda Don Jose", 12_000, "2026-10-01", "mercado", "account"),
+    tx("Tienda don José", 9_000, "2026-10-08", "mercado", "account"),
+    tx("Cine", 30_000, "2026-10-02", "free", "account")
+  ];
+  const chips = frequentExpenses(transactions, { today: "2026-10-10", validCategoryIds: ["gasolina", "mercado"] });
+
+  assert.deepEqual(chips.map((chip) => [chip.merchant, chip.amount, chip.category, chip.source, chip.count]), [
+    ["Terpel", 80_000, "gasolina", "cash", 3],
+    ["Tienda don José", 9_000, "mercado", "account", 2]
+  ], "seen once (Cine) is not a habit; accents/case/spaces group together; newest amount wins");
+});
+
+test("frequent expenses: one chip per merchant, ignoring old, unnamed and deleted-category expenses", () => {
+  const transactions = [
+    tx("Terpel", 80_000, "2026-10-01", "gasolina", "cash"),
+    tx("Terpel", 80_000, "2026-10-03", "gasolina", "cash"),
+    tx("Terpel", 50_000, "2026-10-04", "gasolina", "account"),
+    tx("Gasto", 5_000, "2026-10-04", "free", "cash"),
+    tx("Gasto", 5_000, "2026-10-05", "free", "cash"),
+    tx("Parqueadero", 4_000, "2026-01-02", "free", "cash"),
+    tx("Parqueadero", 4_000, "2026-01-03", "free", "cash"),
+    tx("Gym", 90_000, "2026-09-01", "borrada", "account"),
+    tx("Gym", 90_000, "2026-10-01", "borrada", "account")
+  ];
+  const chips = frequentExpenses(transactions, { today: "2026-10-10", validCategoryIds: new Set(["gasolina"]) });
+
+  assert.deepEqual(chips.map((chip) => [chip.merchant, chip.source, chip.category]), [
+    ["Terpel", "cash", "gasolina"],
+    ["Gym", "account", "free"]
+  ], "the usual way of paying wins; the placeholder 'Gasto' and expenses older than 90 days are skipped; a deleted category falls back to Libre");
+});
+
+test("frequent expenses respects the limit", () => {
+  const transactions = ["Aaa", "Bbb", "Ccc", "Ddd", "Eee"].flatMap((name) => [tx(name, 1_000, "2026-10-01"), tx(name, 1_000, "2026-10-02")]);
+  assert.equal(frequentExpenses(transactions, { today: "2026-10-10", validCategoryIds: ["gasolina"] }).length, 4);
+  assert.equal(frequentExpenses(transactions, { today: "2026-10-10", validCategoryIds: ["gasolina"], limit: 2 }).length, 2);
+  assert.deepEqual(frequentExpenses([], { today: "2026-10-10" }), []);
+});
+
+test("last expense source: Pagado con starts where the latest expense was paid", () => {
+  assert.equal(lastExpenseSource([]), "account");
+  assert.equal(lastExpenseSource([
+    tx("Terpel", 80_000, "2026-10-05", "gasolina", "cash"),
+    tx("Exito", 40_000, "2026-10-01", "mercado", "credit"),
+    tx("Tienda", 3_000, "2026-10-05", "free", "credit", "2026-10-05T08:00:00.000Z")
+  ]), "cash", "latest date wins, then the latest edit within the same day");
 });

@@ -1243,6 +1243,17 @@ label {
   font-size: 1rem;
 }
 
+/* Pinned to the bottom of the sheet: with the amount focused, the phone keyboard covers
+   the lower half of the form, and the button was hidden under it — so even a one-tap
+   "Repetir" still needed closing the keyboard or scrolling to register. The button is
+   opaque, so fields just scroll under it; a solid "mask" behind it can't match the
+   panel's gradient and showed as an off-tone band in dark mode. */
+.quick-expense-panel .btn.quick-submit {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+}
+
 .onboarding-step.is-active {
   display: grid;
   animation: onboarding-step-in 180ms ease;
@@ -6328,11 +6339,72 @@ html[data-theme="dark"] .reminder-panel .metric-badge.danger,
   color: var(--ds-primary-strong);
 }
 
-.merchant-rule-suggestion .btn {
-  width: auto;
-  min-height: 36px;
-  padding: 7px 11px;
+/* "Repetir" chips on Registrar gasto: one tap fills a frequent expense. A horizontal
+   strip so up to four fit without pushing the amount field down the sheet. */
+.quick-repeats {
+  display: grid;
+  gap: 6px;
+}
+
+.quick-repeat-list {
+  display: flex;
+  gap: var(--ds-space-2);
+  margin: 0 -2px;
+  padding: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.quick-repeat-list::-webkit-scrollbar {
+  display: none;
+}
+
+.quick-repeat {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 2px;
+  min-height: 52px;
+  max-width: 220px;
+  padding: 8px 14px;
+  border: 1px solid var(--ds-line);
+  border-radius: var(--ds-radius-md);
+  color: var(--ds-ink);
+  background: rgb(var(--rgb-cream-paper) / 0.88);
+  text-align: left;
+}
+
+.quick-repeat strong {
+  overflow: hidden;
+  font-size: 0.86rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.quick-repeat span {
+  color: var(--ds-muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.quick-repeat.is-active {
+  border-color: rgb(var(--rgb-green) / 0.28);
+  background: var(--ds-primary-soft);
+}
+
+.quick-repeat.is-active strong {
+  color: var(--ds-primary-strong);
+}
+
+html[data-theme="dark"] .quick-repeat {
+  border-color: rgb(var(--rgb-white) / 0.14);
+  background: rgb(var(--rgb-white) / 0.055);
+}
+
+html[data-theme="dark"] .quick-repeat.is-active {
+  border-color: rgb(var(--rgb-mint) / 0.34);
+  background: rgb(var(--rgb-mint) / 0.18);
 }
 
 .merchant-rules-panel {

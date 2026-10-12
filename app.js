@@ -19,7 +19,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.64";
+} from "./finance-core.js?v=1.1.67";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -28,6 +28,8 @@ import {
   LEGACY_TEMPLATE_BUDGET_JOBS,
   buildMerchantRulesFromTransactions,
   clamp,
+  frequentExpenses,
+  lastExpenseSource,
   cleanDate,
   cleanText,
   clearTemplateBudget,
@@ -65,7 +67,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.64";
+} from "./state-model.js?v=1.1.67";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -81,7 +83,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.64";
+} from "./sync-client.js?v=1.1.67";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -3494,6 +3496,10 @@ function renderQuickExpensePanel() {
   const liquidity = liquiditySummary();
   const draft = expenseDraft || {};
   const selectedCategory = categoryChoiceOptions().some((option) => option.value === draft.category) ? draft.category : FREE_CATEGORY_ID;
+  const selectedSource = draft.source || lastExpenseSource(state.transactions);
+  // A calendar event already prefilled the form; offering unrelated repeats there would
+  // only invite overwriting it by accident.
+  const repeats = draft.calendarEventId ? [] : quickExpenseRepeats();
   return `
     <div class="quick-expense-backdrop" role="presentation" data-action="close-expense">
       <section class="quick-expense-panel" role="dialog" aria-modal="true" aria-labelledby="quick-expense-title">
@@ -3507,15 +3513,16 @@ function renderQuickExpensePanel() {
         </div>
         <form class="quick-expense-form" id="transaction-form">
           ${draft.calendarEventId ? `<input name="calendarEventId" type="hidden" value="${escapeAttr(draft.calendarEventId)}">` : ""}
+          ${renderQuickExpenseRepeats(repeats)}
           <label class="quick-amount">
             <span>Monto</span>
-            <input name="amount" type="number" min="1000" step="1000" inputmode="numeric" placeholder="$0" value="${draft.amount ? escapeAttr(draft.amount) : ""}" required>
+            <input name="amount" type="number" min="1000" step="1000" inputmode="numeric" placeholder="$0" value="${draft.amount ? escapeAttr(draft.amount) : ""}" required data-autofocus>
           </label>
           <label>
             Comercio opcional
             <input name="merchant" type="text" maxlength="42" placeholder="Ej. Tienda, Terpel" value="${escapeAttr(draft.merchant || "")}">
           </label>
-          ${renderMerchantRuleSuggestion(draft.merchant || "")}
+          ${renderMerchantRuleSuggestion()}
           <label>
             Descripción opcional
             <input name="description" type="text" maxlength="90" placeholder="Ej. Tanqueada, regalo, almuerzo" value="${escapeAttr(draft.description || "")}">
@@ -3526,7 +3533,7 @@ function renderQuickExpensePanel() {
           </div>
           <div class="quick-field">
             <span class="quick-label">Pagado con</span>
-            ${renderChoicePills("source", expenseSourceOptions(liquidity), "account")}
+            ${renderChoicePills("source", expenseSourceOptions(liquidity), selectedSource)}
           </div>
           <div class="expense-impact-preview" aria-live="polite">
             <span>Disponible antes de registrar</span>
@@ -3563,6 +3570,65 @@ function expenseSourceOptions(liquidity = liquiditySummary()) {
   ];
 }
 
+function quickExpenseRepeats() {
+  return frequentExpenses(state.transactions, {
+    today: todayKey(),
+    validCategoryIds: new Set(state.budgetJobs.map((job) => job.id))
+  });
+}
+
+// Filling the form, not submitting it: prices drift (the tanqueo is rarely the exact same
+// amount twice), so the amount stays selected for a quick correction before "Registrar".
+function renderQuickExpenseRepeats(repeats) {
+  if (!repeats.length) {
+    return "";
+  }
+  return `
+    <div class="quick-repeats quick-field" role="group" aria-label="Repetir un gasto frecuente">
+      <span class="quick-label">Repetir</span>
+      <div class="quick-repeat-list">
+        ${repeats
+          .map(
+            (repeat) => `
+              <button class="quick-repeat" type="button"
+                data-repeat-amount="${escapeAttr(repeat.amount)}"
+                data-repeat-merchant="${escapeAttr(repeat.merchant)}"
+                data-repeat-category="${escapeAttr(repeat.category)}"
+                data-repeat-source="${escapeAttr(repeat.source)}">
+                <strong>${escapeHtml(repeat.merchant)}</strong>
+                <span>${formatMoney(repeat.amount)} · ${escapeHtml(repeat.category === FREE_CATEGORY_ID ? "Libre" : categoryName(repeat.category))} · ${escapeHtml(locationLabel(repeat.source))}</span>
+              </button>
+            `
+          )
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
+function bindQuickExpenseRepeats(form) {
+  form.querySelectorAll("[data-repeat-amount]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const amountInput = form.elements.namedItem("amount");
+      const merchantInput = form.elements.namedItem("merchant");
+      if (amountInput) {
+        amountInput.value = formatMoneyInputValue(button.dataset.repeatAmount);
+      }
+      if (merchantInput) {
+        merchantInput.value = button.dataset.repeatMerchant || "";
+      }
+      setFormChoiceValue(form, "category", button.dataset.repeatCategory || FREE_CATEGORY_ID);
+      setFormChoiceValue(form, "source", normalizeLocation(button.dataset.repeatSource));
+      form.querySelectorAll("[data-repeat-amount]").forEach((item) => item.classList.toggle("is-active", item === button));
+      // The repeat already chose category and source; a merchant-rule suggestion
+      // re-appearing on top of that would only be noise.
+      form.dispatchEvent(new CustomEvent("quick-expense-prefilled"));
+      amountInput?.focus({ preventScroll: true });
+      amountInput?.select?.();
+    });
+  });
+}
+
 function movementSourceIcon(source) {
   const key = normalizeLocation(source);
   if (key === "cash") {
@@ -3578,20 +3644,21 @@ function categoryChoiceOptions() {
   ];
 }
 
-function renderMerchantRuleSuggestion(merchant = "") {
-  const rule = findMerchantRule(merchant);
-  return `
-    <div class="merchant-rule-suggestion" data-merchant-rule-suggestion ${rule ? "" : "hidden"}>
-      ${rule ? merchantRuleSuggestionMarkup(rule) : ""}
-    </div>
-  `;
+// Filled in by bindMerchantRuleSuggestions once the form is live, since applying a rule
+// depends on what the user has already picked by hand.
+function renderMerchantRuleSuggestion() {
+  return `<div class="merchant-rule-suggestion" data-merchant-rule-suggestion role="status" hidden></div>`;
 }
 
-function merchantRuleSuggestionMarkup(rule) {
-  return `
-    <span>Este comercio suele ir en <strong>${escapeHtml(categoryName(rule.category))}</strong> con ${locationLabel(rule.source)}.</span>
-    <button class="btn ghost" type="button" data-apply-merchant-rule="${escapeAttr(rule.id)}">Usar sugerencia</button>
-  `;
+function merchantRuleAppliedMarkup(rule, applied) {
+  const parts = [];
+  if (applied.includes("category")) {
+    parts.push(`<strong>${escapeHtml(categoryName(rule.category))}</strong>`);
+  }
+  if (applied.includes("source")) {
+    parts.push(`<strong>${escapeHtml(locationLabel(rule.source))}</strong>`);
+  }
+  return `<span>Puse ${parts.join(" y ")}, como las veces anteriores. Cámbialo abajo si esta vez fue distinto.</span>`;
 }
 
 function renderMerchantRulesPanel() {
@@ -4950,6 +5017,7 @@ function bindEvents() {
   const transactionForm = document.querySelector("#transaction-form");
   if (transactionForm) {
     bindMerchantRuleSuggestions(transactionForm);
+    bindQuickExpenseRepeats(transactionForm);
     transactionForm.addEventListener("submit", handleTransactionSubmit);
   }
 
@@ -5099,7 +5167,7 @@ function bindDialogBehavior() {
       if (!dialog.isConnected || dialog.contains(document.activeElement)) {
         return;
       }
-      firstFocusable(dialog)?.focus({ preventScroll: true });
+      (dialog.querySelector("[data-autofocus]") || firstFocusable(dialog))?.focus({ preventScroll: true });
     }, 0);
   }
 
@@ -5645,6 +5713,10 @@ function bindSavingsSimulatorPreview(form) {
   escalation?.addEventListener("change", () => form.requestSubmit());
 }
 
+// A merchant seen before fills in its usual category and way of paying on its own; it used
+// to only show a "Usar sugerencia" button, one more tap on every repeated expense. Never
+// overrides a choice made by hand (or by a calendar event / repeat chip), and undoes its
+// own change if the merchant is edited into one with no rule.
 function bindMerchantRuleSuggestions(form) {
   const merchantInput = form.elements.namedItem("merchant");
   const suggestion = form.querySelector("[data-merchant-rule-suggestion]");
@@ -5652,38 +5724,77 @@ function bindMerchantRuleSuggestions(form) {
     return;
   }
 
-  const update = () => {
-    const rule = findMerchantRule(merchantInput.value);
-    const selectedCategory = form.elements.namedItem("category")?.value || "";
-    const shouldShow = Boolean(rule) && (!selectedCategory || selectedCategory === FREE_CATEGORY_ID);
-    suggestion.hidden = !shouldShow;
-    suggestion.innerHTML = shouldShow ? merchantRuleSuggestionMarkup(rule) : "";
+  const pickedByHand = new Set();
+  if ((form.elements.namedItem("category")?.value || FREE_CATEGORY_ID) !== FREE_CATEGORY_ID) {
+    pickedByHand.add("category");
+  }
+  let autoApplied = null;
+
+  const hide = () => {
+    suggestion.hidden = true;
+    suggestion.innerHTML = "";
   };
 
+  const restoreBeforeAutoApply = () => {
+    if (!autoApplied) {
+      return;
+    }
+    Object.entries(autoApplied.before).forEach(([name, value]) => {
+      if (!pickedByHand.has(name)) {
+        setFormChoiceValue(form, name, value);
+      }
+    });
+    autoApplied = null;
+  };
+
+  const update = () => {
+    const rule = findMerchantRule(merchantInput.value);
+    if (!rule) {
+      restoreBeforeAutoApply();
+      hide();
+      return;
+    }
+    if (autoApplied?.ruleId === rule.id) {
+      return;
+    }
+    restoreBeforeAutoApply();
+    const targets = { category: rule.category, source: normalizeLocation(rule.source) };
+    const before = {};
+    const applied = [];
+    Object.entries(targets).forEach(([name, value]) => {
+      const current = form.elements.namedItem(name)?.value;
+      if (pickedByHand.has(name) || current === value) {
+        return;
+      }
+      before[name] = current;
+      setFormChoiceValue(form, name, value);
+      applied.push(name);
+    });
+    if (!applied.length) {
+      hide();
+      return;
+    }
+    autoApplied = { ruleId: rule.id, before };
+    suggestion.innerHTML = merchantRuleAppliedMarkup(rule, applied);
+    suggestion.hidden = false;
+  };
+
+  form.querySelectorAll('[data-choice-name="category"], [data-choice-name="source"]').forEach((pill) => {
+    pill.addEventListener("click", () => {
+      pickedByHand.add(pill.dataset.choiceName);
+      autoApplied = null;
+      hide();
+    });
+  });
+  form.addEventListener("quick-expense-prefilled", () => {
+    pickedByHand.add("category");
+    pickedByHand.add("source");
+    autoApplied = null;
+    hide();
+  });
   merchantInput.addEventListener("input", update);
   merchantInput.addEventListener("change", update);
-  form.querySelectorAll('[name="category"], [data-choice-name="category"]').forEach((control) => {
-    control.addEventListener("change", update);
-    control.addEventListener("click", () => window.setTimeout(update));
-  });
-  suggestion.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-apply-merchant-rule]");
-    if (!button) {
-      return;
-    }
-    const rule = state.merchantRules.find((item) => item.id === button.dataset.applyMerchantRule);
-    if (!rule) {
-      return;
-    }
-    applyMerchantRuleToForm(form, rule);
-    update();
-  });
   update();
-}
-
-function applyMerchantRuleToForm(form, rule) {
-  setFormChoiceValue(form, "category", rule.category);
-  setFormChoiceValue(form, "source", normalizeLocation(rule.source));
 }
 
 function setFormChoiceValue(form, name, value) {
