@@ -19,7 +19,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.67";
+} from "./finance-core.js?v=1.1.68";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -67,7 +67,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.67";
+} from "./state-model.js?v=1.1.68";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -83,7 +83,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.67";
+} from "./sync-client.js?v=1.1.68";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -1199,7 +1199,7 @@ function startTour() {
   `;
   document.body.append(layer);
   app.inert = true;
-  layer.querySelector("[data-tour-skip]").addEventListener("click", () => endTour());
+  layer.querySelector("[data-tour-skip]").addEventListener("click", () => finishTour());
   layer.querySelector("[data-tour-back]").addEventListener("click", () => moveTour(-1));
   layer.querySelector("[data-tour-next]").addEventListener("click", () => moveTour(1));
   // The tour lives outside #app, whose keydown handler it cannot rely on.
@@ -1219,11 +1219,66 @@ function moveTour(delta) {
   const next = tour.position + delta;
   if (next < 0) return;
   if (next >= tour.steps.length) {
-    endTour();
+    finishTour();
     return;
   }
   tour.position = next;
   showTourStep();
+}
+
+// Whether the first-run tour should end by offering the daily reminder. Recording
+// everything on the same day is what keeps the numbers right, and the reminder (which
+// opens "Registrar gasto" when tapped) was buried in Datos and off by default, so most
+// people never found it. Only once — the first tour — and only if it is not on yet.
+function shouldOfferDailyReminder() {
+  return !state.settings.tourDone
+    && !normalizeDailyReminder(state.dailyReminder).enabled
+    && notificationPermissionStatus() !== "unsupported";
+}
+
+function finishTour() {
+  if (tour && !tour.offer && shouldOfferDailyReminder()) {
+    showDailyReminderOffer();
+    return;
+  }
+  endTour();
+}
+
+function showDailyReminderOffer() {
+  const layer = document.getElementById("app-tour");
+  if (!tour || !layer) return;
+  tour.offer = true;
+  const time = normalizeDailyReminder(state.dailyReminder).time;
+  const card = layer.querySelector(".tour-card");
+  card.classList.add("tour-reminder-offer");
+  card.setAttribute("aria-labelledby", "tour-reminder-title");
+  card.setAttribute("aria-describedby", "tour-reminder-text");
+  card.innerHTML = `
+    <h2 id="tour-reminder-title">¿Te recordamos registrar tus gastos?</h2>
+    <p id="tour-reminder-text">Una vez al día te llega un aviso que abre directo "Registrar gasto". Anotar el mismo día es lo que mantiene tus números al día.</p>
+    <label class="tour-reminder-time">
+      Hora del aviso
+      <input type="time" value="${escapeAttr(time)}" data-tour-reminder-time required>
+    </label>
+    <div class="tour-actions">
+      <button class="btn ghost" type="button" data-tour-reminder-skip>Ahora no</button>
+      <button class="btn primary" type="button" data-tour-reminder-enable>Activar recordatorio</button>
+    </div>
+    <p class="tour-reminder-note">Puedes cambiarlo cuando quieras en Datos.</p>
+  `;
+  card.querySelector("[data-tour-reminder-skip]").addEventListener("click", () => endTour());
+  const enable = card.querySelector("[data-tour-reminder-enable]");
+  enable.addEventListener("click", async () => {
+    enable.disabled = true;
+    const permission = await setDailyReminder({ enabled: true, time: card.querySelector("[data-tour-reminder-time]").value });
+    endTour();
+    if (permission === "granted") {
+      showNoticeSnackbar(state.lastAlert);
+    }
+    render();
+  });
+  layoutTour();
+  enable.focus({ preventScroll: true });
 }
 
 function showTourStep() {
@@ -1236,7 +1291,7 @@ function showTourStep() {
   layer.querySelector("[data-tour-text]").textContent = step.text;
   layer.querySelector("[data-tour-back]").hidden = tour.position === 0;
   layer.querySelector("[data-tour-skip]").hidden = last;
-  layer.querySelector("[data-tour-next]").textContent = last ? "Empezar a usarla" : "Siguiente";
+  layer.querySelector("[data-tour-next]").textContent = last && !shouldOfferDailyReminder() ? "Empezar a usarla" : "Siguiente";
   const target = tourTarget(step);
   if (target && window.getComputedStyle(target).position !== "fixed" && !target.closest(".bottom-nav, .sidebar")) {
     try {
@@ -1256,7 +1311,7 @@ function scheduleTourLayout() {
 function layoutTour() {
   const layer = document.getElementById("app-tour");
   if (!tour || !layer) return;
-  const target = tourTarget(TOUR_STEPS[tour.steps[tour.position]]);
+  const target = tour.offer ? null : tourTarget(TOUR_STEPS[tour.steps[tour.position]]);
   const spotlight = layer.querySelector(".tour-spotlight");
   const card = layer.querySelector(".tour-card");
   if (!target) {
@@ -6680,8 +6735,15 @@ function handleSmartSubmit(event) {
 async function handleDailyReminderSubmit(event) {
   event.preventDefault();
   const data = new FormData(event.currentTarget);
-  const enabled = data.get("enabled") === "on";
-  const time = normalizeReminderTime(data.get("time"));
+  await setDailyReminder({ enabled: data.get("enabled") === "on", time: data.get("time") });
+  render();
+}
+
+// Shared by the Datos form and the offer at the end of the welcome tour: asks for
+// notification permission when needed, saves, schedules, and leaves the outcome in
+// state.lastAlert. Returns the permission so the caller can tell the user what happened.
+async function setDailyReminder({ enabled, time }) {
+  const reminderTime = normalizeReminderTime(time);
   let permission = notificationPermissionStatus();
 
   if (enabled && permission === "default") {
@@ -6691,19 +6753,19 @@ async function handleDailyReminderSubmit(event) {
   state.dailyReminder = {
     ...normalizeDailyReminder(state.dailyReminder),
     enabled,
-    time,
+    time: reminderTime,
     updated_at: new Date().toISOString()
   };
 
   if (enabled && permission === "denied") {
-    state.lastAlert = "Recordatorio guardado, pero las notificaciones están bloqueadas en el navegador.";
+    state.lastAlert = "Recordatorio guardado, pero las notificaciones están bloqueadas. Puedes permitirlas en los ajustes del teléfono.";
     showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
   } else if (enabled && permission === "unsupported") {
     state.lastAlert = "Este navegador no permite notificaciones desde la app.";
     showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
   } else {
     state.lastAlert = enabled
-      ? `Recordatorio diario activado a las ${time}.`
+      ? `Recordatorio diario activado a las ${reminderTime}.`
       : "Recordatorio diario apagado.";
   }
 
@@ -6711,7 +6773,7 @@ async function handleDailyReminderSubmit(event) {
   if (enabled && permission === "granted") {
     scheduleDailyReminder();
   }
-  render();
+  return permission;
 }
 
 function handleFinancialEventSubmit(event) {
@@ -8138,7 +8200,7 @@ async function showDailyReminderNotification(options = {}) {
   }
 
   const title = options.test ? "Prueba de recordatorio" : "Revisión de gastos";
-  const body = "Quieres registrar tus gastos de hoy?";
+  const body = "¿Quieres registrar tus gastos de hoy?";
   const data = { url: `${selfLocationOrigin()}#${QUICK_EXPENSE_HASH}` };
   const localNotifications = nativeLocalNotifications();
   if (localNotifications) {
@@ -8296,7 +8358,7 @@ async function scheduleNativeDailyReminder(reminder = normalizeDailyReminder(sta
         {
           id: DAILY_REMINDER_NOTIFICATION_ID,
           title: "Revisión de gastos",
-          body: "Quieres registrar tus gastos de hoy?",
+          body: "¿Quieres registrar tus gastos de hoy?",
           schedule: {
             at: nextReminderDate(reminder.time),
             repeats: true,

@@ -8082,6 +8082,25 @@ html[data-theme="dark"] .conversion-box strong {
   padding: 0 16px;
 }
 
+/* Last card of the first-run tour: offer the daily reminder. */
+.tour-reminder-time {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+  color: var(--ds-muted);
+  font-size: 0.76rem;
+  font-weight: 750;
+}
+
+.tour-reminder-time input {
+  width: 100%;
+}
+
+.tour-card .tour-reminder-note {
+  font-size: 0.75rem;
+  text-align: center;
+}
+
 /* Inicio's hero card as a subtraction: Tienes − Reservado = Libre. */
 .money-math > * + * {
   border-top: 1px solid var(--ds-line);
