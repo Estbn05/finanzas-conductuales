@@ -230,6 +230,40 @@ test("a new category that no longer fits the real free money is blocked, preview
   }
 });
 
+// Both "Nueva categoría" forms end in state.budgetJobs and share one set of checks. A
+// recurring category under a name the plan already has used to create a second envelope
+// ("Mercado" and "Mercado-2"); "Apartar dinero" tops up the existing one instead.
+test("both category forms share their checks, and a repeated name never creates a second category", async () => {
+  const jobs = [{ id: "mercado", name: "Mercado", amount: 200_000, cadence: "monthly" }];
+  const ui = await bootApp({ savedState: returningUserState({ budgetJobs: jobs }) });
+  try {
+    await ui.click('[data-view="budget"]');
+    await ui.click('[data-action="open-add-category-choice"]');
+    await ui.click('[data-action="open-category-sheet"]');
+    let form = ui.$("#budget-job-form");
+    form.elements.namedItem("name").value = "  mercado ";
+    await ui.type(form.elements.namedItem("amount"), "50000");
+    form.requestSubmit();
+    await settle(ui.window);
+    assert.match(ui.text(), /Ya tienes una categoría llamada Mercado\./);
+    assert.deepEqual(ui.saved().budgetJobs.map((job) => job.id), ["mercado"]);
+
+    // The failed form stays open so the name can be fixed; go back to the other path.
+    await ui.click('[data-action="close-plan-sheet"]');
+    await ui.click('[data-action="open-add-category-choice"]');
+    await ui.click('[data-action="open-setaside-sheet"]');
+    form = ui.$("#setaside-form");
+    form.elements.namedItem("name").value = "Viaje";
+    await ui.type(form.elements.namedItem("amount"), "99000000");
+    form.requestSubmit();
+    await settle(ui.window);
+    assert.match(ui.text(), /Solo tienes \$\s?[\d.]+ libres para apartar\./);
+    assert.deepEqual(ui.saved().budgetJobs.map((job) => job.id), ["mercado"]);
+  } finally {
+    ui.close();
+  }
+});
+
 test("apartar dinero lowers free money without touching the real account balance", async () => {
   const ui = await bootApp({ savedState: returningUserState() });
   try {

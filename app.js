@@ -19,7 +19,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.68";
+} from "./finance-core.js?v=1.1.69";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -67,7 +67,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.68";
+} from "./state-model.js?v=1.1.69";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -83,7 +83,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.68";
+} from "./sync-client.js?v=1.1.69";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -3029,11 +3029,6 @@ function renderAddCategoryChoiceSheet() {
   `;
 }
 
-// Plain-language front door for reserving money, in the "envelope" mental model people
-// already use ("aparté plata para los remedios"). Deliberately asks only two things —
-// how much, and what for — where renderBudgetJobForm also asks for a frequency: this
-// reserves once for the current period (cadence "period"), which is what a one-off
-// "aparté esto ahora" actually means. Recurring reserves still go through the full form.
 function renderCreditRow(liquidity) {
   return `<div class="money-location-row is-owed"><span class="money-location-icon" aria-hidden="true">${renderIcon("card")}</span><span class="money-location-text"><span>Tarjeta (ya lo debes)</span><strong>${liquidity.credit > 0 ? `-${formatMoney(liquidity.credit)}` : formatMoney(0)}</strong></span></div>`;
 }
@@ -3075,6 +3070,11 @@ function renderCreditPaymentSheet() {
   `;
 }
 
+// Plain-language front door for reserving money, in the "envelope" mental model people
+// already use ("aparté plata para los remedios"). Deliberately asks only two things —
+// how much, and what for — where renderBudgetJobForm also asks for a frequency: this
+// reserves once (cadence "once", or a top-up on a category of the same name) and the
+// fund carries over until spent or released. Recurring reserves use the full form.
 function renderSetAsideSheet() {
   const summary = budgetSummary();
   const reusable = state.budgetJobs.slice(0, 6);
@@ -6430,25 +6430,47 @@ function showDiagnosisValidation(validation) {
   }, 220);
 }
 
+// Both "Nueva categoría" forms (Apartar dinero and Apartar cada semana o mes) end in
+// state.budgetJobs, so they share one set of checks and messages. `reserves` is what the
+// category takes from this period: the typed amount for a one-off, the period equivalent
+// of the cadence for a recurring one. Comparing against freeRemaining (not the gross
+// freeBudget) matters: it is the "Libre" the user sees, and it already discounts this
+// period's unclassified spending.
+function categoryReserveError({ name, amount, reserves = amount, createsCategory }) {
+  if (amount <= 0) {
+    return "Escribe un monto mayor que cero.";
+  }
+  if (createsCategory && state.budgetJobs.length >= MAX_CATEGORIES) {
+    return `Mantengamos máximo ${MAX_CATEGORIES} categorías para que el plan siga claro.`;
+  }
+  const free = budgetSummary().freeRemaining;
+  if (reserves > free) {
+    return reserves === amount
+      ? `Solo tienes ${formatMoney(free)} libres para apartar.`
+      : `${name} apartaría ${formatMoney(reserves)} este periodo, pero solo tienes ${formatMoney(free)} libres.`;
+  }
+  return "";
+}
+
+function failCategoryForm(message) {
+  state.lastAlert = message;
+  showNoticeSnackbar(message, { kind: "error", renderNow: false });
+  saveState();
+  render();
+}
+
 function handleBudgetSubmit(event) {
   event.preventDefault();
   const data = new FormData(event.currentTarget);
-  if (state.budgetJobs.length >= MAX_CATEGORIES) {
-    state.lastAlert = "Mantengamos máximo 10 categorías para que el plan siga claro.";
-    showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
-    saveState();
-    render();
-    return;
-  }
-
   const name = cleanText(data.get("name"), "Nueva categoría");
   const amount = numberFrom(data.get("amount"));
   const cadence = JOB_CADENCE_VALUES.includes(data.get("cadence")) ? data.get("cadence") : "monthly";
-  if (amount <= 0) {
-    state.lastAlert = "El monto de la categoría debe ser mayor que cero.";
-    showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
-    saveState();
-    render();
+
+  // A second recurring "Mercado" would split one envelope in two with no way to tell them
+  // apart; "Apartar dinero" tops up the existing one instead (setAsideTarget).
+  const existing = setAsideTarget(name).job;
+  if (existing) {
+    failCategoryForm(`Ya tienes una categoría llamada ${existing.name}.`);
     return;
   }
 
@@ -6460,19 +6482,9 @@ function handleBudgetSubmit(event) {
     updated_at: new Date().toISOString()
   };
   const semesterBudget = getBudgetAmountForJob(job, state.profile);
-  const summary = budgetSummary();
-  // Comparar contra freeBudget (el cupo bruto: ingreso menos OTRAS categorias) deja
-  // pasar categorias que si caben en el cupo pero no en lo que de verdad queda libre,
-  // porque freeBudget no descuenta lo que ya gastaste sin clasificar este periodo. El
-  // usuario ve "Libre" (freeRemaining) en pantalla, asi que hay que validar contra eso:
-  // es el mismo numero que compara mentalmente antes de crear la categoria, y evita que
-  // freeRemaining termine clavado en $0 (por el Math.max(0, ...) interno) en vez de
-  // bloquear la creacion con un aviso claro.
-  if (semesterBudget > summary.freeRemaining) {
-    state.lastAlert = `${name} reservaría ${formatMoney(semesterBudget)}, pero solo hay ${formatMoney(summary.freeRemaining)} libre para reservar.`;
-    showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
-    saveState();
-    render();
+  const error = categoryReserveError({ name, amount, reserves: semesterBudget, createsCategory: true });
+  if (error) {
+    failCategoryForm(error);
     return;
   }
 
@@ -7887,11 +7899,9 @@ function applySavingsAllocation(amount, updatedAt) {
   return setAsideForThisPeriod(target.job, target.createName, amount, updatedAt);
 }
 
-// Mirrors savingsAllocationTarget's rule, and for the same reason: a weekly/monthly
-// category multiplies its amount across the period (see budgetAmountForJob), so adding a
-// one-off set-aside straight onto job.amount would reserve several times what was asked
-// for. Only a "period" category can absorb it directly; anything else gets its own
-// exact-amount reserve beside it.
+// Setting money aside under a name the plan already has tops up that category's fund
+// (setAsideForThisPeriod records it as a top-up, never by touching job.amount, which a
+// weekly/monthly cadence would multiply) instead of creating a second one.
 function setAsideTarget(name) {
   const wanted = String(name).trim().toLowerCase();
   const match = state.budgetJobs.find((job) => String(job.name || "").trim().toLowerCase() === wanted);
@@ -7903,30 +7913,10 @@ function handleSetAsideSubmit(event) {
   const data = new FormData(event.currentTarget);
   const name = cleanText(data.get("name"), "Apartado");
   const amount = numberFrom(data.get("amount"));
-
-  const failWith = (message) => {
-    state.lastAlert = message;
-    showNoticeSnackbar(message, { kind: "error", renderNow: false });
-    saveState();
-    render();
-  };
-
-  if (amount <= 0) {
-    failWith("Escribe cuánto quieres apartar.");
-    return;
-  }
-
-  // Same guard as handleBudgetSubmit: freeRemaining is the number shown on screen as
-  // "Libre", so it's the one the user compares against before apartar.
-  const summary = budgetSummary();
-  if (amount > summary.freeRemaining) {
-    failWith(`Solo tienes ${formatMoney(summary.freeRemaining)} libres para apartar.`);
-    return;
-  }
-
   const target = setAsideTarget(name);
-  if (!target.job && state.budgetJobs.length >= MAX_CATEGORIES) {
-    failWith("Mantengamos máximo 10 categorías para que el plan siga claro.");
+  const error = categoryReserveError({ name: target.createName, amount, createsCategory: !target.job });
+  if (error) {
+    failCategoryForm(error);
     return;
   }
 

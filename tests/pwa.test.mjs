@@ -1220,9 +1220,10 @@ test("apartar dinero reserves money in plain language without moving real balanc
   // A set-aside is for this period only (see setAsideForThisPeriod and the behavior tests
   // in finance-core.test.mjs / app-smoke.test.mjs).
   const submit = app.slice(app.indexOf("function handleSetAsideSubmit"), app.indexOf("function reduceSavingsAllocation"));
-  assert.ok(submit.includes("amount > summary.freeRemaining"));
+  // Limit and free-money checks are shared with the recurring form (behavior covered in
+  // app-smoke.test.mjs).
+  assert.ok(submit.includes("categoryReserveError("));
   assert.ok(submit.includes("setAsideForThisPeriod("));
-  assert.ok(submit.includes("state.budgetJobs.length >= MAX_CATEGORIES"));
 
   // Picking a suggestion chip runs through a direct listener rather than data-action:
   // handleAction re-renders the view, which would rebuild the uncontrolled inputs and
