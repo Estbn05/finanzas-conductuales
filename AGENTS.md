@@ -65,20 +65,16 @@ npm.cmd run android:apk
 APK esperado:
 
 ```text
-C:\Users\yefry\Documents\finanzas\android\app\build\outputs\apk\debug\app-debug.apk
+C:\Users\yefry\Documents\proyectos\finanzas\android\app\build\outputs\apk\debug\app-debug.apk
 ```
 
 Si el cambio afecta `app.js`, `styles.css`, `index.html`, service worker, manifest o comportamiento visible, normalmente tambien debe correrse `npm.cmd run android:apk` para que `www/` y `android/app/src/main/assets/public/` queden sincronizados.
 
 ## Versionado de assets/cache
 
-Cuando cambies JS/CSS/HTML que deba reflejarse en PWA o APK, sube el sufijo de version en:
+Cuando cambies JS/CSS/HTML que deba reflejarse en PWA o APK, sube la version con `npm run bump` (la fuente de verdad es `package.json`; el script reescribe `index.html`, `service-worker.js`, `manifest.webmanifest` y los imports `?v=` de los modulos). `tests/static-files.test.mjs` falla si alguna copia queda desincronizada.
 
-- `index.html` (`APP_VERSION` y referencias de assets).
-- `service-worker.js` (`CACHE_NAME` y `APP_SHELL`).
-- `manifest.webmanifest` (iconos con `?v=`).
-- imports versionados en `app.js`.
-- `tests/pwa.test.mjs` (`ASSET_VERSION`).
+Un modulo local nuevo importado por `app.js` debe agregarse a `scripts/build-mobile.mjs`, al `APP_SHELL` de `service-worker.js` y, si tiene imports `?v=`, a `VERSIONED_FILES` en `scripts/bump-version.mjs` (tambien lo verifica `tests/static-files.test.mjs`).
 
 Despues ejecuta:
 
@@ -97,14 +93,16 @@ Esto evita que el telefono siga usando cache viejo.
 - Preferir texto UI en espanol simple, corto y accionable.
 - Mantener ASCII en codigo y textos nuevos salvo que el archivo ya use o necesite caracteres especiales.
 - Usar `formatMoney`, `formatCompactMoney`, `todayKey`, `cleanDate`, `escapeHtml` y `escapeAttr` en vez de duplicar logica.
-- Las reglas financieras centrales deben vivir en `finance-core.js` cuando sean calculos puros compartibles/testeables.
+- Las reglas financieras centrales deben vivir en `finance-core.js` cuando sean calculos puros compartibles/testeables. El estado (defaults, migracion, sync) vive en `state-model.js` y lo que se calcula sobre los movimientos (listas, CSV, reporte, calendario, insights) en `movements.js`.
 - La UI debe ser mobile-first: probar al menos un viewport tipo telefono cuando el cambio sea visual.
 - No crear landing pages ni secciones explicativas pesadas dentro de la app; priorizar acciones y datos utiles.
 
 ## Convenciones de pruebas
 
 - Cambios de calculos financieros: agregar/actualizar tests en `tests/finance-core.test.mjs`.
-- Cambios de PWA, shell, navegacion, cache o presencia de UI: actualizar `tests/pwa.test.mjs`.
+- Logica pura nueva: sacarla de `app.js` a un modulo y probarla directo (`tests/state-model.test.mjs`, `tests/movements.test.mjs`).
+- Comportamiento de pantallas: tests jsdom que arrancan la app real y la usan con clicks (`tests/app-*-smoke.test.mjs`, harness en `tests/helpers/boot-app.mjs`). Los plugins nativos (atras, widget, huella, compartir) se simulan en `window.Capacitor.Plugins` (ver `tests/app-native-smoke.test.mjs`).
+- No escribir tests que busquen texto dentro de `app.js`: pasan aunque el codigo este roto. Leer el archivo solo vale para configuracion (manifest, Android, service worker, CSS de layout): `tests/static-files.test.mjs`.
 - Cambios de sincronizacion/autenticacion: actualizar `tests/sync-client.test.mjs`.
 - Para UI visible, ademas de `npm.cmd run verify`, hacer una prueba renderizada con navegador cuando sea posible.
 - Si el Browser integrado falla por permisos de Windows, usar Playwright + Microsoft Edge como fallback y reportar la razon.

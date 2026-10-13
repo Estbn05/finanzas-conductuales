@@ -19,7 +19,9 @@ import {
   lastExpenseSource,
   relativeTimeEs,
   remoteChangedSinceLastSync,
-  uid
+  uid,
+  createDefaultState,
+  migrateState
 } from "../state-model.js";
 
 const EMPTY = { profile: { completed: false }, transactions: [], budgetJobs: [] };
@@ -290,4 +292,28 @@ test("last expense source: Pagado con starts where the latest expense was paid",
     tx("Exito", 40_000, "2026-10-01", "mercado", "credit"),
     tx("Tienda", 3_000, "2026-10-05", "free", "credit", "2026-10-05T08:00:00.000Z")
   ]), "cash", "latest date wins, then the latest edit within the same day");
+});
+
+// Regression: the default state used to describe a specific person (a student with a
+// $1.750.000 semester income, weekly gasoline, a money-scripts profile) and those numbers
+// showed up already typed in the first user's onboarding.
+test("a new profile assumes nothing about the user, and follows the phone's theme", () => {
+  const fresh = createDefaultState("2026-10-12", "today");
+  assert.equal(fresh.profile.completed, false);
+  assert.equal(fresh.profile.incomeAmount, 0);
+  assert.equal(fresh.profile.incomeCadence, "", "the onboarding must ask, not preselect");
+  assert.equal(fresh.profile.incomeType, "");
+  assert.equal(fresh.profile.committedExpenses, 0);
+  assert.deepEqual(fresh.budgetJobs, []);
+  assert.deepEqual(fresh.transactions, []);
+  assert.deepEqual({ account: fresh.liquidity.account, cash: fresh.liquidity.cash }, { account: 0, cash: 0 });
+  assert.equal(fresh.settings.theme, "");
+  assert.equal(fresh.periodIncomeStatus, null);
+});
+
+test("an explicit theme survives migration, anything else falls back to following the phone", () => {
+  for (const theme of ["dark", "light"]) {
+    assert.equal(migrateState({ settings: { theme } }, "2026-10-12", "today").settings.theme, theme);
+  }
+  assert.equal(migrateState({ settings: { theme: "sepia" } }, "2026-10-12", "today").settings.theme, "");
 });

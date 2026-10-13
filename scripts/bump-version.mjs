@@ -14,6 +14,7 @@ export const VERSIONED_FILES = [
   "index.html",
   "app.js",
   "state-model.js",
+  "movements.js",
   "manifest.webmanifest",
   "service-worker.js"
 ];

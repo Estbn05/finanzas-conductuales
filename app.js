@@ -19,7 +19,22 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.69";
+} from "./finance-core.js?v=1.1.70";
+import {
+  SMALL_EXPENSE_THRESHOLD,
+  categoryTrend,
+  compareByRecent,
+  dailyExpenseTotal,
+  dailyTotals,
+  expenseCalendar,
+  inWindow,
+  listMovements,
+  merchantTotals,
+  movementsCsv,
+  periodMovements,
+  smallExpenses,
+  weekdayPattern
+} from "./movements.js?v=1.1.70";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -39,7 +54,6 @@ import {
   merchantKey,
   isPlaceholderMerchant,
   merchantRuleMatches,
-  csvField,
   migrateState,
   normalizeBudgetExtras,
   normalizeBudgetJobs,
@@ -67,7 +81,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.69";
+} from "./state-model.js?v=1.1.70";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -83,7 +97,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.69";
+} from "./sync-client.js?v=1.1.70";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -149,7 +163,6 @@ const moneyFormatterCache = new Map();
 // overwritten, and must always reach the sidebar. A previous version silenced any
 // message matching /nube|sincron/i, which swallowed that overwrite warning too.
 
-const SMALL_EXPENSE_THRESHOLD = 15000;
 const WEEKDAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
 
 // Matches FreeMoneyWidgetProvider.QUICK_ADD_URI and the intent-filter data (scheme +
@@ -2833,7 +2846,7 @@ function generatePeriodReport(plan = calculatePlan(), summary = budgetSummary(),
   const liquidity = liquiditySummary(summary);
   const periodEnd = previousDay(summary.window.end);
   const transactions = transactionsForSummary(summary);
-  const movements = movementsForSummary(summary).slice().sort(compareTransactionsByRecent);
+  const movements = movementsForSummary(summary).slice().sort(compareByRecent);
   const totalExpenses = transactions.reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
   const oneOffTotal = transactions
     .filter((transaction) => transaction.oneOff)
@@ -2920,28 +2933,11 @@ function periodReportCategoryLines() {
 }
 
 function periodReportDailyTotals(summary = budgetSummary()) {
-  const totals = transactionsForSummary(summary).reduce((acc, transaction) => {
-    const date = String(transaction.date || todayKey()).slice(0, 10);
-    acc[date] ||= { date, total: 0, count: 0 };
-    acc[date].total += Number(transaction.amount || 0);
-    acc[date].count += 1;
-    return acc;
-  }, {});
-  return Object.values(totals).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  return dailyTotals(transactionsForSummary(summary), todayKey());
 }
 
 function periodReportMerchantTotals(summary = budgetSummary()) {
-  const totals = transactionsForSummary(summary).reduce((acc, transaction) => {
-    const name = cleanText(transaction.merchant, "Comercio");
-    const key = merchantKey(name) || name.toLowerCase();
-    acc[key] ||= { name, total: 0, count: 0 };
-    acc[key].total += Number(transaction.amount || 0);
-    acc[key].count += 1;
-    return acc;
-  }, {});
-  return Object.values(totals)
-    .sort((a, b) => b.total - a.total || b.count - a.count || String(a.name).localeCompare(String(b.name)))
-    .slice(0, 8);
+  return merchantTotals(transactionsForSummary(summary));
 }
 
 function periodReportMovementLines(movements = []) {
@@ -3920,124 +3916,18 @@ function renderExpenseCalendarDay(day, maxDaily) {
 }
 
 function expenseCalendarForSummary(summary = budgetSummary()) {
-  // Whole period, except semester/yearly ones (too long for a grid): those show the month
-  // of the last day that already happened.
-  const long = datesInWindow(summary.window.start, summary.window.end).length > 35;
-  const anchor = minDateKey(todayKey(), previousDay(summary.window.end));
-  const monthStart = monthStartKey(anchor);
-  const start = long ? maxDateKey(summary.window.start, monthStart) : summary.window.start;
-  const end = long ? minDateKey(summary.window.end, nextMonthStartKey(monthStart)) : summary.window.end;
-  const totals = transactionsForSummary(summary).reduce((acc, transaction) => {
-    const date = String(transaction.date || todayKey()).slice(0, 10);
-    if (date < start || date >= end) {
-      return acc;
-    }
-    acc[date] = (acc[date] || 0) + Number(transaction.amount || 0);
-    return acc;
-  }, {});
-  const days = datesInWindow(start, end).map((date) => {
-    const total = totals[date] || 0;
-    return {
-      date,
-      total,
-      dayNumber: Number(date.slice(8, 10)),
-      isToday: date === todayKey()
-    };
-  });
-  const activeDays = days.filter((day) => day.total > 0);
-  const total = activeDays.reduce((sum, day) => sum + day.total, 0);
-  const heaviest = activeDays.slice().sort((a, b) => b.total - a.total || String(b.date).localeCompare(String(a.date)))[0] || null;
-  return {
-    start,
-    end,
-    days,
-    blanks: Array.from({ length: weekdayOffset(start) }),
-    total,
-    heaviest,
-    maxDaily: activeDays.reduce((max, day) => Math.max(max, day.total), 0),
-    averageActive: activeDays.length ? Math.round(total / activeDays.length) : 0
-  };
+  return expenseCalendar(state.transactions, summary.window, todayKey());
 }
 
-function datesInWindow(start, end) {
-  const dates = [];
-  const cursor = new Date(`${start}T12:00:00`);
-  const finish = new Date(`${end}T12:00:00`);
-  while (cursor < finish) {
-    dates.push(todayKey(cursor));
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return dates;
-}
 
-function nextMonthStartKey(dateValue = todayKey()) {
-  const date = new Date(`${monthStartKey(dateValue)}T12:00:00`);
-  date.setMonth(date.getMonth() + 1);
-  return todayKey(date);
-}
 
-function minDateKey(a, b) {
-  return String(a) <= String(b) ? String(a) : String(b);
-}
 
-function maxDateKey(a, b) {
-  return String(a) >= String(b) ? String(a) : String(b);
-}
 
-function weekdayOffset(dateValue) {
-  const day = new Date(`${dateValue}T12:00:00`).getDay();
-  return day === 0 ? 6 : day - 1;
-}
 
-function movementMatchesFilter(movement, filter) {
-  if (!filter || filter === "all") {
-    return true;
-  }
-  if (filter === "expense" || filter === "income") {
-    return movement.kind === filter;
-  }
-  if (movement.kind !== "expense") {
-    return false;
-  }
-  const category = movement.transaction.category || FREE_CATEGORY_ID;
-  const unlabeled = !movement.transaction.labeled || category === FREE_CATEGORY_ID;
-  if (filter === "uncategorized") {
-    return unlabeled;
-  }
-  if (filter.startsWith("cat:")) {
-    return category === filter.slice(4);
-  }
-  return true;
-}
 
-function movementMatchesSearch(movement, query) {
-  if (!query) {
-    return true;
-  }
-  const needle = query.trim().toLowerCase();
-  if (!needle) {
-    return true;
-  }
-  const haystack =
-    movement.kind === "income"
-      ? movement.extra.source || ""
-      : `${movement.transaction.merchant || ""} ${movement.transaction.description || ""}`;
-  return haystack.toLowerCase().includes(needle);
-}
 
 function renderTransactionHistory(summary = budgetSummary(), sort = "recent", filter = "all", search = "", date = "") {
-  const movements = movementsForSummary(summary)
-    .filter(
-      (movement) =>
-        movementMatchesFilter(movement, filter) &&
-        movementMatchesSearch(movement, search) &&
-        (!date || String(movement.date || "").slice(0, 10) === date)
-    )
-    .sort((a, b) =>
-      sort === "amount"
-        ? Number(b.amount || 0) - Number(a.amount || 0) || compareTransactionsByRecent(a, b)
-        : compareTransactionsByRecent(a, b)
-    );
+  const movements = listMovements(movementsForSummary(summary), { sort, filter, search, date });
 
   if (!movements.length) {
     return date
@@ -4115,11 +4005,6 @@ function renderTransactionHistory(summary = budgetSummary(), sort = "recent", fi
   `;
 }
 
-function dailyExpenseTotal(dayMovements = []) {
-  return dayMovements
-    .filter((movement) => movement.kind === "expense")
-    .reduce((total, movement) => total + Number(movement.amount || 0), 0);
-}
 
 function renderTransactionEditor() {
   const transaction = state.transactions.find((item) => item.id === editingTransactionId);
@@ -4260,14 +4145,6 @@ function renderExtraEditor() {
   `;
 }
 
-function compareTransactionsByRecent(a, b) {
-  const dateDifference = String(b.date || "").localeCompare(String(a.date || ""));
-  if (dateDifference) return dateDifference;
-
-  const aCreated = Date.parse(a.createdAt || a.updated_at || "");
-  const bCreated = Date.parse(b.createdAt || b.updated_at || "");
-  return (Number.isFinite(bCreated) ? bCreated : 0) - (Number.isFinite(aCreated) ? aCreated : 0);
-}
 
 function renderCooldown(cooldown) {
   const unlocked = new Date(cooldown.unlockAt).getTime() <= Date.now();
@@ -4512,101 +4389,41 @@ function renderProgressView() {
   `;
 }
 
-function previousPeriodWindow(summary) {
-  const start = new Date(`${summary.window.start}T00:00:00`);
-  const end = new Date(`${summary.window.end}T00:00:00`);
-  const lengthMs = end.getTime() - start.getTime();
-  const prevStart = new Date(start.getTime() - lengthMs);
-  return { start: todayKey(prevStart), end: summary.window.start };
-}
 
 function weekdaySpendingInsight(summary) {
-  const transactions = transactionsForSummary(summary);
-  if (transactions.length < 6) {
+  const pattern = weekdayPattern(transactionsForSummary(summary));
+  if (!pattern) {
     return null;
   }
-  const totals = new Array(7).fill(0);
-  transactions.forEach((transaction) => {
-    const day = new Date(`${transaction.date}T12:00:00`).getDay();
-    totals[day] += Number(transaction.amount || 0);
-  });
-  const totalSpent = totals.reduce((sum, value) => sum + value, 0);
-  if (totalSpent <= 0) {
-    return null;
-  }
-  const daysWithSpend = totals.map((total, day) => ({ day, total })).filter((entry) => entry.total > 0);
-  if (daysWithSpend.length < 3) {
-    return null;
-  }
-  const top = daysWithSpend.reduce((best, entry) => (entry.total > best.total ? entry : best));
-  const share = (top.total / totalSpent) * 100;
-  if (share < 25) {
-    return null;
-  }
+  const day = WEEKDAY_NAMES[pattern.day];
   return {
     icon: "calendar",
-    title: `Los ${WEEKDAY_NAMES[top.day]}s concentran tus gastos`,
-    detail: `Gastaste ${formatMoney(top.total)} en ${WEEKDAY_NAMES[top.day]}s este periodo, ${Math.round(share)}% de lo que llevas gastado.`
+    title: `Los ${day}s concentran tus gastos`,
+    detail: `Gastaste ${formatMoney(pattern.total)} en ${day}s este periodo, ${Math.round(pattern.share)}% de lo que llevas gastado.`
   };
 }
 
 function categoryTrendInsight(summary) {
-  const prevWindow = previousPeriodWindow(summary);
-  const currentByCategory = {};
-  transactionsForSummary(summary).forEach((transaction) => {
-    const category = transaction.category || FREE_CATEGORY_ID;
-    currentByCategory[category] = (currentByCategory[category] || 0) + Number(transaction.amount || 0);
-  });
-  const prevByCategory = {};
-  (state.transactions || []).forEach((transaction) => {
-    const date = String(transaction.date || "").slice(0, 10);
-    if (date >= prevWindow.start && date < prevWindow.end) {
-      const category = transaction.category || FREE_CATEGORY_ID;
-      prevByCategory[category] = (prevByCategory[category] || 0) + Number(transaction.amount || 0);
-    }
-  });
-  let best = null;
-  Object.keys(currentByCategory).forEach((category) => {
-    const current = currentByCategory[category];
-    const previous = prevByCategory[category] || 0;
-    if (previous < 5000) {
-      return;
-    }
-    const diff = current - previous;
-    const pct = (diff / previous) * 100;
-    if (pct >= 30 && diff >= 10000 && (!best || diff > best.diff)) {
-      best = { category, current, previous, diff, pct };
-    }
-  });
-  if (!best) {
+  const trend = categoryTrend(state.transactions, summary.window);
+  if (!trend) {
     return null;
   }
   return {
     icon: "trend",
-    title: `${categoryName(best.category)} subio frente al periodo pasado`,
-    detail: `Gastaste ${formatMoney(best.current)}, ${Math.round(best.pct)}% más que los ${formatMoney(best.previous)} del periodo anterior.`
+    title: `${categoryName(trend.category)} subió frente al periodo pasado`,
+    detail: `Gastaste ${formatMoney(trend.current)}, ${Math.round(trend.pct)}% más que los ${formatMoney(trend.previous)} del periodo anterior.`
   };
 }
 
 function smallExpensesInsight(summary) {
-  const transactions = transactionsForSummary(summary);
-  const small = transactions.filter((transaction) => {
-    const amount = Number(transaction.amount || 0);
-    return amount > 0 && amount < SMALL_EXPENSE_THRESHOLD;
-  });
-  if (small.length < 5) {
-    return null;
-  }
-  const total = small.reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
-  const totalSpent = Number(summary.totalSpent || 0);
-  const share = totalSpent > 0 ? (total / totalSpent) * 100 : 0;
-  if (share < 10) {
+  const small = smallExpenses(transactionsForSummary(summary), Number(summary.totalSpent || 0));
+  if (!small) {
     return null;
   }
   return {
     icon: "cash",
     title: "Gasto hormiga acumulado",
-    detail: `${small.length} gastos menores a ${formatMoney(SMALL_EXPENSE_THRESHOLD)} suman ${formatMoney(total)}, ${Math.round(share)}% de lo gastado este periodo.`
+    detail: `${small.count} gastos menores a ${formatMoney(SMALL_EXPENSE_THRESHOLD)} suman ${formatMoney(small.total)}, ${Math.round(small.share)}% de lo gastado este periodo.`
   };
 }
 
@@ -7641,32 +7458,9 @@ function downloadPeriodReport() {
   exportFile(`reporte-periodo-${summary.window.start}.txt`, reportText, "text/plain", "Reporte listo.");
 }
 
-function movementsCsvRows() {
-  const expenseRows = (state.transactions || []).map((transaction) => ({
-    date: transaction.date,
-    kind: "Gasto",
-    who: transaction.merchant,
-    category: categoryName(transaction.category || FREE_CATEGORY_ID),
-    amount: -Math.abs(Number(transaction.amount || 0)),
-    paidWith: locationLabel(transaction.source),
-    note: transaction.description || ""
-  }));
-  const incomeRows = (state.budgetExtras || []).map((extra) => ({
-    date: extra.date,
-    kind: "Ingreso",
-    who: extra.source,
-    category: "",
-    amount: Math.abs(Number(extra.amount || 0)),
-    paidWith: extra.location === "cash" ? "Efectivo" : "Cuenta",
-    note: ""
-  }));
-  return [...expenseRows, ...incomeRows].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-}
 
 function buildMovementsCsv() {
-  const header = ["Fecha", "Tipo", "Comercio u origen", "Categoría", "Monto", "Pagado con", "Nota"];
-  const rows = movementsCsvRows().map((row) => [row.date, row.kind, row.who, row.category, row.amount, row.paidWith, row.note]);
-  return [header, ...rows].map((row) => row.map(csvField).join(",")).join("\r\n");
+  return movementsCsv(state.transactions, state.budgetExtras, { categoryName, locationLabel });
 }
 
 function downloadMovementsCsv() {
@@ -8480,37 +8274,15 @@ function adjustLiquidity(location, delta, reason) {
 }
 
 function budgetExtrasForSummary(summary = budgetSummary()) {
-  return (state.budgetExtras || []).filter((extra) => {
-    const date = String(extra.date || "").slice(0, 10);
-    return date >= summary.window.start && date < summary.window.end;
-  });
+  return inWindow(state.budgetExtras, summary.window);
 }
 
 function transactionsForSummary(summary = budgetSummary()) {
-  return (state.transactions || []).filter((transaction) => {
-    const date = String(transaction.date || "").slice(0, 10);
-    return date >= summary.window.start && date < summary.window.end;
-  });
+  return inWindow(state.transactions, summary.window);
 }
 
 function movementsForSummary(summary = budgetSummary()) {
-  const expenses = transactionsForSummary(summary).map((transaction) => ({
-    id: transaction.id,
-    kind: "expense",
-    date: transaction.date,
-    amount: transaction.amount,
-    updated_at: transaction.updated_at || transaction.createdAt || transaction.date,
-    transaction
-  }));
-  const income = budgetExtrasForSummary(summary).map((extra) => ({
-    id: extra.id,
-    kind: "income",
-    date: extra.date,
-    amount: extra.amount,
-    updated_at: extra.updated_at || extra.date,
-    extra
-  }));
-  return [...expenses, ...income];
+  return periodMovements(state.transactions, state.budgetExtras, summary.window);
 }
 
 function categoryStatus() {
