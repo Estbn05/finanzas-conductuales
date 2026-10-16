@@ -1,6 +1,7 @@
 package com.estbn05.finanzasconductuales;
 
 import android.app.Notification;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Bundle;
@@ -29,6 +30,10 @@ public class BankNotificationListener extends NotificationListenerService {
     private static final int MAX_PENDING = 30;
     // Banks often re-post the same notification (an update, a group change) seconds later.
     private static final long DUPLICATE_WINDOW_MS = 2 * 60 * 1000;
+    // Whether Android has this listener bound right now. The service runs in the app's own
+    // process, so the plugin reads the live value. Granted access is not enough: Xiaomi
+    // phones refuse to bind it while the app's "Inicio automático" (autostart) is off.
+    static volatile boolean connected = false;
 
     @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
@@ -39,6 +44,7 @@ public class BankNotificationListener extends NotificationListenerService {
     // made just before turning the feature on is not lost.
     @Override
     public void onListenerConnected() {
+        connected = true;
         try {
             StatusBarNotification[] active = getActiveNotifications();
             if (active == null) return;
@@ -47,6 +53,22 @@ public class BankNotificationListener extends NotificationListenerService {
             }
         } catch (RuntimeException ignored) {
             // The system can disconnect us between the callback and the call.
+        }
+    }
+
+    // Updating the app (and some phones, MIUI among them, on their own) unbinds the
+    // listener while access stays granted, so new notifications silently stop arriving.
+    @Override
+    public void onListenerDisconnected() {
+        connected = false;
+        requestRebind(this);
+    }
+
+    static void requestRebind(Context context) {
+        try {
+            NotificationListenerService.requestRebind(new ComponentName(context, BankNotificationListener.class));
+        } catch (RuntimeException ignored) {
+            // Access not granted (anymore): nothing to reconnect.
         }
     }
 

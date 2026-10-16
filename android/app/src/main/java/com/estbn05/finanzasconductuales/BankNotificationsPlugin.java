@@ -1,7 +1,9 @@
 package com.estbn05.finanzasconductuales;
 
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.provider.Settings;
 import androidx.core.app.NotificationManagerCompat;
 import com.getcapacitor.JSArray;
@@ -22,9 +24,17 @@ public class BankNotificationsPlugin extends Plugin {
     @PluginMethod
     public void status(PluginCall call) {
         Context context = getContext();
+        boolean enabled = BankNotificationListener.isEnabled(context);
+        boolean permission = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.getPackageName());
+        // The app asks for its status at launch and on every return to the foreground:
+        // a good moment to reconnect a listener an app update left unbound.
+        if (enabled && permission) {
+            BankNotificationListener.requestRebind(context);
+        }
         JSObject result = new JSObject();
-        result.put("enabled", BankNotificationListener.isEnabled(context));
-        result.put("permission", NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.getPackageName()));
+        result.put("enabled", enabled);
+        result.put("permission", permission);
+        result.put("connected", BankNotificationListener.connected);
         call.resolve(result);
     }
 
@@ -46,6 +56,26 @@ public class BankNotificationsPlugin extends Plugin {
         Intent intent = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         getContext().startActivity(intent);
+        call.resolve();
+    }
+
+    /**
+     * Where the user lets the app run in the background. Xiaomi's autostart screen when it
+     * exists (the listener cannot be bound without it there), the app's info page otherwise.
+     */
+    @PluginMethod
+    public void openBackgroundSettings(PluginCall call) {
+        Context context = getContext();
+        Intent autostart = new Intent();
+        autostart.setComponent(new ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"));
+        autostart.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            context.startActivity(autostart);
+        } catch (RuntimeException notXiaomi) {
+            Intent details = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.getPackageName(), null));
+            details.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(details);
+        }
         call.resolve();
     }
 

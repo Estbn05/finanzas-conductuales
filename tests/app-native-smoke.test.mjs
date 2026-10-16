@@ -9,7 +9,7 @@ import { bootApp, returningUserState, settle, todayKey } from "./helpers/boot-ap
 
 // What the native side would receive, recorded instead of acted on.
 function fakeCapacitor({ launchUrl = "", biometricResult = "success", bank = { enabled: false, permission: false, pending: [] } } = {}) {
-  const calls = { exited: 0, widget: [], files: [], shares: [], biometricPrompts: 0, bankSettingsOpened: 0, bankDismissed: [], bankEnabled: [] };
+  const calls = { exited: 0, widget: [], files: [], shares: [], biometricPrompts: 0, bankSettingsOpened: 0, bankBackgroundOpened: 0, bankDismissed: [], bankEnabled: [] };
   const listeners = {};
   const plugins = {
     App: {
@@ -37,7 +37,11 @@ function fakeCapacitor({ launchUrl = "", biometricResult = "success", bank = { e
     },
     // Stands in for BankNotificationsPlugin.java (the Android listener's store).
     BankNotifications: {
-      status: () => Promise.resolve({ enabled: bank.enabled, permission: bank.permission }),
+      status: () => Promise.resolve({ enabled: bank.enabled, permission: bank.permission, connected: bank.connected !== false }),
+      openBackgroundSettings() {
+        calls.bankBackgroundOpened += 1;
+        return Promise.resolve();
+      },
       setEnabled({ enabled }) {
         bank.enabled = enabled;
         calls.bankEnabled.push(enabled);
@@ -352,6 +356,75 @@ test("nothing from the bank shows while the feature is off, even with notificati
     await waitFor(ui, '[data-view="profile"]');
     await settle(ui.window);
     assert.equal(ui.$('[data-action="register-bank-suggestion"]'), null);
+  } finally {
+    ui.close();
+  }
+});
+
+// Xiaomi phones keep notification access granted but refuse to start the listener while
+// the app's "Inicio automático" is off: nothing arrives, and nothing said why.
+test("when the phone blocks the listener, Datos says so and opens the setting that fixes it", async () => {
+  const native = fakeCapacitor({ bank: { enabled: true, permission: true, connected: false, pending: [] } });
+  const ui = await bootApp({ savedState: returningUserState(), beforeBoot: native.install });
+  try {
+    await waitFor(ui, '[data-view="profile"]');
+    await ui.click('[data-view="profile"]');
+    assert.match(ui.text(), /Inicio automático/);
+    await ui.click('[data-action="open-bank-background-settings"]');
+    assert.equal(native.calls.bankBackgroundOpened, 1);
+  } finally {
+    ui.close();
+  }
+});
+
+// Real Nu text. For the app the account is only Nu, so money moved in from Nequi is new
+// money in it: unrecorded, the balance and the free money would both come out short.
+test("money that arrives at Nu is offered as income and lands in the account with Dinero extra", async () => {
+  const arrived = {
+    id: "com.nu.production:1:income",
+    packageName: "com.nu.production",
+    title: "Recibiste 20.000,00 en tu cuenta",
+    text: "Te llegó dinero de YEFRY ESTEBAN AVILA ZULUAGA con tu llave.",
+    postedAt: Date.now()
+  };
+  const native = fakeCapacitor({ bank: { enabled: true, permission: true, pending: [arrived] } });
+  const ui = await bootApp({ savedState: returningUserState(), beforeBoot: native.install });
+  try {
+    await waitFor(ui, '[data-action="register-bank-income"]');
+    assert.match(ui.text(), /¿Registrar este ingreso\?/);
+    assert.match(ui.text(), /Yefry Esteban Avila Zuluaga/);
+    assert.equal(ui.$('[data-action="register-bank-suggestion"]'), null, "it is not offered as an expense");
+
+    await ui.click('[data-action="register-bank-income"]');
+    const form = ui.$("#extra-budget-form");
+    assert.ok(form, "the Dinero extra sheet opened");
+    assert.equal(form.elements.namedItem("source").value, "Yefry Esteban Avila Zuluaga");
+    assert.equal(form.elements.namedItem("amount").value.replace(/\D/g, ""), "20000");
+    assert.equal(form.elements.namedItem("location").value, "account");
+    form.requestSubmit(form.querySelector('[value="all-free"]'));
+    await settle(ui.window);
+
+    const saved = ui.saved();
+    assert.equal(saved.budgetExtras.length, 1);
+    assert.equal(saved.budgetExtras[0].amount, 20_000);
+    assert.equal(saved.liquidity.account, 1_520_000, "the account balance matches the bank again");
+    assert.deepEqual(native.calls.bankDismissed, [arrived.id]);
+    assert.equal(ui.$('[data-action="register-bank-income"]'), null);
+  } finally {
+    ui.close();
+  }
+});
+
+test("'No es un ingreso' drops money that was already counted", async () => {
+  const arrived = { id: "nu:2", packageName: "com.nu.production", title: "Recibiste 50.000,00 en tu cuenta", text: "Te llegó dinero de Ana con tu llave.", postedAt: Date.now() };
+  const native = fakeCapacitor({ bank: { enabled: true, permission: true, pending: [arrived] } });
+  const ui = await bootApp({ savedState: returningUserState(), beforeBoot: native.install });
+  try {
+    await waitFor(ui, '[data-action="dismiss-bank-suggestion"]');
+    assert.match(ui.$('[data-action="dismiss-bank-suggestion"]').textContent, /No es un ingreso/);
+    await ui.click('[data-action="dismiss-bank-suggestion"]');
+    assert.deepEqual(native.calls.bankDismissed, ["nu:2"]);
+    assert.equal(ui.saved()?.budgetExtras?.length ?? 0, 0);
   } finally {
     ui.close();
   }

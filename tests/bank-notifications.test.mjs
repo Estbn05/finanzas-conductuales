@@ -2,7 +2,7 @@
 // typical Colombian banking wording, to be replaced with real samples as they show up.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { alreadyRecorded, parseAmount, parseMerchant, pendingSuggestions, suggestionFromNotification } from "../bank-notifications.js";
+import { alreadyRecorded, parseAmount, parseMerchant, parseOrigin, pendingSuggestions, suggestionFromNotification } from "../bank-notifications.js";
 
 const NU = "com.nu.production";
 const at = (iso) => new Date(iso).getTime();
@@ -20,6 +20,21 @@ test("amounts in Colombian format become whole pesos", () => {
   assert.equal(parseAmount("$3500"), 3_500);
   assert.equal(parseAmount("Tu código es 483920"), 0, "a number without a currency is not an amount");
   assert.equal(parseAmount(""), 0);
+});
+
+// Real Nu: money that arrives is written without "$".
+test("a bare amount counts only with both separators, as Nu writes money that arrived", () => {
+  assert.equal(parseAmount("Recibiste 20.000,00 en tu cuenta"), 20_000);
+  assert.equal(parseAmount("Recibiste 1.250.000,50 en tu cuenta"), 1_250_001);
+  assert.equal(parseAmount("tarjeta terminada en 3965"), 0);
+  assert.equal(parseAmount("el 12.10.2026"), 0, "a date is not an amount");
+  assert.equal(parseAmount("Tu clave es 4.839"), 0);
+});
+
+test("who sent the money is what follows 'de', in calm capitalization", () => {
+  assert.equal(parseOrigin("Te llegó dinero de YEFRY ESTEBAN AVILA ZULUAGA con tu llave."), "Yefry Esteban Avila Zuluaga");
+  assert.equal(parseOrigin("Recibiste $200.000 de Ana en tu cuenta."), "Ana");
+  assert.equal(parseOrigin("Recibiste dinero"), "");
 });
 
 test("the merchant is what follows 'en', in calm capitalization", () => {
@@ -53,7 +68,7 @@ test("a card purchase becomes an expense to confirm, with its date, card and mer
   );
   assert.deepEqual(
     { ...suggestion, id: undefined, postedAt: undefined },
-    { id: undefined, bank: "Nu", amount: 45_000, merchant: "Terpel Calle 80", source: "credit", date: "2026-10-12", postedAt: undefined }
+    { id: undefined, kind: "expense", bank: "Nu", amount: 45_000, merchant: "Terpel Calle 80", source: "credit", date: "2026-10-12", postedAt: undefined }
   );
 });
 
@@ -64,9 +79,24 @@ test("money out of the account is an expense from the account", () => {
   assert.equal(suggestion.merchant, "");
 });
 
-test("income, declined payments, codes and promotions are never offered as expenses", () => {
+// Real Nu: money arriving from Nequi through a Bre-B key. For the app the account is only
+// Nu, so even the user's own transfer is new money in it, and is offered as income.
+test("money that arrives is offered as income to the account, with who sent it", () => {
+  const suggestion = suggestionFromNotification(
+    notification("Recibiste 20.000,00 en tu cuenta", "Te llegó dinero de YEFRY ESTEBAN AVILA ZULUAGA con tu llave.")
+  );
+  assert.equal(suggestion.kind, "income");
+  assert.equal(suggestion.amount, 20_000);
+  assert.equal(suggestion.origin, "Yefry Esteban Avila Zuluaga");
+  assert.equal(suggestion.location, "account");
+  assert.equal(suggestion.date, "2026-10-12");
+
+  const other = suggestionFromNotification(notification("Te llegó plata", "Recibiste un pago de $200.000 de Ana en tu cuenta."));
+  assert.equal(other.kind, "income", "'pago' inside a 'recibiste' is still money coming in");
+});
+
+test("refunds, declined payments, codes and promotions are never offered", () => {
   for (const [title, text] of [
-    ["Te llegó plata", "Recibiste $200.000 de Ana en tu cuenta."],
     ["Compra rechazada", "Tu compra por $45.000 en Terpel fue rechazada."],
     ["Código de seguridad", "Tu código es 483920. No lo compartas."],
     ["Oferta", "Paga $0 de cuota de manejo este mes con tu tarjeta"],
@@ -77,25 +107,31 @@ test("income, declined payments, codes and promotions are never offered as expen
   }
 });
 
-test("a purchase already recorded by hand that day is not offered again", () => {
-  const suggestion = suggestionFromNotification(notification("Compra", "Compraste $45.000 en Terpel"));
-  assert.equal(alreadyRecorded(suggestion, [{ amount: 45_000, date: "2026-10-12" }]), true);
-  assert.equal(alreadyRecorded(suggestion, [{ amount: 45_000, date: "2026-10-11" }]), false);
-  assert.equal(alreadyRecorded(suggestion, [{ amount: 46_000, date: "2026-10-12" }]), false);
+test("a movement already recorded by hand that day is not offered again, expenses and income apart", () => {
+  const purchase = suggestionFromNotification(notification("Compra", "Compraste $45.000 en Terpel"));
+  assert.equal(alreadyRecorded(purchase, { transactions: [{ amount: 45_000, date: "2026-10-12" }] }), true);
+  assert.equal(alreadyRecorded(purchase, { transactions: [{ amount: 45_000, date: "2026-10-11" }] }), false);
+  assert.equal(alreadyRecorded(purchase, { transactions: [{ amount: 46_000, date: "2026-10-12" }] }), false);
+  assert.equal(alreadyRecorded(purchase, { extras: [{ amount: 45_000, date: "2026-10-12" }] }), false, "income of the same amount is not this expense");
+
+  const arrived = suggestionFromNotification(notification("Recibiste 20.000,00 en tu cuenta", "Te llegó dinero de Ana."));
+  assert.equal(alreadyRecorded(arrived, { extras: [{ amount: 20_000, date: "2026-10-12" }] }), true);
+  assert.equal(alreadyRecorded(arrived, { transactions: [{ amount: 20_000, date: "2026-10-12" }] }), false);
 });
 
-test("pending suggestions: newest first, without the ones that are not expenses or are already recorded", () => {
+test("pending suggestions: newest first, without the ones already recorded", () => {
   const list = pendingSuggestions(
     [
       notification("Compra", "Compraste $10.000 en Café", at("2026-10-12T08:00:00")),
-      notification("Te llegó plata", "Recibiste $5.000", at("2026-10-12T09:00:00")),
+      notification("Te llegó plata", "Recibiste $5.000 de Ana", at("2026-10-12T09:00:00")),
       notification("Compra", "Compraste $30.000 en Éxito", at("2026-10-12T10:00:00")),
-      notification("Compra", "Compraste $7.000 en Bus", at("2026-10-12T11:00:00"))
+      notification("Compra", "Compraste $7.000 en Bus", at("2026-10-12T11:00:00")),
+      notification("Hola", "Tu extracto ya está disponible.", at("2026-10-12T12:00:00"))
     ],
-    [{ amount: 7_000, date: "2026-10-12" }]
+    { transactions: [{ amount: 7_000, date: "2026-10-12" }] }
   );
   assert.deepEqual(
-    list.map((item) => item.merchant),
-    ["Éxito", "Café"]
+    list.map((item) => item.merchant || item.origin),
+    ["Éxito", "Ana", "Café"]
   );
 });

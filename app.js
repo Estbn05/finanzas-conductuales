@@ -19,7 +19,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.73";
+} from "./finance-core.js?v=1.1.76";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -34,8 +34,8 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.73";
-import { pendingSuggestions } from "./bank-notifications.js?v=1.1.73";
+} from "./movements.js?v=1.1.76";
+import { pendingSuggestions } from "./bank-notifications.js?v=1.1.76";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -82,7 +82,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.73";
+} from "./state-model.js?v=1.1.76";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -98,7 +98,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.73";
+} from "./sync-client.js?v=1.1.76";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -339,7 +339,9 @@ let biometricPromptActive = false;
 // Expenses read from the bank app's notifications, waiting for the user to confirm them.
 // Device-only: they come from the Android listener and are never part of the synced state.
 let bankSuggestions = [];
-let bankStatus = { available: false, enabled: false, permission: false };
+let bankStatus = { available: false, enabled: false, permission: false, connected: false };
+// Money a bank notification said arrived, prefilling the "Dinero extra" sheet.
+let extraDraft = null;
 
 render();
 initializeNativeNotificationActions();
@@ -3167,6 +3169,7 @@ function renderPlanSheet() {
   // second sheet after "Continuar"; the proposal now sits right under the amount, with
   // the suggestion preselected and "Dejar todo libre" one tap away.
   const target = savingsAllocationTarget();
+  const draft = extraDraft || {};
   return `
     <div class="sheet-backdrop" role="presentation" data-action="close-plan-sheet">
       <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="extra-sheet-title">
@@ -3176,15 +3179,21 @@ function renderPlanSheet() {
           <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">${renderIcon("close")}</button>
         </div>
         <form class="sheet-form" id="extra-budget-form">
-          <label>Origen<input name="source" type="text" maxlength="36" placeholder="Ej. Bono trabajo" required></label>
-          <label>Monto<input name="amount" type="number" min="1000" step="1000" inputmode="numeric" placeholder="$0" required></label>
-          <input name="date" type="hidden" value="${todayKey()}">
+          ${
+            draft.bankNotificationId
+              ? `<input name="bankNotificationId" type="hidden" value="${escapeAttr(draft.bankNotificationId)}">
+                 <p class="data-note quick-bank-note">De tu notificación de ${escapeHtml(draft.bank)}, ${escapeHtml(bankDateLabel(draft.date))}. Revisa y confirma.</p>`
+              : ""
+          }
+          <label>Origen<input name="source" type="text" maxlength="36" placeholder="Ej. Bono trabajo" value="${escapeAttr(draft.source || "")}" required></label>
+          <label>Monto<input name="amount" type="number" min="1000" step="1000" inputmode="numeric" placeholder="$0" value="${draft.amount ? escapeAttr(draft.amount) : ""}" required></label>
+          <input name="date" type="hidden" value="${escapeAttr(draft.date || todayKey())}">
           <div class="sheet-field">
             <span class="sheet-label">¿Dónde entró?</span>
             ${renderChoicePills("location", [
               { value: "account", label: "Cuenta" },
               { value: "cash", label: "Efectivo" }
-            ], "account")}
+            ], draft.location || "account")}
           </div>
           ${
             canSeparateSavings()
@@ -5779,6 +5788,7 @@ function handleAction(event) {
     "retry-cloud-sync",
     "open-bank-disclosure",
     "register-bank-suggestion",
+    "register-bank-income",
     "dismiss-bank-suggestion"
   ]);
 
@@ -5856,6 +5866,7 @@ function handleAction(event) {
       if (quickExpenseOpen) {
         closeQuickExpense();
       }
+      extraDraft = null;
       planSheet = "extra";
       menuOpen = false;
       predictionDetailsOpen = false;
@@ -6008,7 +6019,9 @@ function handleAction(event) {
     "enable-bank-notifications": () => enableBankNotifications(),
     "disable-bank-notifications": () => disableBankNotifications(),
     "open-bank-settings": () => nativeBankNotifications()?.openSettings().catch(() => {}),
+    "open-bank-background-settings": () => nativeBankNotifications()?.openBackgroundSettings().catch(() => {}),
     "register-bank-suggestion": () => registerBankSuggestion(id),
+    "register-bank-income": () => registerBankIncome(id),
     "dismiss-bank-suggestion": () => {
       forgetBankNotification(id);
       showNoticeSnackbar("Listo, no lo registro.", { duration: 3500, renderNow: false });
@@ -6062,7 +6075,8 @@ function handleAction(event) {
       action === "disable-biometric" ||
       action === "enable-bank-notifications" ||
       action === "disable-bank-notifications" ||
-      action === "open-bank-settings";
+      action === "open-bank-settings" ||
+      action === "open-bank-background-settings";
     if (!selfManagedAction && !interfaceOnlyActions.has(action)) {
       saveState();
     }
@@ -6374,6 +6388,11 @@ function handleExtraBudgetSubmit(event) {
     },
     allFree ? 0 : numberFrom(data.get("savingsPercent"))
   );
+  const bankNotificationId = cleanText(data.get("bankNotificationId"), "");
+  if (bankNotificationId) {
+    forgetBankNotification(bankNotificationId);
+  }
+  extraDraft = null;
   planSheet = "";
   saveState();
   render();
@@ -7168,16 +7187,26 @@ function bindBankNotifications() {
   refreshBankSuggestions();
 }
 
-async function refreshBankSuggestions() {
+async function refreshBankSuggestions({ recheck = true } = {}) {
   const plugin = nativeBankNotifications();
   if (!plugin) {
     return;
   }
   try {
     const status = await plugin.status();
-    bankStatus = { available: true, enabled: Boolean(status?.enabled), permission: Boolean(status?.permission) };
+    bankStatus = {
+      available: true,
+      enabled: Boolean(status?.enabled),
+      permission: Boolean(status?.permission),
+      connected: status?.connected !== false
+    };
+    // status() asks Android to reconnect an unbound listener, which takes a moment: look
+    // again once before telling the user something is blocking it.
+    if (recheck && bankStatus.enabled && bankStatus.permission && !bankStatus.connected) {
+      window.setTimeout(() => refreshBankSuggestions({ recheck: false }), 1500);
+    }
     const pending = bankStatus.enabled && bankStatus.permission ? (await plugin.getPending())?.notifications || [] : [];
-    bankSuggestions = pendingSuggestions(pending, state.transactions);
+    bankSuggestions = pendingSuggestions(pending, { transactions: state.transactions, extras: state.budgetExtras });
   } catch {
     bankStatus = { ...bankStatus, available: true };
   }
@@ -7205,6 +7234,23 @@ function registerBankSuggestion(id) {
     source: suggestion.source
   };
   openQuickExpense();
+}
+
+function registerBankIncome(id) {
+  const suggestion = bankSuggestions.find((item) => item.id === id);
+  if (!suggestion) {
+    return;
+  }
+  extraDraft = {
+    bankNotificationId: suggestion.id,
+    bank: suggestion.bank,
+    date: suggestion.date,
+    amount: suggestion.amount,
+    source: suggestion.origin || `Recibido en ${suggestion.bank}`,
+    location: suggestion.location
+  };
+  planSheet = "extra";
+  menuOpen = false;
 }
 
 async function enableBankNotifications() {
@@ -7242,36 +7288,52 @@ function bankDateLabel(date) {
   return formatShortDate(date);
 }
 
+// Inicio: what the bank said went out, and what it said came in, each in its own card so
+// the question ("¿gasto?" / "¿ingreso?") is never ambiguous.
 function renderBankSuggestions() {
-  if (!bankSuggestions.length) {
+  const expenses = bankSuggestions.filter((suggestion) => suggestion.kind !== "income");
+  const income = bankSuggestions.filter((suggestion) => suggestion.kind === "income");
+  return `${renderBankSuggestionCard(expenses, "expense")}${renderBankSuggestionCard(income, "income")}`;
+}
+
+function renderBankSuggestionCard(suggestions, kind) {
+  if (!suggestions.length) {
     return "";
   }
-  const shown = bankSuggestions.slice(0, 3);
-  const more = bankSuggestions.length - shown.length;
+  const isIncome = kind === "income";
+  const shown = suggestions.slice(0, 3);
+  const more = suggestions.length - shown.length;
+  const question = isIncome
+    ? `¿Registrar ${suggestions.length === 1 ? "este ingreso" : "estos ingresos"}?`
+    : `¿Registrar ${suggestions.length === 1 ? "este gasto" : "estos gastos"}?`;
   return `
-    <article class="cooldown-panel bank-suggestions" aria-label="Gastos por confirmar">
+    <article class="cooldown-panel bank-suggestions ${isIncome ? "is-income" : ""}" aria-label="${isIncome ? "Ingresos por confirmar" : "Gastos por confirmar"}">
       <div class="home-section-heading compact-heading">
         <div>
           <p class="eyebrow">De tus notificaciones de ${escapeHtml(shown[0].bank)}</p>
-          <h2>¿Registrar ${bankSuggestions.length === 1 ? "este gasto" : "estos gastos"}?</h2>
+          <h2>${question}</h2>
         </div>
       </div>
       <div class="cooldown-list">
         ${shown
-          .map(
-            (suggestion) => `
+          .map((suggestion) => {
+            const title = isIncome
+              ? suggestion.origin || `Te llegó plata a ${suggestion.bank}`
+              : suggestion.merchant || `Compra con ${suggestion.bank}`;
+            const where = isIncome ? locationLabel(suggestion.location) : suggestion.source ? locationLabel(suggestion.source) : "";
+            return `
           <div class="cooldown-item">
             <div>
-              <strong>${escapeHtml(suggestion.merchant || `Compra con ${suggestion.bank}`)}</strong>
-              <span>${formatMoney(suggestion.amount)}${suggestion.source ? ` · ${escapeHtml(locationLabel(suggestion.source))}` : ""} · ${escapeHtml(bankDateLabel(suggestion.date))}</span>
+              <strong>${escapeHtml(title)}</strong>
+              <span>${isIncome ? "+" : ""}${formatMoney(suggestion.amount)}${where ? ` · ${escapeHtml(where)}` : ""} · ${escapeHtml(bankDateLabel(suggestion.date))}</span>
             </div>
             <div class="cooldown-actions">
-              <button class="btn ghost" type="button" data-action="dismiss-bank-suggestion" data-id="${escapeAttr(suggestion.id)}">No es un gasto</button>
-              <button class="btn secondary" type="button" data-action="register-bank-suggestion" data-id="${escapeAttr(suggestion.id)}">Registrar</button>
+              <button class="btn ghost" type="button" data-action="dismiss-bank-suggestion" data-id="${escapeAttr(suggestion.id)}">${isIncome ? "No es un ingreso" : "No es un gasto"}</button>
+              <button class="btn secondary" type="button" data-action="${isIncome ? "register-bank-income" : "register-bank-suggestion"}" data-id="${escapeAttr(suggestion.id)}">Registrar</button>
             </div>
           </div>
-        `
-          )
+        `;
+          })
           .join("")}
       </div>
       ${more > 0 ? `<p class="data-note">Y ${more} más. Aparecen aquí a medida que confirmes estos.</p>` : ""}
@@ -7283,12 +7345,17 @@ function renderBankNotificationsPanel() {
   if (!bankStatus.available) {
     return "";
   }
-  const { enabled, permission } = bankStatus;
+  const { enabled, permission, connected } = bankStatus;
+  // Access granted but Android will not start the listener: on Xiaomi phones that is the
+  // app's "Inicio automático" (autostart) being off, and nothing arrives until it is on.
+  const blocked = enabled && permission && !connected;
   const note = !enabled
     ? "Cuando Nu te avise de una compra, te proponemos registrarla. Tú confirmas cada una."
-    : permission
-      ? "Activado. Cuando Nu te avise de una compra, aparece en Inicio para que la confirmes."
-      : "Falta un paso: permite el acceso a notificaciones en los ajustes de Android.";
+    : !permission
+      ? "Falta un paso: permite el acceso a notificaciones en los ajustes de Android."
+      : blocked
+        ? "Tu teléfono no deja que la app lea las notificaciones en segundo plano. Activa “Inicio automático” para Finanzas Conductuales y vuelve a abrir la app."
+        : "Activado. Cuando Nu te avise de una compra, aparece en Inicio para que la confirmes.";
   return `
     <article class="data-section bank-notifications-section">
       <div class="data-section-heading"><span class="data-icon">${renderIcon("card")}</span><div><strong>Gastos desde Nu</strong><small>${note}</small></div></div>
@@ -7297,6 +7364,7 @@ function renderBankNotificationsPanel() {
           !enabled
             ? `<button class="btn primary" type="button" data-action="open-bank-disclosure">Activar</button>`
             : `${permission ? "" : `<button class="btn primary" type="button" data-action="open-bank-settings">Dar permiso</button>`}
+               ${blocked ? `<button class="btn primary" type="button" data-action="open-bank-background-settings">Abrir ajustes</button>` : ""}
                <button class="btn ghost" type="button" data-action="disable-bank-notifications">Desactivar</button>`
         }
       </div>
