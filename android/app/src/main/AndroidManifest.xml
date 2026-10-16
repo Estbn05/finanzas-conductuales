@@ -51,6 +51,19 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
 
+        <!-- Reads only the bank app's notifications (BANK_PACKAGES) to offer them as
+             expenses to confirm. Android asks the user for notification access separately;
+             the app also keeps nothing until the feature is turned on in Datos. -->
+        <service
+            android:name=".BankNotificationListener"
+            android:label="@string/bank_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".FreeMoneyWidgetProvider"
             android:exported="false">

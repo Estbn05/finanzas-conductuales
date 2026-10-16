@@ -92,6 +92,21 @@ test("Android declares the plugins and permissions the app relies on", async () 
   assert.ok(manifest.includes('android:name=".FreeMoneyWidgetProvider"'));
 });
 
+// Only Android may bind the listener (the BIND permission), and it is registered for the
+// bank packages bank-notifications.js knows how to name.
+test("the bank notification listener is declared, protected and limited to Nu", async () => {
+  const manifest = await read("android/app/src/main/AndroidManifest.xml");
+  const service = manifest.slice(manifest.indexOf('android:name=".BankNotificationListener"'));
+  assert.ok(service.includes('android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"'));
+  assert.ok(service.includes("android.service.notification.NotificationListenerService"));
+  assert.ok((await read(`${JAVA}/MainActivity.java`)).includes("registerPlugin(BankNotificationsPlugin.class);"));
+  const listener = await read(`${JAVA}/BankNotificationListener.java`);
+  const { BANK_NAMES } = await import("../bank-notifications.js");
+  for (const pkg of Object.keys(BANK_NAMES)) {
+    assert.ok(listener.includes(`"${pkg}"`), `${pkg} is named in the app but not listened to`);
+  }
+});
+
 // allowBackup="true" would let Android's Auto Backup upload localStorage (including the
 // Supabase refresh token) to the user's Google Drive, outside any control the PIN has; on
 // Android 12+ device-to-device transfer ignores it and follows dataExtractionRules.

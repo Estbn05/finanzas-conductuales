@@ -14,6 +14,7 @@ const runtimeEntries = [
   // app.js imports it at load time; leaving it out ships an APK that never boots.
   "state-model.js",
   "movements.js",
+  "bank-notifications.js",
   "sync-client.js",
   "sync-config.js",
   "manifest.webmanifest",
@@ -42,7 +43,7 @@ for (const entry of runtimeEntries) {
 
 // Minified inside the APK only; the source files stay readable. Transform, not bundle:
 // every module keeps its own file and its "?v=" import URLs, exactly as in the source.
-const minifiable = { "app.js": "js", "finance-core.js": "js", "state-model.js": "js", "movements.js": "js", "sync-client.js": "js", "styles.css": "css" };
+const minifiable = { "app.js": "js", "finance-core.js": "js", "state-model.js": "js", "movements.js": "js", "bank-notifications.js": "js", "sync-client.js": "js", "styles.css": "css" };
 let before = 0;
 let after = 0;
 for (const [file, loader] of Object.entries(minifiable)) {

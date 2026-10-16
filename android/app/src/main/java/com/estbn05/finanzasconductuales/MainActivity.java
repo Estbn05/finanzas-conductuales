@@ -8,6 +8,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(WidgetBridgePlugin.class);
         registerPlugin(BiometricAuthPlugin.class);
+        registerPlugin(BankNotificationsPlugin.class);
         super.onCreate(savedInstanceState);
         getBridge().getWebView().setVerticalScrollBarEnabled(false);
         getBridge().getWebView().setHorizontalScrollBarEnabled(false);

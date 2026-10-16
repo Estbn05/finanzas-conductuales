@@ -8,8 +8,8 @@ import test from "node:test";
 import { bootApp, returningUserState, settle, todayKey } from "./helpers/boot-app.mjs";
 
 // What the native side would receive, recorded instead of acted on.
-function fakeCapacitor({ launchUrl = "", biometricResult = "success" } = {}) {
-  const calls = { exited: 0, widget: [], files: [], shares: [], biometricPrompts: 0 };
+function fakeCapacitor({ launchUrl = "", biometricResult = "success", bank = { enabled: false, permission: false, pending: [] } } = {}) {
+  const calls = { exited: 0, widget: [], files: [], shares: [], biometricPrompts: 0, bankSettingsOpened: 0, bankDismissed: [], bankEnabled: [] };
   const listeners = {};
   const plugins = {
     App: {
@@ -33,6 +33,25 @@ function fakeCapacitor({ launchUrl = "", biometricResult = "success" } = {}) {
       authenticate() {
         calls.biometricPrompts += 1;
         return biometricResult === "success" ? Promise.resolve() : Promise.reject(new Error("cancelled"));
+      }
+    },
+    // Stands in for BankNotificationsPlugin.java (the Android listener's store).
+    BankNotifications: {
+      status: () => Promise.resolve({ enabled: bank.enabled, permission: bank.permission }),
+      setEnabled({ enabled }) {
+        bank.enabled = enabled;
+        calls.bankEnabled.push(enabled);
+        return Promise.resolve();
+      },
+      openSettings() {
+        calls.bankSettingsOpened += 1;
+        return Promise.resolve();
+      },
+      getPending: () => Promise.resolve({ notifications: bank.pending }),
+      dismiss({ ids }) {
+        calls.bankDismissed.push(...ids);
+        bank.pending = bank.pending.filter((item) => !ids.includes(item.id));
+        return Promise.resolve();
       }
     },
     Filesystem: {
@@ -231,6 +250,108 @@ test("Exportar CSV hands the file to Android's share sheet", async () => {
     assert.match(file.data, /Terpel/);
     assert.match(file.data, /-25000/);
     assert.equal(native.calls.shares[0].url, `file:///cache/${file.path}`);
+  } finally {
+    ui.close();
+  }
+});
+
+function nuNotification(text, daysAgo = 0) {
+  const postedAt = Date.now() - daysAgo * 86_400_000;
+  return { id: `com.nu.production:${postedAt}:a`, packageName: "com.nu.production", title: "Compra aprobada", text, postedAt };
+}
+
+function dateDaysAgo(days) {
+  const date = new Date(Date.now() - days * 86_400_000);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+}
+
+test("Gastos desde Nu: Datos explains what is read before Android's permission screen", async () => {
+  const native = fakeCapacitor();
+  const ui = await bootApp({ savedState: returningUserState(), beforeBoot: native.install });
+  try {
+    await waitFor(ui, '[data-view="profile"]');
+    await ui.click('[data-view="profile"]');
+    await ui.click('[data-action="open-bank-disclosure"]');
+    assert.equal(native.calls.bankSettingsOpened, 0, "nothing is asked of Android before the explanation");
+    assert.match(ui.text(), /Leemos solo las notificaciones de la app de Nu/);
+    assert.match(ui.text(), /no se sube a la nube/);
+
+    await ui.click('[data-action="enable-bank-notifications"]');
+    assert.deepEqual(native.calls.bankEnabled, [true]);
+    assert.equal(native.calls.bankSettingsOpened, 1, "then Android's notification-access screen opens");
+    assert.match(ui.text(), /Falta un paso/);
+
+    await ui.click('[data-action="disable-bank-notifications"]');
+    assert.deepEqual(native.calls.bankEnabled, [true, false]);
+    assert.ok(ui.$('[data-action="open-bank-disclosure"]'));
+  } finally {
+    ui.close();
+  }
+});
+
+test("a Nu purchase shows on Inicio and one confirmation records it with the bank's date and card", async () => {
+  const purchase = nuNotification("Compraste $450.000 con tu tarjeta de crédito en TERPEL CALLE 80.", 1);
+  const native = fakeCapacitor({ bank: { enabled: true, permission: true, pending: [purchase] } });
+  const savedState = returningUserState({
+    budgetJobs: [{ id: "transporte", name: "Transporte", amount: 900_000, cadence: "monthly" }],
+    // Earlier Terpel purchases were paid in cash: that habit fills the category, but the
+    // bank says this one went on the card, so the card wins.
+    transactions: [
+      { id: "t1", date: dateDaysAgo(5), amount: 40_000, merchant: "Terpel Calle 80", category: "transporte", labeled: true, source: "cash" },
+      { id: "t2", date: dateDaysAgo(3), amount: 40_000, merchant: "Terpel Calle 80", category: "transporte", labeled: true, source: "cash" }
+    ],
+    liquidity: { account: 1_500_000, cash: 200_000, initialized: true }
+  });
+  const ui = await bootApp({ savedState, beforeBoot: native.install });
+  try {
+    await waitFor(ui, '[data-action="register-bank-suggestion"]');
+    assert.match(ui.text(), /¿Registrar este gasto\?/);
+    assert.match(ui.text(), /Terpel Calle 80/);
+    assert.match(ui.text(), /ayer/);
+
+    await ui.click('[data-action="register-bank-suggestion"]');
+    const form = ui.$("#transaction-form");
+    assert.equal(form.elements.namedItem("amount").value.replace(/\D/g, ""), "450000");
+    assert.equal(form.elements.namedItem("merchant").value, "Terpel Calle 80");
+    assert.equal(form.elements.namedItem("source").value, "credit");
+    assert.equal(form.elements.namedItem("category").value, "transporte");
+    form.requestSubmit();
+    await settle(ui.window);
+
+    const recorded = ui.saved().transactions.find((item) => item.amount === 450_000);
+    assert.ok(recorded, "a large purchase the bank reported is recorded, not paused for 24 hours");
+    assert.equal(recorded.date, dateDaysAgo(1));
+    assert.equal(recorded.source, "credit");
+    assert.equal(ui.saved().cooldowns?.length ?? 0, 0);
+    assert.deepEqual(native.calls.bankDismissed, [purchase.id]);
+    assert.equal(ui.$('[data-action="register-bank-suggestion"]'), null);
+  } finally {
+    ui.close();
+  }
+});
+
+test("'No es un gasto' drops the suggestion without recording anything", async () => {
+  const purchase = nuNotification("Compraste $12.000 en Rappi");
+  const native = fakeCapacitor({ bank: { enabled: true, permission: true, pending: [purchase] } });
+  const ui = await bootApp({ savedState: returningUserState(), beforeBoot: native.install });
+  try {
+    await waitFor(ui, '[data-action="dismiss-bank-suggestion"]');
+    await ui.click('[data-action="dismiss-bank-suggestion"]');
+    assert.equal(ui.$('[data-action="dismiss-bank-suggestion"]'), null);
+    assert.deepEqual(native.calls.bankDismissed, [purchase.id]);
+    assert.equal(ui.saved()?.transactions?.length ?? 0, 0);
+  } finally {
+    ui.close();
+  }
+});
+
+test("nothing from the bank shows while the feature is off, even with notifications kept", async () => {
+  const native = fakeCapacitor({ bank: { enabled: false, permission: true, pending: [nuNotification("Compraste $12.000 en Rappi")] } });
+  const ui = await bootApp({ savedState: returningUserState(), beforeBoot: native.install });
+  try {
+    await waitFor(ui, '[data-view="profile"]');
+    await settle(ui.window);
+    assert.equal(ui.$('[data-action="register-bank-suggestion"]'), null);
   } finally {
     ui.close();
   }

@@ -4,4 +4,5 @@
     <string name="title_activity_main">Finanzas Conductuales</string>
     <string name="package_name">com.estbn05.finanzasconductuales</string>
     <string name="custom_url_scheme">com.estbn05.finanzasconductuales</string>
+    <string name="bank_listener_label">Gastos desde notificaciones de Nu</string>
 </resources>

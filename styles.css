@@ -7568,6 +7568,38 @@ html[data-theme="dark"] .setaside-action small,
   gap: 7px;
 }
 
+/* "Gastos desde Nu": what the notification reading does, before Android's permission. */
+.bank-disclosure-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--ink);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.quick-bank-note {
+  margin: 0;
+}
+
+/* Two purchases waiting should fit on screen: the two answers sit side by side. */
+.bank-suggestions .cooldown-item {
+  gap: 10px;
+}
+
+.bank-suggestions .cooldown-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.bank-suggestions .cooldown-actions .btn {
+  width: 100%;
+  min-height: 44px;
+  padding-inline: 10px;
+}
+
 .setaside-chips {
   display: flex;
   flex-wrap: wrap;
