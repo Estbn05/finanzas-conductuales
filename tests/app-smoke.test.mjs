@@ -1165,3 +1165,35 @@ test("'Ya lo anoté como dinero extra' stops waiting for the pay without adding 
     ui.close();
   }
 });
+
+// Clasificar pendientes: suggestions first, accepted in one tap, and classifying teaches
+// the merchant so the next purchase there comes filed.
+test("Clasificar pendientes accepts the suggested categories at once and learns from each choice", async () => {
+  const ui = await bootApp({
+    savedState: returningUserState({
+      budgetJobs: [{ id: "gasolina", name: "Gasolina", amount: 300_000, cadence: "monthly" }, { id: "moto", name: "Revisión moto", amount: 300_000, cadence: "monthly" }],
+      transactions: [
+        transaction({ merchant: "Terpel Calle 80" }),
+        transaction({ merchant: "Despinchada" }),
+        transaction({ merchant: "Préstamo a un amigo" })
+      ]
+    })
+  });
+  try {
+    for (let i = 0; i < 40 && !ui.$('[data-view="movements"]'); i += 1) {
+      await settle(ui.window);
+    }
+    await ui.click('[data-view="movements"]');
+    await ui.click('[data-action="start-quick-classify"]');
+    assert.match(ui.$(".quick-classify-panel").textContent, /sugerida: Gasolina/);
+    await ui.click('[data-action="accept-classify-suggestions"]');
+    assert.equal(ui.window.document.querySelectorAll(".quick-classify-row").length, 2, "only the suggested one was filed");
+    assert.equal(ui.saved().transactions.find((item) => item.merchant === "Terpel Calle 80").category, "gasolina");
+
+    await ui.click('[data-action="quick-classify"][data-category="moto"]');
+    const rules = ui.saved().merchantRules || [];
+    assert.ok(rules.some((rule) => rule.key === "despinchada" && rule.category === "moto"), "classifying by hand created a rule");
+  } finally {
+    ui.close();
+  }
+});

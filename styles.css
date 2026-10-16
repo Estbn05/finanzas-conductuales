@@ -8478,3 +8478,11 @@ html[data-theme="dark"] .money-math > * + * {
   min-height: 44px;
   margin-top: 0;
 }
+
+/* Clasificar pendientes: the category the app suggests comes first, outlined (the row
+   also says "sugerida: X", so the outline is never the only signal). */
+.quick-classify-panel .choice-pill.is-suggested {
+  border-style: dashed;
+  border-color: var(--ds-primary-strong);
+  color: var(--ds-primary-strong);
+}

@@ -138,3 +138,47 @@ test("a choice made by hand is never overridden by the merchant's usual category
     ui.close();
   }
 });
+
+// Merchants never filed before (categorize.js layers 2 and 3).
+test("a new branch of a known brand gets the category and payment used at the other branch", async () => {
+  const ui = await bootApp({
+    savedState: returningUserState({
+      liquidity: { account: 1_500_000, cash: 200_000, initialized: true },
+      budgetJobs: [{ id: "casa", name: "Casa", amount: 600_000, cadence: "monthly" }],
+      transactions: [transaction({ merchant: "Carulla Calle 80", category: "casa", labeled: true, source: "cash" })]
+    })
+  });
+  try {
+    await openExpenseSheet(ui);
+    const form = ui.$("#transaction-form");
+    typeMerchant(ui, form, "CARULLA CALLE 63");
+    assert.equal(choice(form, "category"), "casa");
+    assert.equal(choice(form, "source"), "cash");
+  } finally {
+    ui.close();
+  }
+});
+
+test("a well-known merchant fills only the category named for it, and says why", async () => {
+  const ui = await bootApp({
+    savedState: returningUserState({
+      liquidity: { account: 1_500_000, cash: 200_000, initialized: true },
+      budgetJobs: [GASOLINA, { id: "soat", name: "Soat", amount: 400_000, cadence: "monthly" }],
+      transactions: [transaction({ merchant: "Cine", source: "cash" })]
+    })
+  });
+  try {
+    await openExpenseSheet(ui);
+    const form = ui.$("#transaction-form");
+    const sourceBefore = choice(form, "source");
+    typeMerchant(ui, form, "EDS TERPEL AV BOYACA");
+    assert.equal(choice(form, "category"), "gasolina");
+    assert.equal(choice(form, "source"), sourceBefore, "a dictionary knows the place, not the card");
+    assert.match(form.querySelector("[data-merchant-rule-suggestion]").textContent, /por el nombre del comercio/);
+
+    typeMerchant(ui, form, "Préstamo a un amigo");
+    assert.equal(choice(form, "category"), "free", "nothing it cannot tell is guessed");
+  } finally {
+    ui.close();
+  }
+});

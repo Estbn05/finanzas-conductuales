@@ -19,7 +19,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.80";
+} from "./finance-core.js?v=1.1.82";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -34,8 +34,9 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.80";
-import { pendingSuggestions } from "./bank-notifications.js?v=1.1.80";
+} from "./movements.js?v=1.1.82";
+import { pendingSuggestions } from "./bank-notifications.js?v=1.1.82";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.82";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -54,7 +55,6 @@ import {
   isTemplateBudgetJobs,
   merchantKey,
   isPlaceholderMerchant,
-  merchantRuleMatches,
   migrateState,
   normalizeBudgetExtras,
   normalizeBudgetJobs,
@@ -82,7 +82,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.80";
+} from "./state-model.js?v=1.1.82";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -98,7 +98,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.80";
+} from "./sync-client.js?v=1.1.82";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -165,6 +165,8 @@ const moneyFormatterCache = new Map();
 // message matching /nube|sincron/i, which swallowed that overwrite warning too.
 
 const WEEKDAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+// Icon for a category, by the kind of expense its name says (categorize.js categoryIntent).
+const INTENT_ICONS = { combustible: "fuel", transporte: "car", mercado: "food", comida: "food" };
 
 // Matches FreeMoneyWidgetProvider.QUICK_ADD_URI and the intent-filter data (scheme +
 // host) declared in AndroidManifest.xml for the home screen widget's "+" button.
@@ -3241,15 +3243,13 @@ function renderAllocation(label, amount, type) {
   `;
 }
 
+// One reading of category names for the whole app (categorize.js), icons included.
 function categoryIconFor(name) {
-  const value = String(name || "").toLowerCase();
-  if (/gasolina|combust|carro|transporte|uber|taxi|bus|moto/.test(value)) {
-    return /transporte|uber|taxi|bus/.test(value) ? "car" : "fuel";
+  const icon = INTENT_ICONS[categoryIntent(name)];
+  if (icon) {
+    return icon;
   }
-  if (/comida|mercado|almuerzo|restaurante|alimentaci/.test(value)) {
-    return "food";
-  }
-  return "tag";
+  return /carro|moto/.test(String(name || "").toLowerCase()) ? "fuel" : "tag";
 }
 
 function renderBudgetJob(job) {
@@ -3752,6 +3752,9 @@ function merchantRuleAppliedMarkup(rule, applied) {
   if (applied.includes("source")) {
     parts.push(`<strong>${escapeHtml(locationLabel(rule.source))}</strong>`);
   }
+  if (rule.via === "dictionary") {
+    return `<span>Puse ${parts.join(" y ")} por el nombre del comercio. Cámbialo abajo si no es.</span>`;
+  }
   return `<span>Puse ${parts.join(" y ")}, como las veces anteriores. Cámbialo abajo si esta vez fue distinto.</span>`;
 }
 
@@ -4096,6 +4099,8 @@ function renderQuickClassifyPanel() {
     return "";
   }
   const categoryChips = categoryChoiceOptions().filter((option) => option.value !== FREE_CATEGORY_ID);
+  const suggestions = new Map(pending.map((transaction) => [transaction.id, findMerchantRule(transaction.merchant)?.category || ""]));
+  const suggestedCount = [...suggestions.values()].filter(Boolean).length;
   return `
     <div class="sheet-backdrop" role="presentation" data-action="close-quick-classify">
       <section class="bottom-sheet quick-classify-panel" role="dialog" aria-modal="true" aria-labelledby="quick-classify-title">
@@ -4104,22 +4109,31 @@ function renderQuickClassifyPanel() {
           <div><p class="eyebrow">Clasificar pendientes</p><h2 id="quick-classify-title">${pending.length} ${pending.length === 1 ? "movimiento sin categoría" : "movimientos sin categoría"}</h2></div>
           <button class="icon-btn muted" type="button" data-action="close-quick-classify" aria-label="Cerrar">${renderIcon("close")}</button>
         </div>
+        ${
+          suggestedCount
+            ? `<button class="btn primary" type="button" data-action="accept-classify-suggestions">Aceptar ${suggestedCount === 1 ? "la sugerida" : `las ${suggestedCount} sugeridas`}</button>`
+            : ""
+        }
         <div class="quick-classify-list">
           ${pending
-            .map(
-              (transaction) => `
+            .map((transaction) => {
+              const suggested = suggestions.get(transaction.id);
+              const chips = suggested
+                ? [...categoryChips.filter((option) => option.value === suggested), ...categoryChips.filter((option) => option.value !== suggested)]
+                : categoryChips;
+              return `
                 <article class="quick-classify-row">
                   <div class="quick-classify-row-head">
                     <strong>${escapeHtml(transaction.merchant)}</strong>
-                    <span>${formatMoney(transaction.amount)} · ${formatDate(transaction.date)}</span>
+                    <span>${formatMoney(transaction.amount)} · ${formatDate(transaction.date)}${suggested ? ` · sugerida: ${escapeHtml(categoryName(suggested))}` : ""}</span>
                   </div>
                   ${
                     categoryChips.length
                       ? `<div class="choice-pills">
-                          ${categoryChips
+                          ${chips
                             .map(
                               (option) => `
-                                <button class="choice-pill" type="button" data-action="quick-classify" data-id="${escapeAttr(transaction.id)}" data-category="${escapeAttr(option.value)}">${escapeHtml(option.label)}</button>
+                                <button class="choice-pill ${option.value === suggested ? "is-suggested" : ""}" type="button" data-action="quick-classify" data-id="${escapeAttr(transaction.id)}" data-category="${escapeAttr(option.value)}">${escapeHtml(option.label)}</button>
                               `
                             )
                             .join("")}
@@ -4127,8 +4141,8 @@ function renderQuickClassifyPanel() {
                       : `<p class="quick-classify-empty">Aún no tienes categorías creadas. Crea una desde Plan para poder clasificar.</p>`
                   }
                 </article>
-              `
-            )
+              `;
+            })
             .join("")}
         </div>
       </section>
@@ -5684,7 +5698,7 @@ function bindMerchantRuleSuggestions(form) {
       return;
     }
     restoreBeforeAutoApply();
-    const targets = { category: rule.category, source: normalizeLocation(rule.source) };
+    const targets = rule.source ? { category: rule.category, source: normalizeLocation(rule.source) } : { category: rule.category };
     const before = {};
     const applied = [];
     Object.entries(targets).forEach(([name, value]) => {
@@ -5991,12 +6005,24 @@ function handleAction(event) {
     "quick-classify": () => {
       const transaction = state.transactions.find((item) => item.id === id);
       if (transaction) {
-        transaction.category = category || FREE_CATEGORY_ID;
-        transaction.labeled = transaction.category !== FREE_CATEGORY_ID;
-        transaction.updated_at = new Date().toISOString();
+        classifyTransaction(transaction, category);
         showNoticeSnackbar(`Clasificado como ${categoryName(transaction.category)}.`, { renderNow: false });
       }
       quickClassifyQueue = quickClassifyQueue.filter((queuedId) => queuedId !== id);
+    },
+    "accept-classify-suggestions": () => {
+      let classified = 0;
+      quickClassifyQueue = quickClassifyQueue.filter((queuedId) => {
+        const transaction = state.transactions.find((item) => item.id === queuedId);
+        const suggested = transaction && findMerchantRule(transaction.merchant)?.category;
+        if (!suggested) {
+          return true;
+        }
+        classifyTransaction(transaction, suggested);
+        classified += 1;
+        return false;
+      });
+      showNoticeSnackbar(`Clasifiqué ${classified} ${classified === 1 ? "movimiento" : "movimientos"}.`, { renderNow: false });
     },
     "close-quick-classify": () => {
       quickClassifyQueue = [];
@@ -8729,16 +8755,29 @@ function activeMerchantRules() {
     .sort((a, b) => String(b.lastUsedAt || b.updated_at || "").localeCompare(String(a.lastUsedAt || a.updated_at || "")) || Number(b.count || 0) - Number(a.count || 0));
 }
 
+// The category (and, from the user's own habits, the way of paying) a merchant probably
+// goes with: the user's past choices first, then the same brand at another branch, then
+// well-known names matched to the user's categories (categorize.js). Shaped like a rule.
 function findMerchantRule(merchant) {
-  const key = merchantKey(merchant);
-  if (key.length < 3) {
+  const suggestion = suggestCategory(merchant, { rules: activeMerchantRules(), categories: state.budgetJobs });
+  if (!suggestion) {
     return null;
   }
+  return {
+    id: suggestion.rule?.id || `${suggestion.via}:${suggestion.category}`,
+    category: suggestion.category,
+    source: suggestion.source,
+    via: suggestion.via
+  };
+}
 
-  const rules = activeMerchantRules();
-  return rules.find((rule) => rule.key === key)
-    || rules.find((rule) => merchantRuleMatches(key, rule.key))
-    || null;
+// Classifying by hand teaches the merchant's category, so the next purchase there (and,
+// through its brand, at its other branches) comes already filed.
+function classifyTransaction(transaction, category) {
+  transaction.category = category || FREE_CATEGORY_ID;
+  transaction.labeled = transaction.category !== FREE_CATEGORY_ID;
+  transaction.updated_at = new Date().toISOString();
+  rememberMerchantRule(transaction);
 }
 
 function rememberMerchantRule(transaction) {
