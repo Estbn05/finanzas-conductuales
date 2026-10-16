@@ -1065,3 +1065,37 @@ test("no module-level const/let is declared below app.js's boot code", async () 
     .filter(({ line, number }) => number > bootLine + 1 && /^(const|let) \w+/.test(line));
   assert.deepEqual(late, [], "move these declarations above the boot code");
 });
+
+// Regression: "Por recibir" was the period's cupo (pay + extra money − reservations). Extra
+// money already in the account showed both inside Tienes and as still to come, and with
+// reservations as big as the pay the whole pending pay vanished from the screen.
+test("Por recibir is the whole pay still to come, never extra money already in the account", async () => {
+  const soon = new Date(Date.now() + 5 * 86_400_000);
+  const payday = new Date(soon.getTime() - soon.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+  const base = returningUserState({
+    profile: { ...returningUserState().profile, incomeType: "fixed", periodStart: payday },
+    budgetJobs: [{ id: "arriendo", name: "Arriendo", amount: 1_900_000, cadence: "monthly" }],
+    liquidity: { account: 500_000, cash: 0, initialized: true }
+  });
+  const before = await bootApp({ savedState: base });
+  let pendingBefore;
+  try {
+    // The first boot in a process can still be on the loading screen.
+    for (let i = 0; i < 40 && !/Tu dinero libre/.test(before.text()); i += 1) {
+      await settle(before.window);
+    }
+    pendingBefore = before.text().match(/Por recibir: \$\s?([\d.]*\d)/)?.[1];
+    assert.equal(pendingBefore, "2.000.000", "the whole pay is pending, not what is left after reservations");
+  } finally {
+    before.close();
+  }
+
+  const withExtra = await bootApp({
+    savedState: { ...base, budgetExtras: [{ id: "x1", source: "Ana", amount: 80_000, date: todayKey(), location: "account" }] }
+  });
+  try {
+    assert.equal(withExtra.text().match(/Por recibir: \$\s?([\d.]*\d)/)?.[1], pendingBefore);
+  } finally {
+    withExtra.close();
+  }
+});

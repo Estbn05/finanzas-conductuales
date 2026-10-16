@@ -19,7 +19,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.76";
+} from "./finance-core.js?v=1.1.78";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -34,8 +34,8 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.76";
-import { pendingSuggestions } from "./bank-notifications.js?v=1.1.76";
+} from "./movements.js?v=1.1.78";
+import { pendingSuggestions } from "./bank-notifications.js?v=1.1.78";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -82,7 +82,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.76";
+} from "./state-model.js?v=1.1.78";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -98,7 +98,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.76";
+} from "./sync-client.js?v=1.1.78";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -2035,10 +2035,15 @@ function moneyLocationItems(liquidity) {
 // Fixed income with a real balance: Tienes − Reservado; the big figure above is the result.
 function renderMoneyMathFromBalance(summary, liquidity) {
   const shortfall = Math.max(0, summary.reservedRemaining - liquidity.total);
-  const pending = !summary.incomeApplied && summary.freeBudget > 0;
+  // What payday adds is the whole pay: it lands in Tienes, and since Reservado is already
+  // taken out of the figure above, free money rises by all of it. Extra money is never
+  // pending (it is already inside Tienes), and neither is the cupo after reservations,
+  // which is what this used to show.
+  const toReceive = Number(summary.baseIncome || 0);
+  const pending = !summary.incomeApplied && toReceive > 0;
   const notes = [
     shortfall > 0 ? `Te faltan ${formatMoney(shortfall)} para cubrir lo reservado.` : "",
-    pending ? `Por recibir: ${formatMoney(summary.freeBudget)}. Se suma el día que te pagan.` : ""
+    pending ? `Por recibir: ${formatMoney(toReceive)}. Se suma el día que te pagan.` : ""
   ].filter(Boolean);
   return `
     <div class="money-location-list money-math">
