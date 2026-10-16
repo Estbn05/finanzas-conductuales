@@ -19,7 +19,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.78";
+} from "./finance-core.js?v=1.1.80";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -34,8 +34,8 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.78";
-import { pendingSuggestions } from "./bank-notifications.js?v=1.1.78";
+} from "./movements.js?v=1.1.80";
+import { pendingSuggestions } from "./bank-notifications.js?v=1.1.80";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -82,7 +82,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.78";
+} from "./state-model.js?v=1.1.80";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -98,7 +98,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.78";
+} from "./sync-client.js?v=1.1.80";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -2051,6 +2051,7 @@ function renderMoneyMathFromBalance(summary, liquidity) {
       ${renderReservedBreakdown("remaining")}
     </div>
     ${notes.map((note) => `<p class="money-math-note">${note}</p>`).join("")}
+    ${pending ? `<button class="prediction-detail-link pay-received-link" type="button" data-action="open-pay-received">Ya me llegó</button>` : ""}
   `;
 }
 
@@ -2241,8 +2242,13 @@ function renderPredictionDetailsModal() {
           <code>${formatMoney(prediction.observedFreeSpent)} / ${prediction.observedDays} = ${formatMoney(Math.round(prediction.observedDailyRate))} diarios</code>
           <p><strong>gasto_estimado_restante</strong> = ritmo_diario * dias_hasta_proximo_pago</p>
           <code>${formatMoney(Math.round(prediction.dailyRate))} x ${prediction.remainingDays} = ${formatMoney(prediction.projectedRemainingSpend)}</code>
-          <p><strong>resultado_final</strong> = libre_hoy - gasto_estimado_restante</p>
-          <code>${formatMoney(prediction.freeToday)} - ${formatMoney(prediction.projectedRemainingSpend)} = ${formatMoney(prediction.projectedEndFree)}</code>
+          ${
+            prediction.pendingIncome > 0
+              ? `<p><strong>resultado_final</strong> = libre_hoy + sueldo_por_recibir - gasto_estimado_restante</p>
+                 <code>${formatMoney(prediction.freeToday)} + ${formatMoney(prediction.pendingIncome)} - ${formatMoney(prediction.projectedRemainingSpend)} = ${formatMoney(prediction.projectedEndFree)}</code>`
+              : `<p><strong>resultado_final</strong> = libre_hoy - gasto_estimado_restante</p>
+                 <code>${formatMoney(prediction.freeToday)} - ${formatMoney(prediction.projectedRemainingSpend)} = ${formatMoney(prediction.projectedEndFree)}</code>`
+          }
         </div>
         <button class="btn primary" type="button" data-action="close-prediction-details">Entendido</button>
       </section>
@@ -3138,6 +3144,10 @@ function renderSetAsideSheet() {
 }
 
 function renderPlanSheet() {
+  if (planSheet === "pay-received") {
+    return renderPayReceivedSheet();
+  }
+
   if (planSheet === "bank-disclosure") {
     return renderBankDisclosureSheet();
   }
@@ -4909,6 +4919,11 @@ function bindEvents() {
     setAsideForm.addEventListener("submit", handleSetAsideSubmit);
   }
 
+  const payReceivedForm = document.querySelector("#pay-received-form");
+  if (payReceivedForm) {
+    payReceivedForm.addEventListener("submit", handlePayReceivedSubmit);
+  }
+
   const creditPaymentForm = document.querySelector("#credit-payment-form");
   if (creditPaymentForm) {
     creditPaymentForm.addEventListener("submit", handleCreditPaymentSubmit);
@@ -5794,7 +5809,8 @@ function handleAction(event) {
     "open-bank-disclosure",
     "register-bank-suggestion",
     "register-bank-income",
-    "dismiss-bank-suggestion"
+    "dismiss-bank-suggestion",
+    "open-pay-received"
   ]);
 
   const actions = {
@@ -6027,6 +6043,10 @@ function handleAction(event) {
     "open-bank-background-settings": () => nativeBankNotifications()?.openBackgroundSettings().catch(() => {}),
     "register-bank-suggestion": () => registerBankSuggestion(id),
     "register-bank-income": () => registerBankIncome(id),
+    "open-pay-received": () => {
+      planSheet = "pay-received";
+      menuOpen = false;
+    },
     "dismiss-bank-suggestion": () => {
       forgetBankNotification(id);
       showNoticeSnackbar("Listo, no lo registro.", { duration: 3500, renderNow: false });
@@ -6564,6 +6584,86 @@ function handleExtraEditSubmit(event) {
 // Paying the card moves money from a real source to what is owed. It creates no
 // transaction: the expense was recorded when the card was used; recording it again would
 // count it twice and charge its category a second time.
+// "Ya me llegó": the way back after telling the app on payday that the pay had not arrived
+// ("Aún no me llega"). Without it the pay could only be entered as Dinero extra, and the
+// app then kept waiting for a pay that was already in the account. The amount can differ
+// from the usual pay (a bonus month, a raise), so it is asked, not assumed.
+function renderPayReceivedSheet() {
+  const usual = getPeriodIncome(state.profile);
+  return `
+    <div class="sheet-backdrop" role="presentation" data-action="close-plan-sheet">
+      <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="pay-received-title">
+        <div class="sheet-handle"></div>
+        <div class="sheet-heading">
+          <div><p class="eyebrow">Tu pago</p><h2 id="pay-received-title">¿Cuánto te llegó?</h2></div>
+          <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">${renderIcon("close")}</button>
+        </div>
+        <p class="setaside-note">Se suma a tu saldo y deja de aparecer como por recibir.</p>
+        <form class="sheet-form" id="pay-received-form">
+          <label>Monto<input name="amount" type="number" min="1000" step="1000" inputmode="numeric" value="${usual > 0 ? usual : ""}" required data-autofocus></label>
+          <div class="sheet-field">
+            <span class="sheet-label">¿Dónde entró?</span>
+            ${renderChoicePills("location", [
+              { value: "account", label: "Cuenta" },
+              { value: "cash", label: "Efectivo" }
+            ], "account")}
+          </div>
+          <button class="btn primary" type="submit" name="intent" value="add">Sumar a mi saldo</button>
+          <button class="btn ghost" type="submit" name="intent" value="already-recorded" formnovalidate>Ya lo anoté como dinero extra</button>
+          <p class="data-note">Esta opción solo deja de esperarlo: no suma nada, porque esa plata ya está en tu saldo.</p>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function handlePayReceivedSubmit(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  // Entered earlier as Dinero extra: the money is already in the balance, so the pay is
+  // only marked as received (amount 0, like settlePeriodIncomeAtOnboarding), and that
+  // movement with its savings split stays as it is.
+  const alreadyRecorded = event.submitter?.value === "already-recorded";
+  const amount = alreadyRecorded ? 0 : numberFrom(data.get("amount"));
+  if (!alreadyRecorded && amount <= 0) {
+    showNoticeSnackbar("Escribe cuánto te llegó.", { kind: "error" });
+    return;
+  }
+  const location = normalizeIncomeLocation(data.get("location"));
+  const now = new Date().toISOString();
+  const window = budgetSummary().window;
+  if (amount > 0) {
+    adjustLiquidity(location, amount, "ingreso-periodico");
+  }
+  state.periodIncomeStatus = {
+    ...(state.periodIncomeStatus || {}),
+    windowStart: window.start,
+    applied: true,
+    rejected: false,
+    bannerDismissed: true,
+    amount,
+    location,
+    appliedAt: now
+  };
+  // The ledger guards against depositing the same period twice (see resolvePeriodIncome).
+  const logged = findLoggedIncome(state.periodIncomeApplied, todayKey());
+  if (logged) {
+    Object.assign(logged, { status: "applied", amount, appliedAt: now });
+  } else {
+    state.periodIncomeApplied = [
+      ...(state.periodIncomeApplied || []),
+      { windowStart: window.start, windowEnd: window.end, status: "applied", amount, appliedAt: now }
+    ].slice(-12);
+  }
+  planSheet = "";
+  state.lastAlert = alreadyRecorded
+    ? "Listo: tu pago de este periodo ya cuenta como recibido."
+    : `Listo: sumé ${formatMoney(amount)} a tu ${location === "cash" ? "efectivo" : "cuenta"}.`;
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
+  saveState();
+  render();
+}
+
 function handleCreditPaymentSubmit(event) {
   event.preventDefault();
   const data = new FormData(event.currentTarget);

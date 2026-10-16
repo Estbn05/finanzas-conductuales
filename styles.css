@@ -8470,3 +8470,11 @@ html[data-theme="dark"] .money-math > * + * {
     grid-row: auto;
   }
 }
+
+/* "Ya me llegó" under "Por recibir": a full touch target, though it reads as a link. */
+.pay-received-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-top: 0;
+}

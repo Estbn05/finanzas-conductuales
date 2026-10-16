@@ -1072,3 +1072,28 @@ test("released money leaves the fund, and empty funds are dropped at a new perio
   assert.deepEqual(retired, [{ id: "regalo", name: "Regalo" }]);
   assert.equal(pruneExpiredOneOffs(jobs, "2026-06-01", FUND_PROFILE, transactions).budgetJobs[1], jobs[1], "nothing to prune keeps the same objects");
 });
+
+// Regression (real data, October 2026): the user told the app on payday that the pay had
+// not arrived yet. freeToday is real money, so it rightly leaves the pay out, but the
+// prediction then reported "no alcanza" for someone still about to receive $1.500.000.
+test("a fixed pay not received yet counts in the end-of-period prediction, not in today's free money", () => {
+  const state = makeState({
+    profile: { incomeCadence: "monthly", incomeAmount: 1_500_000, periodStart: "2026-10-01" },
+    budgetJobs: [],
+    transactions: [{ date: "2026-10-05", amount: 300_000, category: "free", labeled: true }],
+    liquidity: { account: 200_000, cash: 0, initialized: true },
+    periodIncomeStatus: { windowStart: "2026-10-01", amount: 1_500_000, applied: false, rejected: true }
+  });
+  const prediction = predictUntilNextPeriod(state, "2026-10-16");
+
+  assert.equal(prediction.freeToday, 200_000, "today's free money is still only what is really there");
+  assert.equal(prediction.pendingIncome, 1_500_000);
+  assert.equal(prediction.projectedEndFree, 200_000 + 1_500_000 - prediction.projectedRemainingSpend);
+  assert.notEqual(prediction.status, "risk");
+
+  const paid = predictUntilNextPeriod(
+    { ...state, periodIncomeStatus: { windowStart: "2026-10-01", amount: 1_500_000, applied: true } },
+    "2026-10-16"
+  );
+  assert.equal(paid.pendingIncome, 0, "once paid, the pay is already inside the balance");
+});

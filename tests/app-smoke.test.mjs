@@ -1099,3 +1099,69 @@ test("Por recibir is the whole pay still to come, never extra money already in t
     withExtra.close();
   }
 });
+
+// Real case: on payday the user said the pay had not arrived ("Aún no me llega"). When it
+// did ($2.000.000, more than the usual $1.500.000) there was no way to say so, so it went
+// in as Dinero extra and the app kept waiting for a pay already in the account.
+test("'Ya me llegó' adds the pay that arrived late, for the amount that really came, and stops waiting", async () => {
+  const monthStart = `${todayKey().slice(0, 8)}01`;
+  const ui = await bootApp({
+    savedState: returningUserState({
+      profile: { ...returningUserState().profile, incomeType: "fixed", incomeAmount: 1_500_000, periodStart: monthStart },
+      liquidity: { account: 300_000, cash: 0, initialized: true },
+      periodIncomeStatus: { windowStart: monthStart, applied: false, rejected: true, bannerDismissed: true, amount: 1_500_000, location: "account" },
+      periodIncomeApplied: [{ windowStart: monthStart, windowEnd: "2999-01-01", status: "rejected", amount: 1_500_000 }]
+    })
+  });
+  try {
+    for (let i = 0; i < 40 && !ui.$('[data-action="open-pay-received"]'); i += 1) {
+      await settle(ui.window);
+    }
+    assert.match(ui.text(), /Por recibir: \$\s?1\.500\.000/);
+    await ui.click('[data-action="open-pay-received"]');
+    const form = ui.$("#pay-received-form");
+    assert.equal(form.elements.namedItem("amount").value.replace(/\D/g, ""), "1500000", "the usual pay is suggested");
+    await ui.type(form.elements.namedItem("amount"), "2000000");
+    form.requestSubmit();
+    await settle(ui.window);
+
+    const saved = ui.saved();
+    assert.equal(saved.liquidity.account, 2_300_000);
+    assert.equal(saved.periodIncomeStatus.applied, true);
+    assert.equal(saved.periodIncomeStatus.amount, 2_000_000);
+    assert.doesNotMatch(ui.text(), /Por recibir/);
+    assert.equal(ui.$('[data-action="open-pay-received"]'), null);
+  } finally {
+    ui.close();
+  }
+});
+
+test("'Ya lo anoté como dinero extra' stops waiting for the pay without adding it again", async () => {
+  const monthStart = `${todayKey().slice(0, 8)}01`;
+  const ui = await bootApp({
+    savedState: returningUserState({
+      profile: { ...returningUserState().profile, incomeType: "fixed", incomeAmount: 1_500_000, periodStart: monthStart },
+      liquidity: { account: 2_300_000, cash: 0, initialized: true },
+      budgetExtras: [{ id: "x1", source: "Salario", amount: 2_000_000, date: monthStart, location: "account" }],
+      periodIncomeStatus: { windowStart: monthStart, applied: false, rejected: true, bannerDismissed: true, amount: 1_500_000, location: "account" },
+      periodIncomeApplied: [{ windowStart: monthStart, windowEnd: "2999-01-01", status: "rejected", amount: 1_500_000 }]
+    })
+  });
+  try {
+    for (let i = 0; i < 40 && !ui.$('[data-action="open-pay-received"]'); i += 1) {
+      await settle(ui.window);
+    }
+    await ui.click('[data-action="open-pay-received"]');
+    const form = ui.$("#pay-received-form");
+    form.requestSubmit(form.querySelector('[value="already-recorded"]'));
+    await settle(ui.window);
+
+    const saved = ui.saved();
+    assert.equal(saved.liquidity.account, 2_300_000, "nothing is added a second time");
+    assert.equal(saved.periodIncomeStatus.applied, true);
+    assert.equal(saved.budgetExtras.length, 1, "the Dinero extra movement stays");
+    assert.doesNotMatch(ui.text(), /Por recibir/);
+  } finally {
+    ui.close();
+  }
+});

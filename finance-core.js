@@ -366,7 +366,11 @@ export function predictUntilNextPeriod(state, today) {
   const observedDailyRate = hasObservedPace ? pace.observedFreeSpent / observedDays : 0;
   const dailyRate = hasReliablePace ? observedDailyRate : 0;
   const projectedRemainingSpend = Math.round(dailyRate * remainingDays);
-  const projectedEndFree = Math.round(freeToday - projectedRemainingSpend);
+  // A fixed pay that has not landed yet (the user said "aún no me llega" on payday) is not
+  // in freeToday, which is real money, but it still arrives within this period: leaving
+  // it out predicted a shortfall for someone about to be paid.
+  const pendingIncome = summary.usesLiquidityBasedFree && !summary.incomeApplied ? Math.round(Number(summary.baseIncome || 0)) : 0;
+  const projectedEndFree = Math.round(freeToday + pendingIncome - projectedRemainingSpend);
   const shortage = Math.max(0, -projectedEndFree);
   const tightThreshold = Math.round(summary.income * LARGE_PURCHASE_RATIO);
   let status = "healthy";
@@ -412,6 +416,7 @@ export function predictUntilNextPeriod(state, today) {
     usesLiquidityBasedFree: summary.usesLiquidityBasedFree,
     incomeApplied: summary.incomeApplied,
     freeToday,
+    pendingIncome,
     observedFreeSpent: pace.observedFreeSpent,
     ignoredOneOffSpent: pace.ignoredOneOffSpent,
     observedDailyRate,
