@@ -19,7 +19,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.83";
+} from "./finance-core.js?v=1.1.84";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -34,9 +34,9 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.83";
-import { isStale, pendingSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.83";
-import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.83";
+} from "./movements.js?v=1.1.84";
+import { isStale, pendingSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.84";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.84";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -58,6 +58,8 @@ import {
   migrateState,
   normalizeBudgetExtras,
   normalizeBudgetJobs,
+  REMINDER_DAYS_AHEAD,
+  upcomingReminderDates,
   normalizeCalendarEvents,
   normalizeDailyReminder,
   normalizeEventCategory,
@@ -82,7 +84,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.83";
+} from "./state-model.js?v=1.1.84";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -98,7 +100,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.83";
+} from "./sync-client.js?v=1.1.84";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -194,6 +196,8 @@ const BACK_CLOSE_SELECTORS = [
 ];
 const DAILY_REMINDER_NOTIFICATION_ID = 7301;
 const TEST_REMINDER_NOTIFICATION_ID = 7302;
+// One id per upcoming day (see upcomingReminderDates); 7301 is the old repeating one.
+const DAILY_REMINDER_FIRST_ID = 7310;
 const INCOME_TYPES = ["fixed", "variable"];
 const VOLATILITY_VALUES = ["low", "medium", "high"];
 
@@ -307,6 +311,10 @@ let deleteAccountOpen = false;
 // execution ever reaches a `let` declared later in the file — same TDZ trap as
 // SHORT_DATE_FORMATTER above.
 let cachedBudgetSummary = null;
+// What the native daily reminders were last scheduled for, so saving state (which runs
+// scheduleDailyReminder on every change) only reschedules when something that matters
+// changed: on, time, day, permission, or whether an expense was recorded today.
+let nativeReminderPlan = "";
 let expenseDraft = null;
 let diagnosisValidation = { field: "", message: "" };
 let cloudState = {
@@ -8417,7 +8425,7 @@ function handleDailyReminderDue() {
   }
 
   const today = todayKey();
-  if (reminder.lastShownDate !== today) {
+  if (reminder.lastShownDate !== today && !recordedExpenseToday()) {
     showDailyReminderNotification();
     state.dailyReminder = {
       ...reminder,
@@ -8490,6 +8498,7 @@ async function showDailyReminderNotification(options = {}) {
             title,
             body,
             schedule: { at: new Date(Date.now() + 1200) },
+            isExactNotification: false,
             extra: { route: QUICK_EXPENSE_HASH }
           }
         ]
@@ -8559,6 +8568,8 @@ async function refreshNativeNotificationPermission(options = {}) {
   } catch {
     nativeNotificationPermission = "unsupported";
   }
+  // At launch the reminder was planned before the permission was known.
+  scheduleDailyReminder();
   if (renderNow) {
     render();
   }
@@ -8621,33 +8632,48 @@ function initializeWidgetQuickAddDeepLink() {
   } catch {}
 }
 
+function recordedExpenseToday() {
+  const today = todayKey();
+  return (state.transactions || []).some((transaction) => String(transaction.date || "").slice(0, 10) === today);
+}
+
+// Not exact on purpose: a reminder a few minutes late is fine, and asking for exact
+// alarms makes Android open its "Alarmas y recordatorios" settings screen in the
+// middle of the app (the local-notifications plugin does it on schedule since 8.3).
 async function scheduleNativeDailyReminder(reminder = normalizeDailyReminder(state.dailyReminder)) {
   const localNotifications = nativeLocalNotifications();
   if (!localNotifications) {
     return false;
   }
+  const permission = notificationPermissionStatus();
+  const skipToday = recordedExpenseToday();
+  const plan = JSON.stringify([reminder.enabled, reminder.time, permission, skipToday, todayKey()]);
+  if (plan === nativeReminderPlan) {
+    return reminder.enabled && permission === "granted";
+  }
+  nativeReminderPlan = plan;
+  const ids = Array.from({ length: REMINDER_DAYS_AHEAD }, (_, index) => DAILY_REMINDER_FIRST_ID + index);
   try {
-    await localNotifications.cancel({ notifications: [{ id: DAILY_REMINDER_NOTIFICATION_ID }] });
-    if (!reminder.enabled || notificationPermissionStatus() !== "granted") {
+    await localNotifications.cancel({
+      notifications: [DAILY_REMINDER_NOTIFICATION_ID, ...ids].map((id) => ({ id }))
+    });
+    if (!reminder.enabled || permission !== "granted") {
       return false;
     }
+    const dates = upcomingReminderDates(reminder.time, { skipToday });
     await localNotifications.schedule({
-      notifications: [
-        {
-          id: DAILY_REMINDER_NOTIFICATION_ID,
-          title: "Revisión de gastos",
-          body: "¿Quieres registrar tus gastos de hoy?",
-          schedule: {
-            at: nextReminderDate(reminder.time),
-            repeats: true,
-            every: "day"
-          },
-          extra: { route: QUICK_EXPENSE_HASH }
-        }
-      ]
+      notifications: dates.map((at, index) => ({
+        id: ids[index],
+        title: "Revisión de gastos",
+        body: "¿Quieres registrar tus gastos de hoy?",
+        schedule: { at, allowWhileIdle: true },
+        isExactNotification: false,
+        extra: { route: QUICK_EXPENSE_HASH }
+      }))
     });
     return true;
   } catch {
+    nativeReminderPlan = "";
     return false;
   }
 }

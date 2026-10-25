@@ -21,7 +21,8 @@ import {
   remoteChangedSinceLastSync,
   uid,
   createDefaultState,
-  migrateState
+  migrateState,
+  upcomingReminderDates
 } from "../state-model.js";
 
 const EMPTY = { profile: { completed: false }, transactions: [], budgetJobs: [] };
@@ -316,4 +317,16 @@ test("an explicit theme survives migration, anything else falls back to followin
     assert.equal(migrateState({ settings: { theme } }, "2026-10-12", "today").settings.theme, theme);
   }
   assert.equal(migrateState({ settings: { theme: "sepia" } }, "2026-10-12", "today").settings.theme, "");
+});
+
+test("the daily reminder covers the next 14 days at its time, skipping today when already recorded", () => {
+  const keys = (dates) => dates.map((date) => `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, "0")}`);
+  const morning = new Date(2026, 9, 25, 9, 0);
+  const dates = upcomingReminderDates("20:00", { now: morning });
+  assert.equal(dates.length, 14);
+  assert.deepEqual(keys(dates).slice(0, 2), ["10/25 20:00", "10/26 20:00"], "today still counts before the time");
+  assert.deepEqual(keys(upcomingReminderDates("20:00", { now: morning, skipToday: true })).slice(0, 1), ["10/26 20:00"], "already recorded today");
+  assert.deepEqual(keys(upcomingReminderDates("20:00", { now: new Date(2026, 9, 25, 21, 0) })).slice(0, 1), ["10/26 20:00"], "time already passed");
+  assert.deepEqual(keys(upcomingReminderDates("20:00", { now: new Date(2026, 9, 31, 22, 0) })).slice(0, 2), ["11/1 20:00", "11/2 20:00"], "across a month end");
+  assert.equal(upcomingReminderDates("nope", { now: morning })[0].getHours(), 20, "an invalid time falls back to 20:00");
 });

@@ -453,3 +453,55 @@ test("Datos lists the Nu notifications the app could not read, and old ones are 
     ui.close();
   }
 });
+
+// Daily reminder (plugin @capacitor/local-notifications, faked here).
+function fakeNotifications(window) {
+  const log = { scheduled: [], cancelled: [] };
+  window.Capacitor = window.Capacitor || { Plugins: {} };
+  window.Capacitor.Plugins.LocalNotifications = {
+    checkPermissions: () => Promise.resolve({ display: "granted" }),
+    requestPermissions: () => Promise.resolve({ display: "granted" }),
+    addListener: () => Promise.resolve({ remove() {} }),
+    cancel({ notifications }) {
+      log.cancelled.push(notifications.map((item) => item.id));
+      return Promise.resolve();
+    },
+    schedule({ notifications }) {
+      log.scheduled.push(notifications);
+      return Promise.resolve({ notifications });
+    }
+  };
+  return log;
+}
+
+test("the daily reminder is planned 14 days ahead, never as an exact alarm, and skips a day already recorded", async () => {
+  let log;
+  const ui = await bootApp({
+    savedState: returningUserState({ dailyReminder: { enabled: true, time: "23:59" } }),
+    beforeBoot: (window) => {
+      log = fakeNotifications(window);
+    }
+  });
+  try {
+    await waitFor(ui, '[data-action="open-expense"]');
+    const first = log.scheduled.at(-1);
+    assert.equal(first.length, 14);
+    assert.ok(first.every((item) => item.isExactNotification === false), "an exact alarm makes Android open its alarms settings screen");
+    assert.equal(new Date(first[0].schedule.at).getDate(), new Date().getDate(), "nothing recorded yet: today's reminder stays");
+
+    const plans = log.scheduled.length;
+    await ui.click('[data-view="budget"]');
+    assert.equal(log.scheduled.length, plans, "saving without a relevant change does not reschedule");
+
+    await ui.click('[data-action="open-expense"]');
+    const form = ui.$("#transaction-form");
+    await ui.type(form.elements.namedItem("amount"), "5000");
+    form.requestSubmit();
+    await settle(ui.window);
+    const after = log.scheduled.at(-1);
+    assert.notEqual(new Date(after[0].schedule.at).getDate(), new Date().getDate(), "recorded today: today's reminder is dropped");
+    assert.ok(log.cancelled.at(-1).includes(7301), "the old repeating reminder is cancelled too");
+  } finally {
+    ui.close();
+  }
+});

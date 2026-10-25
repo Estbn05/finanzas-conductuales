@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.83";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.84";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
@@ -233,6 +233,27 @@ export function normalizeEventCategory(value) {
 export function normalizeReminderTime(value) {
   const text = String(value || "").trim();
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(text) ? text : DEFAULT_REMINDER_TIME;
+}
+
+// The daily reminder is scheduled as one notification per day for the coming days rather
+// than one that repeats forever: a day the user already recorded an expense is skipped
+// (being asked "¿registrar tus gastos de hoy?" after doing it teaches people to turn the
+// reminder off), and someone who stops opening the app stops being nagged after two
+// weeks. Each app launch or save schedules the next window again.
+export const REMINDER_DAYS_AHEAD = 14;
+
+export function upcomingReminderDates(timeValue, { now = new Date(), skipToday = false, days = REMINDER_DAYS_AHEAD } = {}) {
+  const [hours, minutes] = normalizeReminderTime(timeValue).split(":").map(Number);
+  const first = new Date(now);
+  first.setHours(hours, minutes, 0, 0);
+  if (skipToday || first.getTime() <= now.getTime()) {
+    first.setDate(first.getDate() + 1);
+  }
+  return Array.from({ length: days }, (_, index) => {
+    const date = new Date(first);
+    date.setDate(first.getDate() + index);
+    return date;
+  });
 }
 
 export function normalizePayday(value) {
