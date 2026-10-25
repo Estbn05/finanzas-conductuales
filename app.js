@@ -19,7 +19,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.82";
+} from "./finance-core.js?v=1.1.83";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -34,9 +34,9 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.82";
-import { pendingSuggestions } from "./bank-notifications.js?v=1.1.82";
-import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.82";
+} from "./movements.js?v=1.1.83";
+import { isStale, pendingSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.83";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.83";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -82,7 +82,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.82";
+} from "./state-model.js?v=1.1.83";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -98,7 +98,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.82";
+} from "./sync-client.js?v=1.1.83";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -342,6 +342,8 @@ let biometricPromptActive = false;
 // Device-only: they come from the Android listener and are never part of the synced state.
 let bankSuggestions = [];
 let bankStatus = { available: false, enabled: false, permission: false, connected: false };
+// Recent bank notifications that are not a movement the app can read (shown in Datos).
+let bankUnreadable = [];
 // Money a bank notification said arrived, prefilling the "Dinero extra" sheet.
 let extraDraft = null;
 
@@ -3150,6 +3152,10 @@ function renderPlanSheet() {
     return renderPayReceivedSheet();
   }
 
+  if (planSheet === "bank-unreadable") {
+    return renderBankUnreadableSheet();
+  }
+
   if (planSheet === "bank-disclosure") {
     return renderBankDisclosureSheet();
   }
@@ -5821,6 +5827,8 @@ function handleAction(event) {
     "set-theme",
     "retry-cloud-sync",
     "open-bank-disclosure",
+    "open-bank-unreadable",
+    "forget-bank-unreadable",
     "register-bank-suggestion",
     "register-bank-income",
     "dismiss-bank-suggestion",
@@ -6060,6 +6068,18 @@ function handleAction(event) {
       menuOpen = false;
     },
     "enable-biometric": () => enableBiometric(),
+    "open-bank-unreadable": () => {
+      planSheet = "bank-unreadable";
+    },
+    "forget-bank-unreadable": () => {
+      const ids = bankUnreadable.map((notification) => notification.id);
+      bankUnreadable = [];
+      planSheet = "";
+      try {
+        nativeBankNotifications()?.dismiss({ ids })?.catch?.(() => {});
+      } catch {}
+      showNoticeSnackbar("Listo, los borré de este teléfono.", { duration: 3500, renderNow: false });
+    },
     "open-bank-disclosure": () => {
       planSheet = "bank-disclosure";
     },
@@ -7337,7 +7357,14 @@ async function refreshBankSuggestions({ recheck = true } = {}) {
       window.setTimeout(() => refreshBankSuggestions({ recheck: false }), 1500);
     }
     const pending = bankStatus.enabled && bankStatus.permission ? (await plugin.getPending())?.notifications || [] : [];
+    // Too old to offer (see SUGGESTION_MAX_AGE_DAYS): forgotten on the phone as well, so
+    // they stop taking room in the listener's limited store.
+    const stale = pending.filter((notification) => isStale(notification)).map((notification) => notification.id);
+    if (stale.length) {
+      plugin.dismiss({ ids: stale })?.catch?.(() => {});
+    }
     bankSuggestions = pendingSuggestions(pending, { transactions: state.transactions, extras: state.budgetExtras });
+    bankUnreadable = unreadableNotifications(pending);
   } catch {
     bankStatus = { ...bankStatus, available: true };
   }
@@ -7499,7 +7526,46 @@ function renderBankNotificationsPanel() {
                <button class="btn ghost" type="button" data-action="disable-bank-notifications">Desactivar</button>`
         }
       </div>
+      ${
+        enabled && bankUnreadable.length
+          ? `<div class="bank-unreadable-row">
+              <span>${bankUnreadable.length === 1 ? "1 aviso de Nu que no entendí" : `${bankUnreadable.length} avisos de Nu que no entendí`}</span>
+              <button class="btn ghost" type="button" data-action="open-bank-unreadable">Ver</button>
+            </div>`
+          : ""
+      }
     </article>
+  `;
+}
+
+// The notifications behind "avisos que no entendí": promos and codes are expected here;
+// a purchase listed here means Nu changed its wording and the reading needs updating.
+function renderBankUnreadableSheet() {
+  return `
+    <div class="sheet-backdrop" role="presentation" data-action="close-plan-sheet">
+      <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="bank-unreadable-title">
+        <div class="sheet-handle"></div>
+        <div class="sheet-heading">
+          <div><p class="eyebrow">Gastos desde Nu</p><h2 id="bank-unreadable-title">Avisos que no entendí</h2></div>
+          <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">${renderIcon("close")}</button>
+        </div>
+        <p class="setaside-note">Promociones o códigos de seguridad son normales aquí. Si ves una compra o una plata que te llegó, avísanos: Nu cambió cómo escribe sus avisos y hay que actualizar la app.</p>
+        <ul class="bank-unreadable-list">
+          ${bankUnreadable
+            .map(
+              (notification) => `
+            <li>
+              <strong>${escapeHtml(notification.title || "Sin título")}</strong>
+              <span>${escapeHtml(notification.text || "")}</span>
+              <small>${escapeHtml(formatDate(new Date(Number(notification.postedAt || 0)).toISOString().slice(0, 10)))}</small>
+            </li>
+          `
+            )
+            .join("")}
+        </ul>
+        <button class="btn ghost" type="button" data-action="forget-bank-unreadable">Borrar estos avisos</button>
+      </section>
+    </div>
   `;
 }
 

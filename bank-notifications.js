@@ -125,16 +125,53 @@ export function suggestionFromNotification(notification) {
   return null;
 }
 
-// Recorded by hand already (same amount, same day, same direction): do not offer it again.
-export function alreadyRecorded(suggestion, { transactions = [], extras = [] } = {}) {
-  const sameDayAndAmount = (item) => Number(item.amount) === suggestion.amount && String(item.date || "").slice(0, 10) === suggestion.date;
-  return suggestion.kind === "income" ? extras.some(sameDayAndAmount) : transactions.some(sameDayAndAmount);
+function daysApart(a, b) {
+  return Math.abs(Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) / 86_400_000;
 }
 
-// Newest first; recorded ones left out.
-export function pendingSuggestions(notifications = [], recorded = {}) {
+function sameName(a, b) {
+  const key = (value) => plain(value).replace(/[^a-z0-9]+/g, " ").trim();
+  const left = key(a);
+  const right = key(b);
+  return Boolean(left && right) && (` ${left} `.includes(` ${right} `) || ` ${right} `.includes(` ${left} `));
+}
+
+// Recorded by hand already: same amount and direction on the same day, or on the day
+// before/after when the name also matches (noted at 11:50 p.m., notified at 12:05 a.m.).
+// The name is required across days so a $3.000 bus ride on two days in a row stays two.
+export function alreadyRecorded(suggestion, { transactions = [], extras = [] } = {}) {
+  const name = suggestion.kind === "income" ? suggestion.origin : suggestion.merchant;
+  const matches = (item) => {
+    if (Number(item.amount) !== suggestion.amount) return false;
+    const date = String(item.date || "").slice(0, 10);
+    if (date === suggestion.date) return true;
+    return daysApart(date, suggestion.date) <= 1 && sameName(suggestion.kind === "income" ? item.source : item.merchant, name);
+  };
+  return suggestion.kind === "income" ? extras.some(matches) : transactions.some(matches);
+}
+
+// A notification this old is not offered any more: it would land in a period that may be
+// closed already, and by then the user has either recorded it by hand or let it go.
+export const SUGGESTION_MAX_AGE_DAYS = 30;
+
+export function isStale(notification, now = Date.now()) {
+  return now - Number(notification?.postedAt || 0) > SUGGESTION_MAX_AGE_DAYS * 86_400_000;
+}
+
+// Newest first; recorded and stale ones left out.
+export function pendingSuggestions(notifications = [], recorded = {}, now = Date.now()) {
   return notifications
+    .filter((notification) => !isStale(notification, now))
     .map(suggestionFromNotification)
     .filter((suggestion) => suggestion && !alreadyRecorded(suggestion, recorded))
     .sort((a, b) => b.postedAt - a.postedAt);
+}
+
+// Recent notifications from the bank that are not a movement the app can read: promos,
+// codes, or a wording it does not know yet. Shown in Datos so a change in the bank's
+// texts does not make the feature stop working in silence.
+export function unreadableNotifications(notifications = [], now = Date.now()) {
+  return notifications
+    .filter((notification) => !isStale(notification, now) && !suggestionFromNotification(notification))
+    .sort((a, b) => Number(b.postedAt || 0) - Number(a.postedAt || 0));
 }

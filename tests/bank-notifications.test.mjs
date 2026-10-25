@@ -2,7 +2,7 @@
 // typical Colombian banking wording, to be replaced with real samples as they show up.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { alreadyRecorded, parseAmount, parseMerchant, parseOrigin, pendingSuggestions, suggestionFromNotification } from "../bank-notifications.js";
+import { alreadyRecorded, isStale, parseAmount, unreadableNotifications, parseMerchant, parseOrigin, pendingSuggestions, suggestionFromNotification } from "../bank-notifications.js";
 
 const NU = "com.nu.production";
 const at = (iso) => new Date(iso).getTime();
@@ -134,4 +134,30 @@ test("pending suggestions: newest first, without the ones already recorded", () 
     list.map((item) => item.merchant || item.origin),
     ["Éxito", "Ana", "Café"]
   );
+});
+
+test("a purchase noted by hand the day before or after counts as recorded only when the name matches", () => {
+  const purchase = suggestionFromNotification(notification("Compra aprobada por $45.000,00", "Compra en TERPEL CALLE 80 con tu tarjeta débito."));
+  assert.equal(alreadyRecorded(purchase, { transactions: [{ amount: 45_000, date: "2026-10-11", merchant: "Terpel" }] }), true, "11:50 p.m. by hand, 12:05 a.m. from Nu");
+  assert.equal(alreadyRecorded(purchase, { transactions: [{ amount: 45_000, date: "2026-10-13", merchant: "terpel calle 80" }] }), true);
+  assert.equal(alreadyRecorded(purchase, { transactions: [{ amount: 45_000, date: "2026-10-11", merchant: "Peaje" }] }), false, "same amount at another place is another purchase");
+  assert.equal(alreadyRecorded(purchase, { transactions: [{ amount: 45_000, date: "2026-10-10", merchant: "Terpel" }] }), false, "two days apart is another purchase");
+});
+
+test("notifications older than 30 days are not offered any more", () => {
+  const now = at("2026-11-20T10:00:00");
+  const old = notification("Compra", "Compraste $10.000 en Café", at("2026-10-12T15:30:00"));
+  const recent = notification("Compra", "Compraste $12.000 en Bus", at("2026-11-19T08:00:00"));
+  assert.equal(isStale(old, now), true);
+  assert.equal(isStale(recent, now), false);
+  assert.deepEqual(pendingSuggestions([old, recent], {}, now).map((item) => item.merchant), ["Bus"]);
+});
+
+test("recent bank notifications the app cannot read are listed, newest first, without the stale ones", () => {
+  const now = at("2026-10-20T10:00:00");
+  const promo = notification("Oferta", "Paga $0 de cuota este mes", at("2026-10-18T10:00:00"));
+  const code = notification("Código", "Tu código es 483920", at("2026-10-19T10:00:00"));
+  const purchase = notification("Compra", "Compraste $10.000 en Café", at("2026-10-19T11:00:00"));
+  const oldPromo = notification("Oferta", "Promo vieja", at("2026-08-01T10:00:00"));
+  assert.deepEqual(unreadableNotifications([promo, code, purchase, oldPromo], now).map((item) => item.title), ["Código", "Oferta"]);
 });

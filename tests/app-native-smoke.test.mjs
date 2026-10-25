@@ -429,3 +429,27 @@ test("'No es un ingreso' drops money that was already counted", async () => {
     ui.close();
   }
 });
+
+test("Datos lists the Nu notifications the app could not read, and old ones are cleaned up", async () => {
+  const day = 86_400_000;
+  const promo = { id: "nu:promo", packageName: "com.nu.production", title: "Oferta", text: "Paga $0 de cuota este mes", postedAt: Date.now() - day };
+  const purchase = { id: "nu:buy", packageName: "com.nu.production", title: "Compra aprobada por $9.000,00", text: "Compra en CAFE con tu tarjeta débito.", postedAt: Date.now() };
+  const old = { id: "nu:old", packageName: "com.nu.production", title: "Compra aprobada por $5.000,00", text: "Compra en BUS con tu tarjeta débito.", postedAt: Date.now() - 45 * day };
+  const native = fakeCapacitor({ bank: { enabled: true, permission: true, pending: [promo, purchase, old] } });
+  const ui = await bootApp({ savedState: returningUserState(), beforeBoot: native.install });
+  try {
+    await waitFor(ui, '[data-action="register-bank-suggestion"]');
+    assert.equal(ui.window.document.querySelectorAll('[data-action="register-bank-suggestion"]').length, 1, "the 45-day-old purchase is not offered");
+    assert.ok(native.calls.bankDismissed.includes("nu:old"), "and it is forgotten on the phone");
+
+    await ui.click('[data-view="profile"]');
+    assert.match(ui.text(), /1 aviso de Nu que no entendí/);
+    await ui.click('[data-action="open-bank-unreadable"]');
+    assert.match(ui.$(".bank-unreadable-list").textContent, /Paga \$0 de cuota/);
+    await ui.click('[data-action="forget-bank-unreadable"]');
+    assert.ok(native.calls.bankDismissed.includes("nu:promo"));
+    assert.doesNotMatch(ui.text(), /que no entendí/);
+  } finally {
+    ui.close();
+  }
+});
