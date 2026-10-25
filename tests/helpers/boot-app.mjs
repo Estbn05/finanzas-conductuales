@@ -109,6 +109,14 @@ export async function bootApp({ savedState, lockConfig, syncConfig = {}, beforeB
   bootCount += 1;
   await import(`../../app.js?smoke=${bootCount}`);
   await settle(window);
+  // The first boot in a process keeps the "Preparando todo" screen up for LOADING_MIN_MS
+  // (1.8 s, counted from process start). settle() is far shorter, so on a slow machine
+  // (GitHub's runners) tests used to look at the loading screen instead of the app.
+  // Wait it out here, up to 6 s, instead of in each test.
+  for (let i = 0; i < 120 && window.document.querySelector(".session-check"); i += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+  }
+  await settle(window);
 
   const app = window.document.querySelector("#app");
   return {
