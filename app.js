@@ -19,7 +19,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.84";
+} from "./finance-core.js?v=1.1.85";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -34,9 +34,10 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.84";
-import { isStale, pendingSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.84";
-import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.84";
+} from "./movements.js?v=1.1.85";
+import { isStale, pendingSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.85";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.85";
+import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.85";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -84,7 +85,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.84";
+} from "./state-model.js?v=1.1.85";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -100,7 +101,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.84";
+} from "./sync-client.js?v=1.1.85";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -2124,6 +2125,7 @@ function renderToday(plan) {
   const homeSummary = budgetSummary();
   return `
     <section class="home-view" aria-label="Resumen del periodo">
+      ${renderDuePlans()}
       ${renderBankSuggestions()}
       ${renderPeriodPredictionCard(homeSummary)}
       ${renderCooldownPanel()}
@@ -3519,6 +3521,14 @@ function renderCalendar() {
               ${renderCategoryOptions(FREE_CATEGORY_ID)}
             </select>
           </label>
+          <label>
+            Se repite
+            <select name="repeat">
+              <option value="">Una vez</option>
+              <option value="weekly">Cada semana</option>
+              <option value="monthly">Cada mes</option>
+            </select>
+          </label>
           <label class="event-notes-field">
             Nota opcional
             <input name="notes" type="text" maxlength="90" placeholder="Ej. Comprar antes del viernes">
@@ -3566,7 +3576,7 @@ function renderFinancialEvent(event) {
           <strong>${escapeHtml(event.title)}</strong>
           <span>${event.spent ? "Registrado" : isPast ? "Pendiente" : "Planeado"}</span>
         </div>
-        <small>${escapeHtml(category)}${event.notes ? ` &middot; ${escapeHtml(event.notes)}` : ""}</small>
+        <small>${event.repeat ? `${escapeHtml(repeatLabel(event.repeat))} &middot; ` : ""}${escapeHtml(category)}${event.notes ? ` &middot; ${escapeHtml(event.notes)}` : ""}</small>
       </div>
       <div class="event-amount">
         <strong>${formatMoney(event.amount)}</strong>
@@ -3576,7 +3586,8 @@ function renderFinancialEvent(event) {
         ${
           event.spent
             ? `<button class="btn ghost" type="button" data-action="reopen-calendar-event" data-id="${escapeAttr(event.id)}">Reabrir</button>`
-            : `<button class="btn secondary" type="button" data-action="register-calendar-event" data-id="${escapeAttr(event.id)}">Registrar gasto</button>`
+            : `<button class="btn secondary" type="button" data-action="register-calendar-event" data-id="${escapeAttr(event.id)}">Registrar gasto</button>
+               ${event.repeat ? `<button class="btn ghost" type="button" data-action="skip-calendar-event" data-id="${escapeAttr(event.id)}">Omitir esta vez</button>` : ""}`
         }
         <button class="icon-btn muted" type="button" data-action="remove-calendar-event" data-id="${escapeAttr(event.id)}" aria-label="Eliminar ${escapeAttr(event.title)}">${renderIcon("close")}</button>
       </div>
@@ -6120,6 +6131,7 @@ function handleAction(event) {
     },
     "remove-calendar-event": () => removeCalendarEvent(id),
     "reopen-calendar-event": () => reopenCalendarEvent(id),
+    "skip-calendar-event": () => skipCalendarEvent(id),
     "cancel-cooldown": () => cancelCooldown(id),
     "unlock-cooldown": () => unlockCooldown(id),
     "cloud-sign-out": () => handleCloudSignOut(),
@@ -6845,6 +6857,7 @@ function handleFinancialEventSubmit(event) {
     return;
   }
 
+  const repeat = normalizeRepeat(data.get("repeat"));
   state.calendarEvents.push({
     id: uid("event"),
     title,
@@ -6854,9 +6867,14 @@ function handleFinancialEventSubmit(event) {
     notes: cleanText(data.get("notes"), ""),
     spent: false,
     transactionId: "",
+    repeat,
+    anchorDay: Number(date.slice(8, 10)),
+    history: [],
     updated_at: new Date().toISOString()
   });
-  state.lastAlert = `${title} quedo en tu calendario con estimado de ${formatMoney(amount)}.`;
+  state.lastAlert = repeat
+    ? `${title} quedó en tus gastos planeados, ${repeatLabel(repeat).toLowerCase()}, con estimado de ${formatMoney(amount)}.`
+    : `${title} quedó en tu calendario con estimado de ${formatMoney(amount)}.`;
   showNoticeSnackbar(state.lastAlert, { renderNow: false });
   saveState();
   render();
@@ -7100,28 +7118,92 @@ function startCalendarEventExpense(id) {
   openQuickExpense();
 }
 
-function markCalendarEventSpent(id, transactionId) {
-  const event = state.calendarEvents.find((item) => item.id === id);
-  if (!event) {
-    return;
-  }
-  event.spent = true;
-  event.transactionId = transactionId;
-  event.updated_at = new Date().toISOString();
+function replaceCalendarEvent(id, update) {
+  state.calendarEvents = state.calendarEvents.map((item) => (item.id === id ? update(item) : item));
 }
 
-function reopenCalendarEvent(id) {
+// A repeating plan moves to its next date (planned.js); a one-off is done.
+function markCalendarEventSpent(id, transactionId) {
+  replaceCalendarEvent(id, (event) => registerOccurrence(event, transactionId));
+}
+
+// transactionId: its expense was deleted, so only that occurrence is undone.
+function reopenCalendarEvent(id, transactionId = "") {
   const event = state.calendarEvents.find((item) => item.id === id);
   if (!event) {
-    state.lastAlert = "No encontre ese evento del calendario.";
+    state.lastAlert = "No encontré ese gasto planeado.";
     showNoticeSnackbar(state.lastAlert, { kind: "error", renderNow: false });
     return;
   }
-  event.spent = false;
-  event.transactionId = "";
-  event.updated_at = new Date().toISOString();
-  state.lastAlert = `${event.title} volvio a quedar pendiente.`;
+  replaceCalendarEvent(id, (item) => undoOccurrence(item, transactionId));
+  const after = state.calendarEvents.find((item) => item.id === id);
+  state.lastAlert = after.repeat
+    ? `${after.title} vuelve a quedar para el ${formatShortDate(after.date)}.`
+    : `${after.title} volvió a quedar pendiente.`;
   showNoticeSnackbar(state.lastAlert, { renderNow: false });
+}
+
+function skipCalendarEvent(id) {
+  const event = state.calendarEvents.find((item) => item.id === id);
+  if (!event) {
+    return;
+  }
+  replaceCalendarEvent(id, (item) => skipOccurrence(item));
+  const after = state.calendarEvents.find((item) => item.id === id);
+  state.lastAlert = after.repeat
+    ? `Listo, ${after.title} no se registró esta vez. El próximo es el ${formatShortDate(after.date)}.`
+    : `Listo, ${after.title} ya no queda pendiente.`;
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
+}
+
+function repeatLabel(repeat) {
+  return repeat === "weekly" ? "Cada semana" : repeat === "monthly" ? "Cada mes" : "Una vez";
+}
+
+function plannedDateLabel(date) {
+  const today = todayKey();
+  if (date === today) return "hoy";
+  if (date === previousDay(today)) return "ayer";
+  return date < today ? `desde el ${formatShortDate(date)}` : formatShortDate(date);
+}
+
+// Inicio: planned expenses whose day has come ("¿Registrar el arriendo?"), with the same
+// two answers as the bank's suggestions. Registering opens the prefilled form.
+function renderDuePlans() {
+  const due = duePlans(state.calendarEvents || [], todayKey());
+  if (!due.length) {
+    return "";
+  }
+  const shown = due.slice(0, 3);
+  return `
+    <article class="cooldown-panel bank-suggestions planned-due" aria-label="Gastos planeados para hoy">
+      <div class="home-section-heading compact-heading">
+        <div>
+          <p class="eyebrow">Gastos planeados</p>
+          <h2>${due.length === 1 ? `¿Registrar ${escapeHtml(shown[0].title)}?` : "¿Registrar estos gastos planeados?"}</h2>
+        </div>
+      </div>
+      <div class="cooldown-list">
+        ${shown
+          .map(
+            (event) => `
+          <div class="cooldown-item">
+            <div>
+              <strong>${escapeHtml(event.title)}</strong>
+              <span>${formatMoney(event.amount)} · ${escapeHtml(plannedDateLabel(event.date))}${event.repeat ? ` · ${escapeHtml(repeatLabel(event.repeat).toLowerCase())}` : ""}</span>
+            </div>
+            <div class="cooldown-actions">
+              <button class="btn ghost" type="button" data-action="skip-calendar-event" data-id="${escapeAttr(event.id)}">${event.repeat ? "Omitir esta vez" : "Ya no aplica"}</button>
+              <button class="btn secondary" type="button" data-action="register-calendar-event" data-id="${escapeAttr(event.id)}">Registrar</button>
+            </div>
+          </div>
+        `
+          )
+          .join("")}
+      </div>
+      ${due.length > shown.length ? `<button class="text-link prediction-detail-link" type="button" data-view="calendar">Ver los ${due.length} pendientes</button>` : ""}
+    </article>
+  `;
 }
 
 function removeCalendarEvent(id) {
@@ -8005,7 +8087,7 @@ function removeTransaction(id) {
     adjustLiquidity(transaction.source, Number(transaction.amount || 0), "refund");
   }
   if (transaction?.calendarEventId) {
-    reopenCalendarEvent(transaction.calendarEventId);
+    reopenCalendarEvent(transaction.calendarEventId, transaction.id);
   }
   state.lastAlert = transaction
     ? `${transaction.merchant} eliminado. La categoría se recalculó.`
@@ -8387,10 +8469,7 @@ function calendarEstimateForDays(days) {
   const start = todayKey();
   const endDate = new Date(`${start}T12:00:00`);
   endDate.setDate(endDate.getDate() + Number(days || 0));
-  const end = todayKey(endDate);
-  return (state.calendarEvents || [])
-    .filter((event) => !event.spent && event.date >= start && event.date <= end)
-    .reduce((sum, event) => sum + Number(event.amount || 0), 0);
+  return plannedTotal(state.calendarEvents || [], start, todayKey(endDate));
 }
 
 function scheduleDailyReminder() {

@@ -130,3 +130,68 @@ test("the theme follows the phone until one is picked, and the pick survives a r
     again.close();
   }
 });
+
+// Recurring planned expenses (planned.js): rent, subscriptions, the gym.
+test("a monthly planned expense is created from Gastos planeados with its repeat", async () => {
+  const ui = await bootApp({ savedState: returningUserState() });
+  try {
+    await waitFor(ui, '[data-view="calendar"]');
+    await ui.click('[data-view="calendar"]');
+    const form = ui.$("#financial-event-form");
+    form.elements.namedItem("title").value = "Arriendo";
+    form.elements.namedItem("amount").value = "900000";
+    form.elements.namedItem("repeat").value = "monthly";
+    form.requestSubmit();
+    await settle(ui.window);
+    const [rent] = ui.saved().calendarEvents;
+    assert.equal(rent.repeat, "monthly");
+    assert.equal(rent.anchorDay, Number(todayKey().slice(8, 10)));
+    assert.match(ui.text(), /Cada mes/);
+  } finally {
+    ui.close();
+  }
+});
+
+test("a repeating plan due today is offered on Inicio; registering moves it a month on, and Deshacer brings it back", async () => {
+  const { nextOccurrence } = await import("../planned.js");
+  const today = todayKey();
+  const rent = { id: "rent", title: "Arriendo", date: today, amount: 900_000, category: "free", repeat: "monthly", anchorDay: Number(today.slice(8, 10)) };
+  const ui = await bootApp({ savedState: returningUserState({ calendarEvents: [rent] }) });
+  try {
+    await waitFor(ui, '[data-action="register-calendar-event"]');
+    assert.match(ui.text(), /¿Registrar Arriendo\?/);
+    await ui.click('[data-action="register-calendar-event"]');
+    const form = ui.$("#transaction-form");
+    assert.equal(form.elements.namedItem("amount").value.replace(/\D/g, ""), "900000");
+    form.requestSubmit();
+    await settle(ui.window);
+
+    let saved = ui.saved();
+    assert.equal(saved.transactions.length, 1);
+    assert.equal(saved.calendarEvents[0].date, nextOccurrence(today, "monthly", rent.anchorDay), "next month, not 'done'");
+    assert.equal(ui.$('[data-action="register-calendar-event"]'), null, "nothing due any more on Inicio");
+
+    await ui.click('[data-action="undo-snackbar"]');
+    saved = ui.saved();
+    assert.equal(saved.transactions.length, 0);
+    assert.equal(saved.calendarEvents[0].date, today, "undoing the expense undoes the step");
+  } finally {
+    ui.close();
+  }
+});
+
+test("'Omitir esta vez' moves a repeating plan on without recording anything", async () => {
+  const today = todayKey();
+  const gym = { id: "gym", title: "Gimnasio", date: today, amount: 90_000, category: "free", repeat: "weekly" };
+  const ui = await bootApp({ savedState: returningUserState({ calendarEvents: [gym] }) });
+  try {
+    await waitFor(ui, '[data-action="skip-calendar-event"]');
+    await ui.click('[data-action="skip-calendar-event"]');
+    const saved = ui.saved();
+    assert.equal(saved.transactions?.length ?? 0, 0);
+    assert.ok(saved.calendarEvents[0].date > today);
+    assert.match(ui.text(), /no se registró esta vez/);
+  } finally {
+    ui.close();
+  }
+});

@@ -330,3 +330,18 @@ test("the daily reminder covers the next 14 days at its time, skipping today whe
   assert.deepEqual(keys(upcomingReminderDates("20:00", { now: new Date(2026, 9, 31, 22, 0) })).slice(0, 2), ["11/1 20:00", "11/2 20:00"], "across a month end");
   assert.equal(upcomingReminderDates("nope", { now: morning })[0].getHours(), 20, "an invalid time falls back to 20:00");
 });
+
+test("repeating planned expenses keep their repeat, day and history through a reload", () => {
+  const saved = {
+    calendarEvents: [
+      { id: "rent", title: "Arriendo", date: "2026-11-30", amount: 900000, repeat: "monthly", anchorDay: 31, history: [{ date: "2026-10-31", transactionId: "tx1" }, { nope: true }] },
+      { id: "gift", title: "Regalo", date: "2026-11-05", amount: 80000, repeat: "yearly" }
+    ]
+  };
+  const [rent, gift] = migrateState(saved, "2026-10-25", "today").calendarEvents;
+  assert.equal(rent.repeat, "monthly");
+  assert.equal(rent.anchorDay, 31);
+  assert.deepEqual(rent.history, [{ date: "2026-10-31", transactionId: "tx1", skipped: false }]);
+  assert.equal(gift.repeat, "", "an unknown repeat is treated as once");
+  assert.equal(gift.anchorDay, 5);
+});

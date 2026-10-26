@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.84";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.85";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
@@ -452,7 +452,16 @@ export function normalizeCalendarEvents(events, today) {
     category: normalizeEventCategory(event.category),
     notes: cleanText(event.notes || event.description, ""),
     spent: Boolean(event.spent),
+    skipped: Boolean(event.skipped),
     transactionId: event.transactionId || "",
+    // Repeating plans (planned.js): "weekly" | "monthly" | "" (once), the day of the month
+    // a monthly one keeps, and the recent register/skip steps that can be undone.
+    repeat: ["weekly", "monthly"].includes(event.repeat) ? event.repeat : "",
+    anchorDay: Number(event.anchorDay) || Number(String(cleanDate(event.date, today)).slice(8, 10)),
+    history: (Array.isArray(event.history) ? event.history : [])
+      .filter((entry) => entry && /^\d{4}-\d{2}-\d{2}$/.test(String(entry.date || "")))
+      .map((entry) => ({ date: entry.date, transactionId: entry.transactionId || "", skipped: Boolean(entry.skipped) }))
+      .slice(-12),
     updated_at: event.updated_at || event.date || ""
   }));
 }

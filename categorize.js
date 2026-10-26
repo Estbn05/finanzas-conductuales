@@ -13,7 +13,7 @@
 //                their names. Never invents a category.
 //
 // Pure and offline: nothing leaves the phone. Unit-tested in tests/categorize.test.mjs.
-import { merchantKey, merchantRuleMatches } from "./state-model.js?v=1.1.84";
+import { merchantKey, merchantRuleMatches } from "./state-model.js?v=1.1.85";
 
 // Words that place a branch, not the business: from the first of these on, the name is
 // an address ("CARULLA CALLE 63", "TERPEL AV BOYACA").
