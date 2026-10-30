@@ -10,6 +10,7 @@ import {
   calculatePlan as calculateFinancePlan,
   categoryStatus as getCategoryStatus,
   findLoggedIncome,
+  hasFund,
   freeShareOfBudget,
   isSavingsJob,
   jobFund,
@@ -19,7 +20,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.90";
+} from "./finance-core.js?v=1.1.92";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -32,11 +33,11 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.90";
-import { isStale, looksLikeEarlyPay, looksLikePay, pendingSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.90";
-import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.90";
-import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.90";
-import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.90";
+} from "./movements.js?v=1.1.92";
+import { isStale, looksLikeEarlyPay, looksLikePay, pendingSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.92";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.92";
+import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.92";
+import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.92";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -85,7 +86,7 @@ import {
   remoteChangedSinceLastSync,
   CREDIT_PAYMENTS_LIMIT,
   uid
-} from "./state-model.js?v=1.1.90";
+} from "./state-model.js?v=1.1.92";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -101,7 +102,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.90";
+} from "./sync-client.js?v=1.1.92";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -299,6 +300,14 @@ const TOUR_STEPS = [
 let moneyDetailsOpen = {};
 let planSheet = "";
 let pendingJobRemovalId = "";
+// The category open in "Editar categoría" (planSheet "edit-job").
+let editingJobId = "";
+// The cadences a recurring category can be edited to (the same as when it is created).
+const EDITABLE_CADENCES = [
+  { value: "weekly", label: "Semanal" },
+  { value: "biweekly", label: "Quincenal" },
+  { value: "monthly", label: "Mensual" }
+];
 let pendingBackupRestoreId = "";
 let editingTransactionId = "";
 let editingExtraId = "";
@@ -3151,6 +3160,10 @@ function renderPlanSheet() {
     return renderCreditPaymentSheet();
   }
 
+  if (planSheet === "edit-job") {
+    return renderEditJobSheet();
+  }
+
   if (planSheet === "category") {
     return `
       <div class="sheet-backdrop" role="presentation" data-action="close-plan-sheet">
@@ -3237,16 +3250,21 @@ function categoryIconFor(name) {
   return /carro|moto/.test(String(name || "").toLowerCase()) ? "fuel" : "tag";
 }
 
-function renderBudgetJob(job) {
+// A category's fund this period, and what of it can still go back to libre: the fund,
+// net of anything already spent from it this period beyond the recurring limit.
+function fundStanding(job) {
   const spent = spendByCategory()[job.id] || 0;
   const windowStart = budgetSummary().window.start;
   const budget = getBudgetAmountForJob(job, state.profile, windowStart, state.transactions);
   const fund = jobFund(job, state.profile, state.transactions, windowStart);
-  const isFundOnly = job.cadence === "once";
-  // What can still be released: the fund, net of anything already spent from it this
-  // period beyond the recurring limit.
-  const recurring = isFundOnly ? 0 : getBudgetAmountForJob(job, state.profile);
+  const recurring = job.cadence === "once" ? 0 : getBudgetAmountForJob(job, state.profile);
   const releasable = Math.max(0, Math.min(fund.total, budget - Math.max(spent, recurring)));
+  return { spent, windowStart, budget, fund, recurring, releasable };
+}
+
+function renderBudgetJob(job) {
+  const { spent, budget, fund, releasable } = fundStanding(job);
+  const isFundOnly = job.cadence === "once";
   const subtitle = isFundOnly
     ? `Apartado · ${formatMoney(fund.total)}${fund.usedBefore > 0 ? ` · ya usaste ${formatMoney(fund.usedBefore)} antes` : ""}`
     : `${capitalize(cadenceLabel(job.cadence))} · ${formatMoney(job.amount)}${fund.total > 0 ? ` + ${formatMoney(fund.total)} apartado` : ""}`;
@@ -3265,7 +3283,7 @@ function renderBudgetJob(job) {
             <span>${subtitle}</span>
           </div>
         </div>
-        <button class="category-menu-btn" type="button" data-action="request-remove-job" data-id="${escapeAttr(job.id)}" aria-label="Eliminar ${escapeAttr(job.name)}">&middot;&middot;&middot;</button>
+        <button class="category-menu-btn" type="button" data-action="open-edit-job" data-id="${escapeAttr(job.id)}" aria-label="Editar o eliminar ${escapeAttr(job.name)}">&middot;&middot;&middot;</button>
       </div>
       <div class="category-card-bar ${band}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(clamp(ratio, 0, 100))}" aria-valuetext="${Math.round(ratio)} por ciento usado">
         <span style="width:${clamp(ratio, 0, 120)}%"></span>
@@ -3281,6 +3299,131 @@ function renderBudgetJob(job) {
       }
     </article>
   `;
+}
+
+// "Editar categoría": its name and, for a recurring one, how much it gets and how often,
+// from this period on (what was set aside in it stays as it is). For money set aside
+// ("once"), the amount is what is set aside right now: raising it sets the difference
+// aside and lowering it releases the difference, the same records "Apartar dinero" and
+// "Liberar" leave, never below what was already spent from it.
+function renderEditJobSheet() {
+  const job = state.budgetJobs.find((item) => item.id === editingJobId);
+  if (!job) {
+    return "";
+  }
+  const isFundOnly = job.cadence === "once";
+  const standing = fundStanding(job);
+  const cadences = EDITABLE_CADENCES.some((option) => option.value === job.cadence)
+    ? EDITABLE_CADENCES
+    : [...EDITABLE_CADENCES, { value: job.cadence, label: capitalize(cadenceLabel(job.cadence)) }];
+  return `
+    <div class="sheet-backdrop" role="presentation" data-action="close-plan-sheet">
+      <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="edit-job-title">
+        <div class="sheet-handle"></div>
+        <div class="sheet-heading">
+          <div><p class="eyebrow">Plan</p><h2 id="edit-job-title">Editar ${escapeHtml(job.name)}</h2></div>
+          <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">${renderIcon("close")}</button>
+        </div>
+        <form class="sheet-form" id="edit-job-form">
+          <input name="id" type="hidden" value="${escapeAttr(job.id)}">
+          <label>
+            Nombre
+            <input name="name" type="text" maxlength="32" value="${escapeAttr(job.name)}" required>
+          </label>
+          ${
+            isFundOnly
+              ? `<label>
+                  Apartado
+                  <input name="fund" type="number" min="${escapeAttr(Math.max(1000, standing.fund.total - standing.releasable))}" step="1000" inputmode="numeric" value="${escapeAttr(standing.fund.total)}" required>
+                </label>
+                <p class="setaside-note">Si lo subes, la diferencia sale de lo libre (tienes ${formatMoney(budgetSummary().freeRemaining)}). Si lo bajas, vuelve a lo libre${
+                  standing.fund.total - standing.releasable > 0 ? `, hasta ${formatMoney(standing.fund.total - standing.releasable)}, porque eso ya lo usaste` : ""
+                }.</p>`
+              : `<label>
+                  Monto
+                  <input name="amount" type="number" min="1000" step="1000" inputmode="numeric" value="${escapeAttr(job.amount)}" required>
+                </label>
+                <div class="sheet-field">
+                  <span class="sheet-label">Cada cuánto</span>
+                  ${renderChoicePills("cadence", cadences, job.cadence)}
+                </div>
+                <p class="setaside-note">El cambio rige desde este periodo. Lo que ya gastaste no cambia${hasFund(job) ? ", y lo que apartaste en ella sigue apartado" : ""}.</p>`
+          }
+          <button class="btn primary" type="submit">Guardar cambios</button>
+          <button class="btn ghost destructive-link" type="button" data-action="request-remove-job" data-id="${escapeAttr(job.id)}">Eliminar categoría</button>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function handleEditJobSubmit(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  const job = state.budgetJobs.find((item) => item.id === data.get("id"));
+  if (!job) {
+    return;
+  }
+  const name = cleanText(data.get("name"), job.name);
+  const duplicate = setAsideTarget(name).job;
+  if (duplicate && duplicate.id !== job.id) {
+    failCategoryForm(`Ya tienes una categoría llamada ${duplicate.name}.`);
+    return;
+  }
+  const changes = { name };
+  let before = 0;
+  let after = 0;
+  let fundChange = 0;
+  if (job.cadence === "once") {
+    const standing = fundStanding(job);
+    const wanted = numberFrom(data.get("fund"));
+    const floor = standing.fund.total - standing.releasable;
+    fundChange = wanted - standing.fund.total;
+    if (wanted <= 0 || wanted < floor) {
+      failCategoryForm(floor > 0 ? `Ya usaste ${formatMoney(floor)} de ${job.name}: no puede quedar en menos.` : "Escribe un monto mayor que cero.");
+      return;
+    }
+    const error = fundChange > 0 ? categoryReserveError({ name, amount: fundChange, createsCategory: false }) : "";
+    if (error) {
+      failCategoryForm(error);
+      return;
+    }
+    before = standing.fund.total;
+    after = wanted;
+  } else {
+    const amount = numberFrom(data.get("amount"));
+    const cadence = JOB_CADENCE_VALUES.includes(data.get("cadence")) && data.get("cadence") !== "once" ? data.get("cadence") : job.cadence;
+    before = getBudgetAmountForJob(job, state.profile);
+    after = getBudgetAmountForJob({ ...job, amount, cadence }, state.profile);
+    // Only what it takes on top of today's reserve has to fit in what is free.
+    const error = categoryReserveError({ name, amount, reserves: Math.max(0, after - before), createsCategory: false });
+    if (amount <= 0 || (after > before && error)) {
+      failCategoryForm(amount <= 0 ? "Escribe un monto mayor que cero." : `${name} pasaría a apartar ${formatMoney(after)} por periodo; te faltan ${formatMoney(after - before - budgetSummary().freeRemaining)} libres para eso.`);
+      return;
+    }
+    Object.assign(changes, { amount, cadence });
+  }
+  const now = new Date().toISOString();
+  if (fundChange > 0) {
+    setAsideForThisPeriod(job, job.name, fundChange, now);
+  } else if (fundChange < 0) {
+    job.released = [...(job.released || []), { windowStart: budgetSummary().window.start, amount: -fundChange }];
+  }
+  Object.assign(job, changes, { updated_at: now });
+  planSheet = "";
+  editingJobId = "";
+  const spent = spendByCategory()[job.id] || 0;
+  state.lastAlert =
+    after === before
+      ? `Listo, guardé ${job.name}.`
+      : job.cadence === "once"
+        ? `${job.name} ahora tiene ${formatMoney(after)} apartados (antes ${formatMoney(before)}). ${fundChange > 0 ? `Apartaste ${formatMoney(fundChange)} más.` : `${formatMoney(-fundChange)} volvieron a lo libre.`}`
+        : `${job.name} ahora aparta ${formatMoney(after)} por periodo (antes ${formatMoney(before)}).${
+          after < before && spent > after ? ` Ya usaste ${formatMoney(spent)}, así que este periodo queda por encima del límite: no pasa nada, solo tenlo en cuenta.` : ""
+        }`;
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
+  saveState();
+  render();
 }
 
 function renderJobRemovalConfirmation() {
@@ -4967,6 +5110,11 @@ function bindEvents() {
     diagnosisForm.addEventListener("submit", handleDiagnosisSubmit);
   }
 
+  const editJobForm = document.querySelector("#edit-job-form");
+  if (editJobForm) {
+    editJobForm.addEventListener("submit", handleEditJobSubmit);
+  }
+
   const budgetForm = document.querySelector("#budget-job-form");
   if (budgetForm) {
     bindPlanCategoryPreview(budgetForm);
@@ -5840,6 +5988,7 @@ function handleAction(event) {
     "open-credit-payment",
     "close-plan-sheet",
     "request-remove-job",
+    "open-edit-job",
     "cancel-remove-job",
     "request-restore-backup",
     "cancel-restore-backup",
@@ -5968,7 +6117,13 @@ function handleAction(event) {
       planSheet = "";
     },
     "release-fund": () => releaseFund(id),
+    "open-edit-job": () => {
+      editingJobId = id;
+      planSheet = "edit-job";
+    },
     "request-remove-job": () => {
+      planSheet = "";
+      editingJobId = "";
       pendingJobRemovalId = id;
     },
     "cancel-remove-job": () => {
@@ -8577,12 +8732,7 @@ function releaseFund(jobId) {
   if (!job) {
     return;
   }
-  const windowStart = budgetSummary().window.start;
-  const spent = spendByCategory()[job.id] || 0;
-  const fund = jobFund(job, state.profile, state.transactions, windowStart);
-  const recurring = job.cadence === "once" ? 0 : getBudgetAmountForJob(job, state.profile);
-  const budget = recurring + fund.total;
-  const amount = Math.max(0, Math.min(fund.total, budget - Math.max(spent, recurring)));
+  const { windowStart, spent, releasable: amount } = fundStanding(job);
   if (amount <= 0) {
     return;
   }

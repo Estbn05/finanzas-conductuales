@@ -284,3 +284,67 @@ test("an expense can be recorded for yesterday or an earlier day, never a future
     ui.close();
   }
 });
+
+test("Editar categoría: rename it and change its limit from this period on, within what is free; deleting is one step further", async () => {
+  const ui = await bootApp({
+    savedState: returningUserState({
+      budgetJobs: [
+        { id: "gas", name: "Gasolina", amount: 150_000, cadence: "monthly" },
+        { id: "soat", name: "Soat", amount: 400_000, cadence: "once" }
+      ],
+      transactions: [
+        expense({ id: "a", merchant: "Terpel", amount: 120_000, category: "gas", labeled: true }),
+        expense({ id: "b", merchant: "Seguros", amount: 100_000, category: "soat", labeled: true })
+      ]
+    })
+  });
+  const edit = async (id, values) => {
+    await ui.click(`[data-action="open-edit-job"][data-id="${id}"]`);
+    const form = ui.$("#edit-job-form");
+    for (const [name, value] of Object.entries(values)) {
+      if (name === "cadence") await ui.click(`#edit-job-form [data-choice-name="cadence"][data-choice-value="${value}"]`);
+      else form.elements.namedItem(name).value = value;
+    }
+    form.requestSubmit();
+    await settle(ui.window);
+  };
+  const job = (id) => ui.saved().budgetJobs.find((item) => item.id === id);
+  try {
+    await waitFor(ui, '[data-view="budget"]');
+    await ui.click('[data-view="budget"]');
+    await waitFor(ui, '[data-action="open-edit-job"]');
+
+    await edit("gas", { name: "Gasolina moto", amount: "200000" });
+    assert.deepEqual([job("gas").name, job("gas").amount, job("gas").cadence], ["Gasolina moto", 200_000, "monthly"]);
+    assert.equal(ui.saved().transactions[0].category, "gas", "its expenses keep their category");
+    assert.match(ui.text(), /ahora aparta \$\s?200\.000 por periodo \(antes \$\s?150\.000\)/);
+
+    await edit("gas", { amount: "99000000" });
+    assert.equal(job("gas").amount, 200_000, "more than what is free is refused");
+
+    await edit("gas", { amount: "50000", cadence: "weekly" });
+    assert.deepEqual([job("gas").amount, job("gas").cadence], [50_000, "weekly"]);
+
+    // Money set aside: raising it sets the difference aside, lowering it releases it, never
+    // below what was already spent from it.
+    await edit("soat", { fund: "450000" });
+    assert.deepEqual(job("soat").topUps.map((topUp) => topUp.amount), [50_000]);
+    await edit("soat", { fund: "300000" });
+    assert.deepEqual(job("soat").released.map((release) => release.amount), [150_000]);
+    assert.match(ui.text(), /Soat ahora tiene \$\s?300\.000 apartados \(antes \$\s?450\.000\)/);
+    await ui.click('[data-action="open-edit-job"][data-id="soat"]');
+    const form = ui.$("#edit-job-form");
+    assert.equal(form.elements.namedItem("fund").min, "100000", "it cannot go below the $100.000 already spent");
+    form.elements.namedItem("fund").min = "0";
+    form.elements.namedItem("fund").value = "50000";
+    form.requestSubmit();
+    await settle(ui.window);
+    assert.equal(job("soat").released.length, 1, "and the app refuses it even past the field's limit");
+
+    await ui.click('[data-action="open-edit-job"][data-id="soat"]');
+    await ui.click('#edit-job-form [data-action="request-remove-job"]');
+    assert.ok(ui.$("#remove-category-title"), "deleting still asks for confirmation");
+  } finally {
+    ui.close();
+  }
+});

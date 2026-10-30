@@ -8659,3 +8659,7 @@ html[data-theme="dark"] .money-math > * + * {
 .expense-date-field input[type="date"] {
   margin-top: 8px;
 }
+
+.btn.destructive-link {
+  color: var(--coral);
+}
