@@ -25,6 +25,7 @@ test("amounts in Colombian format become whole pesos", () => {
 // Real Nu: money that arrives is written without "$".
 test("a bare amount counts only with both separators, as Nu writes money that arrived", () => {
   assert.equal(parseAmount("Recibiste 20.000,00 en tu cuenta"), 20_000);
+  assert.equal(parseAmount("Bancolombia te envió 2.059.928,00."), 2_059_928, "the sentence's final period");
   assert.equal(parseAmount("Recibiste 1.250.000,50 en tu cuenta"), 1_250_001);
   assert.equal(parseAmount("tarjeta terminada en 3965"), 0);
   assert.equal(parseAmount("el 12.10.2026"), 0, "a date is not an amount");
@@ -93,6 +94,19 @@ test("money that arrives is offered as income to the account, with who sent it",
 
   const other = suggestionFromNotification(notification("Te llegó plata", "Recibiste un pago de $200.000 de Ana en tu cuenta."));
   assert.equal(other.kind, "income", "'pago' inside a 'recibiste' is still money coming in");
+});
+
+// Real Nu, October 2026: the pay, sent from the employer's bank, titled just "Nu".
+test("money another bank sent ('Bancolombia te envió') is income from that bank", () => {
+  const pay = suggestionFromNotification(notification("Nu", "Bancolombia te envió 2.059.928,00."));
+  assert.equal(pay.kind, "income");
+  assert.equal(pay.amount, 2_059_928);
+  assert.equal(pay.origin, "Bancolombia");
+
+  const sent = suggestionFromNotification(notification("Enviaste $80.000,00", "Le enviaste a HEY***** ALE******** en su cuenta de Bancolombia."));
+  assert.equal(sent.kind, "expense", "'enviaste' is money out, not 'te envió'");
+  assert.equal(sent.amount, 80_000);
+  assert.equal(sent.source, "account");
 });
 
 test("refunds, declined payments, codes and promotions are never offered", () => {

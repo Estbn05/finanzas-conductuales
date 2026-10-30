@@ -12,7 +12,10 @@
 //             text  "Compra en DROGUERIA ALEMANA 67 C con tu tarjeta débito terminada en 3965."
 //   incoming  title "Recibiste 20.000,00 en tu cuenta"            (no "$")
 //             text  "Te llegó dinero de YEFRY ESTEBAN AVILA ZULUAGA con tu llave."
-// Other kinds (credit card, outgoing transfers) are still read with the usual Colombian
+//   from a bank  title "Nu"   text "Bancolombia te envió 2.059.928,00."   (a pay)
+//   sent      title "Enviaste $80.000,00"
+//             text  "Le enviaste a HEY***** ALE******** en su cuenta de Bancolombia."
+// Other kinds (credit card) are still read with the usual Colombian
 // banking wording until real samples confirm them. On a debug build, what the listener
 // kept can be read with: adb shell run-as com.estbn05.finanzasconductuales cat
 // shared_prefs/bank_notifications.xml
@@ -22,7 +25,7 @@ export const BANK_NAMES = { "com.nu.production": "Nu" };
 const OUTGOING = /\b(compra(ste)?|pag(o|aste|ado)|retir(o|aste)|transferiste|enviaste|debito|cargo)\b/;
 // Money that arrived. Refunds and reversals are left out on purpose: whether they return
 // to the account or lower a card's debt is not something the text reliably says.
-const INCOMING = /\b(recibiste|te (llego|enviaron|transfirieron|pagaron|consignaron))\b/;
+const INCOMING = /\b(recibiste|te (llego|envio|enviaron|transfirieron|pagaron|consignaron))\b/;
 const REFUND = /\b(reembolso|devolucion|devolvimos|reversion|reversamos)\b/;
 const NOT_A_MOVEMENT = /\b(rechazad[ao]|declinad[ao]|fallid[ao]|no (pudimos|fue posible|se pudo)|codigo|clave|oferta|promo)/;
 
@@ -36,10 +39,11 @@ function plain(text) {
 // Colombian format: "." between thousands and "," before cents ($45.000, $ 45.000,50,
 // COP 1.250.000). Nu writes money that arrived without a sign ("Recibiste 20.000,00"),
 // so a bare number also counts when it has both separators, which a code or a card's last
-// digits never do. Returns whole pesos, or 0 when there is no amount.
+// digits never do; a sentence's final period after it is fine ("te envió 2.059.928,00.").
+// Returns whole pesos, or 0 when there is no amount.
 export function parseAmount(text) {
   const match = String(text || "").match(
-    /(?:\$|COP)\s*([\d.]+(?:,\d{1,2})?)|([\d.]+(?:,\d{1,2})?)\s*(?:COP|pesos)\b|(?<![\d.,])(\d{1,3}(?:\.\d{3})+,\d{2})(?![\d.,])/i
+    /(?:\$|COP)\s*([\d.]+(?:,\d{1,2})?)|([\d.]+(?:,\d{1,2})?)\s*(?:COP|pesos)\b|(?<![\d.,])(\d{1,3}(?:\.\d{3})+,\d{2})(?![\d,]|\.\d)/i
   );
   if (!match) {
     return 0;
@@ -74,8 +78,12 @@ export function parseMerchant(text) {
 }
 
 // "Te llegó dinero de YEFRY ESTEBAN AVILA ZULUAGA con tu llave." -> "Yefry Esteban Avila Zuluaga".
+// "Bancolombia te envió 2.059.928,00." -> "Bancolombia".
 export function parseOrigin(text) {
-  const match = String(text || "").match(/\bde\s+(.+?)(?=\s+(?:con|por|a|al|en|desde|via)\b|[.,;!\n]|\s+\$|$)/i);
+  const value = String(text || "");
+  const match =
+    value.match(/\bde\s+(.+?)(?=\s+(?:con|por|a|al|en|desde|via)\b|[.,;!\n]|\s+\$|$)/i) ||
+    value.match(/^\s*(.+?)\s+te\s+envi[oó](?!\p{L})/iu);
   return cleanName(match?.[1], 36);
 }
 

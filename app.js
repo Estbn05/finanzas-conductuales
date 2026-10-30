@@ -19,7 +19,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.85";
+} from "./finance-core.js?v=1.1.86";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -34,10 +34,10 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.85";
-import { isStale, pendingSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.85";
-import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.85";
-import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.85";
+} from "./movements.js?v=1.1.86";
+import { isStale, pendingSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.86";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.86";
+import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.86";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -85,7 +85,7 @@ import {
   mergeStates,
   remoteChangedSinceLastSync,
   uid
-} from "./state-model.js?v=1.1.85";
+} from "./state-model.js?v=1.1.86";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -101,7 +101,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.85";
+} from "./sync-client.js?v=1.1.86";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
