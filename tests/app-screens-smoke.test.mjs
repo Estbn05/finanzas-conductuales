@@ -244,3 +244,43 @@ test("Tu periodo: where the money went, the card, and a document of the period t
     ui.close();
   }
 });
+
+test("an expense can be recorded for yesterday or an earlier day, never a future one", async () => {
+  const ui = await bootApp({ savedState: returningUserState() });
+  const keyOf = (offset) => {
+    const date = new Date(`${todayKey()}T12:00:00`);
+    date.setDate(date.getDate() + offset);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  };
+  const record = async ({ amount, merchant, choice, other, budgeted = true }) => {
+    await waitFor(ui, '[data-action="open-expense"]');
+    await ui.click('[data-action="open-expense"]');
+    const form = ui.$("#transaction-form");
+    form.elements.namedItem("amount").value = amount;
+    form.elements.namedItem("merchant").value = merchant;
+    form.elements.namedItem("budgeted").checked = budgeted;
+    if (choice) await ui.click(`[data-choice-name="dateChoice"][data-choice-value="${choice}"]`);
+    if (other) form.elements.namedItem("expenseDateOther").value = other;
+    form.requestSubmit();
+    await settle(ui.window);
+  };
+  const dateOf = (merchant) => ui.saved().transactions.find((item) => item.merchant === merchant)?.date;
+  try {
+    await record({ amount: "12000", merchant: "Hoy" });
+    assert.equal(dateOf("Hoy"), todayKey(), "today unless told otherwise");
+
+    await record({ amount: "8000", merchant: "Ayer", choice: "yesterday" });
+    assert.equal(dateOf("Ayer"), keyOf(-1));
+
+    // Big and not planned, but from a past day: it already happened, so no 24-hour pause.
+    await record({ amount: "900000", merchant: "Little Caesars", choice: "other", other: keyOf(-5), budgeted: false });
+    assert.equal(dateOf("Little Caesars"), keyOf(-5));
+    assert.equal(ui.saved().cooldowns?.length ?? 0, 0);
+    assert.match(ui.text(), /Quedó con fecha del/);
+
+    await record({ amount: "5000", merchant: "Mañana", choice: "other", other: keyOf(1) });
+    assert.equal(dateOf("Mañana"), undefined, "a future day is refused (the picker's max blocks it)");
+  } finally {
+    ui.close();
+  }
+});

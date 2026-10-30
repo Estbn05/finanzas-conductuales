@@ -19,7 +19,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.89";
+} from "./finance-core.js?v=1.1.90";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -32,11 +32,11 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.89";
-import { isStale, looksLikeEarlyPay, looksLikePay, pendingSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.89";
-import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.89";
-import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.89";
-import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.89";
+} from "./movements.js?v=1.1.90";
+import { isStale, looksLikeEarlyPay, looksLikePay, pendingSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.90";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.90";
+import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.90";
+import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.90";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -85,7 +85,7 @@ import {
   remoteChangedSinceLastSync,
   CREDIT_PAYMENTS_LIMIT,
   uid
-} from "./state-model.js?v=1.1.89";
+} from "./state-model.js?v=1.1.90";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -101,7 +101,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.89";
+} from "./sync-client.js?v=1.1.90";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -3623,6 +3623,7 @@ function renderQuickExpensePanel() {
             <span class="quick-label">Pagado con</span>
             ${renderChoicePills("source", expenseSourceOptions(liquidity), selectedSource)}
           </div>
+          ${draft.bankNotificationId ? "" : renderExpenseDateField()}
           <div class="expense-impact-preview" aria-live="polite">
             <span>Disponible antes de registrar</span>
             <strong>${formatMoney(summary.freeRemaining)} libre · ${formatMoney(liquidity.total)} total real</strong>
@@ -3646,6 +3647,57 @@ function renderQuickExpensePanel() {
       </section>
     </div>
   `;
+}
+
+// When it was: today unless told otherwise, so recording something now costs no extra tap.
+// Yesterday, or any earlier day, is for what was forgotten or that the bank never
+// notified. Never a future day: a purchase that has not happened is a planned expense.
+function renderExpenseDateField() {
+  const today = todayKey();
+  return `
+    <div class="quick-field expense-date-field">
+      <span class="quick-label">¿Cuándo fue?</span>
+      ${renderChoicePills("dateChoice", [
+        { value: "today", label: "Hoy" },
+        { value: "yesterday", label: "Ayer" },
+        { value: "other", label: "Otro día" }
+      ], "today")}
+      <input name="expenseDateOther" type="date" max="${escapeAttr(today)}" value="${escapeAttr(previousDay(previousDay(today)))}" aria-label="Fecha del gasto" hidden>
+    </div>
+  `;
+}
+
+function bindExpenseDateField(form) {
+  const other = form.elements.namedItem("expenseDateOther");
+  if (!other) {
+    return;
+  }
+  form.querySelectorAll('[data-choice-name="dateChoice"]').forEach((pill) => {
+    pill.addEventListener("click", () => {
+      other.hidden = pill.dataset.choiceValue !== "other";
+      if (!other.hidden) {
+        other.focus();
+      }
+    });
+  });
+}
+
+// The day an expense happened, or "" when "Otro día" has no valid past date.
+function expenseDateFromForm(data) {
+  const fromBank = cleanText(data.get("expenseDate"), "");
+  if (fromBank) {
+    return cleanDate(fromBank, todayKey());
+  }
+  const today = todayKey();
+  const choice = String(data.get("dateChoice") || "today");
+  if (choice === "yesterday") {
+    return previousDay(today);
+  }
+  if (choice === "other") {
+    const picked = String(data.get("expenseDateOther") || "");
+    return /^\d{4}-\d{2}-\d{2}$/.test(picked) && picked <= today ? picked : "";
+  }
+  return today;
 }
 
 // The card shows what you ALREADY owe, not an available balance: the app does not know
@@ -4947,6 +4999,7 @@ function bindEvents() {
   if (transactionForm) {
     bindMerchantRuleSuggestions(transactionForm);
     bindQuickExpenseRepeats(transactionForm);
+    bindExpenseDateField(transactionForm);
     transactionForm.addEventListener("submit", handleTransactionSubmit);
   }
 
@@ -6515,9 +6568,9 @@ function handleTransactionSubmit(event) {
   const source = normalizeLocation(data.get("source"));
   const calendarEventId = cleanText(data.get("calendarEventId"), "");
   const bankNotificationId = cleanText(data.get("bankNotificationId"), "");
-  const date = cleanDate(data.get("expenseDate"), todayKey());
+  const date = expenseDateFromForm(data);
   const threshold = plan.expenses * LARGE_PURCHASE_RATIO;
-  const transactionError = validateTransactionDraft({ amount, category });
+  const transactionError = date ? validateTransactionDraft({ amount, category }) : "Elige un día que ya haya pasado.";
 
   if (transactionError) {
     state.lastAlert = transactionError;
@@ -6526,8 +6579,8 @@ function handleTransactionSubmit(event) {
   }
 
   // The 24-hour pause is for deciding whether to buy; a purchase the bank already
-  // reported has happened, so it is recorded straight away.
-  if (!bankNotificationId && !budgeted && amount >= threshold) {
+  // reported, or one from an earlier day, has happened, so it is recorded straight away.
+  if (!bankNotificationId && date === todayKey() && !budgeted && amount >= threshold) {
     state.cooldowns.push({
       id: uid("cool"),
       merchant,
@@ -6550,8 +6603,9 @@ function handleTransactionSubmit(event) {
       markCalendarEventSpent(calendarEventId, transaction.id);
     }
     const overdraft = overdraftNotice(source);
-    state.lastAlert = overdraft || createSpendAlert(category);
-    showUndoSnackbar(transaction.id, overdraft);
+    const when = date === todayKey() ? "" : ` Quedó con fecha ${date === previousDay(todayKey()) ? "de ayer" : `del ${formatShortDate(date)}`}.`;
+    state.lastAlert = overdraft || `${createSpendAlert(category)}${when}`;
+    showUndoSnackbar(transaction.id, [when.trim(), overdraft].filter(Boolean).join(" "));
   }
 
   closeQuickExpense();

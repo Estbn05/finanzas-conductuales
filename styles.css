@@ -1226,6 +1226,7 @@ label {
 
 .quick-expense-form input[type="text"],
 .quick-expense-form input[type="number"],
+.quick-expense-form input[type="date"],
 .quick-expense-form input[data-money-input="true"] {
   width: 100%;
   border: 1px solid var(--line);
@@ -1396,6 +1397,7 @@ label {
 :where(html[data-theme="dark"]) .bottom-nav,
 :where(html[data-theme="dark"]) .quick-expense-form input[type="text"],
 :where(html[data-theme="dark"]) .quick-expense-form input[type="number"],
+:where(html[data-theme="dark"]) .quick-expense-form input[type="date"],
 :where(html[data-theme="dark"]) .quick-expense-form input[data-money-input="true"],
 :where(html[data-theme="dark"]) .choice-pill {
   background: rgb(var(--rgb-white) / 0.05);
@@ -2830,6 +2832,7 @@ input[type="range"] {
 
 .quick-expense-form input[type="text"],
 .quick-expense-form input[type="number"],
+.quick-expense-form input[type="date"],
 .quick-expense-form input[data-money-input="true"],
 .stacked-form input,
 .stacked-form select {
@@ -3300,6 +3303,7 @@ input[type="range"] {
 .financial-event-form select,
 .quick-expense-form input[type="text"],
 .quick-expense-form input[type="number"],
+.quick-expense-form input[type="date"],
 .quick-expense-form input[data-money-input="true"],
 .stacked-form input,
 .stacked-form select,
@@ -3921,6 +3925,7 @@ textarea,
 .history-sort select,
 .quick-expense-form input[type="text"],
 .quick-expense-form input[type="number"],
+.quick-expense-form input[type="date"],
 .quick-expense-form input[data-money-input="true"],
 .financial-event-form input,
 .financial-event-form select,
@@ -5206,6 +5211,7 @@ select,
 textarea,
 .quick-expense-form input[type="text"],
 .quick-expense-form input[type="number"],
+.quick-expense-form input[type="date"],
 .quick-expense-form input[data-money-input="true"],
 .sheet-form input:not([type="range"]),
 .sheet-form select,
@@ -5613,6 +5619,7 @@ html[data-theme="dark"] select,
 html[data-theme="dark"] textarea,
 html[data-theme="dark"] .quick-expense-form input[type="text"],
 html[data-theme="dark"] .quick-expense-form input[type="number"],
+html[data-theme="dark"] .quick-expense-form input[type="date"],
 html[data-theme="dark"] .quick-expense-form input[data-money-input="true"],
 html[data-theme="dark"] .sheet-form input:not([type="range"]),
 html[data-theme="dark"] .sheet-form select,
@@ -8647,4 +8654,8 @@ html[data-theme="dark"] .money-math > * + * {
 .period-report-card .period-report-actions {
   display: grid;
   gap: 10px;
+}
+
+.expense-date-field input[type="date"] {
+  margin-top: 8px;
 }
