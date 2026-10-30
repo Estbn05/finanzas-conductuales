@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import test from "node:test";
+import { budgetWindow } from "../finance-core.js";
 import { bootApp, returningUserState, settle, todayKey } from "./helpers/boot-app.mjs";
 
 // What the native side would receive, recorded instead of acted on.
@@ -501,6 +502,159 @@ test("the daily reminder is planned 14 days ahead, never as an exact alarm, and 
     const after = log.scheduled.at(-1);
     assert.notEqual(new Date(after[0].schedule.at).getDate(), new Date().getDate(), "recorded today: today's reminder is dropped");
     assert.ok(log.cancelled.at(-1).includes(7301), "the old repeating reminder is cancelled too");
+  } finally {
+    ui.close();
+  }
+});
+
+// The pay arriving at Nu. Real amounts from October 2026: usual pay $1.500.000, came
+// $2.068.000. Recognizing it is what stops the pay from going in as Dinero extra while the
+// app still waits for it, or from being counted on top of the app's own payday deposit.
+// The period starts today unless told otherwise, so a pay notified "now" is never in the
+// period's last days (that is the early-pay case, tested on its own).
+function fixedPayState({ status, liquidity = { account: 300_000, cash: 0, initialized: true }, start = todayKey() }) {
+  const profile = { ...returningUserState().profile, incomeType: "fixed", incomeAmount: 1_500_000, periodStart: start };
+  const window = budgetWindow(profile, todayKey());
+  return returningUserState({
+    profile,
+    liquidity,
+    periodIncomeStatus: { windowStart: window.start, bannerDismissed: true, location: "account", ...status },
+    periodIncomeApplied: [
+      { windowStart: window.start, windowEnd: window.end, status: status.applied ? "applied" : "rejected", amount: status.amount }
+    ]
+  });
+}
+
+// A monthly period start that makes today 1 to 3 days before the period ends.
+function startEndingSoon() {
+  for (let back = 25; back <= 35; back += 1) {
+    const date = new Date(`${todayKey()}T12:00:00`);
+    date.setDate(date.getDate() - back);
+    const start = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    const { end } = budgetWindow({ incomeCadence: "monthly", periodStart: start }, todayKey());
+    const left = Math.round((Date.parse(`${end}T12:00:00`) - Date.parse(`${todayKey()}T12:00:00`)) / 86_400_000);
+    if (left >= 1 && left <= 3) return start;
+  }
+  throw new Error("no period start found");
+}
+
+function nuPay(amount = "2.068.000,00") {
+  return { id: "nu:pay", packageName: "com.nu.production", title: `Recibiste ${amount} en tu cuenta`, text: "Te llegó dinero de EMPRESA SAS con tu llave.", postedAt: Date.now() };
+}
+
+test("pending pay: '¿Es tu sueldo?' adds what really came and can make it the usual pay", async () => {
+  const native = fakeCapacitor({ bank: { enabled: true, permission: true, pending: [nuPay()] } });
+  const ui = await bootApp({ savedState: fixedPayState({ status: { applied: false, rejected: true, amount: 1_500_000 } }), beforeBoot: native.install });
+  try {
+    await waitFor(ui, '[data-action="confirm-bank-pay"]');
+    assert.match(ui.text(), /¿Es tu sueldo\?/);
+    assert.equal(ui.$('[data-action="register-bank-income"]').textContent.trim(), "No, es otra cosa");
+
+    await ui.click('[data-action="confirm-bank-pay"]');
+    const form = ui.$("#pay-received-form");
+    assert.equal(form.elements.namedItem("amount").value.replace(/\D/g, ""), "2068000");
+    form.elements.namedItem("makeUsual").checked = true;
+    form.requestSubmit();
+    await settle(ui.window);
+
+    const saved = ui.saved();
+    assert.equal(saved.liquidity.account, 300_000 + 2_068_000);
+    assert.equal(saved.periodIncomeStatus.applied, true);
+    assert.equal(saved.periodIncomeStatus.amount, 2_068_000);
+    assert.equal(saved.profile.incomeAmount, 2_068_000, "next period deposits the new pay");
+    assert.equal(saved.budgetExtras?.length ?? 0, 0, "the pay is not Dinero extra");
+    assert.deepEqual(native.calls.bankDismissed, ["nu:pay"]);
+    assert.doesNotMatch(ui.text(), /Por recibir/);
+  } finally {
+    ui.close();
+  }
+});
+
+test("pay the app already added on payday: confirming it only corrects the difference", async () => {
+  const native = fakeCapacitor({ bank: { enabled: true, permission: true, pending: [nuPay()] } });
+  const ui = await bootApp({
+    savedState: fixedPayState({ status: { applied: true, amount: 1_500_000 }, liquidity: { account: 1_800_000, cash: 0, initialized: true } }),
+    beforeBoot: native.install
+  });
+  try {
+    await waitFor(ui, '[data-action="confirm-bank-pay"]');
+    await ui.click('[data-action="confirm-bank-pay"]');
+    assert.match(ui.text(), /sumé \$\s?1\.500\.000 por tu sueldo/);
+    ui.$("#pay-received-form").requestSubmit();
+    await settle(ui.window);
+
+    const saved = ui.saved();
+    assert.equal(saved.liquidity.account, 1_800_000 + 568_000, "only the $568.000 the app had not added");
+    assert.equal(saved.periodIncomeStatus.amount, 2_068_000);
+    assert.equal(saved.profile.incomeAmount, 1_500_000, "the usual pay changes only when asked");
+  } finally {
+    ui.close();
+  }
+});
+
+test("'No, es otra cosa' records it as Dinero extra instead", async () => {
+  const native = fakeCapacitor({ bank: { enabled: true, permission: true, pending: [nuPay()] } });
+  const ui = await bootApp({ savedState: fixedPayState({ status: { applied: false, rejected: true, amount: 1_500_000 } }), beforeBoot: native.install });
+  try {
+    await waitFor(ui, '[data-action="confirm-bank-pay"]');
+    await ui.click('[data-action="register-bank-income"]');
+    assert.ok(ui.$("#extra-budget-form"));
+    assert.equal(ui.$("#extra-budget-form").elements.namedItem("amount").value.replace(/\D/g, ""), "2068000");
+  } finally {
+    ui.close();
+  }
+});
+
+test("a small transfer, or a pay already entered another way, is plain income, not '¿Es tu sueldo?'", async () => {
+  const small = fakeCapacitor({ bank: { enabled: true, permission: true, pending: [nuPay("60.000,00")] } });
+  const pending = await bootApp({ savedState: fixedPayState({ status: { applied: false, rejected: true, amount: 1_500_000 } }), beforeBoot: small.install });
+  try {
+    await waitFor(pending, '[data-action="register-bank-income"]');
+    assert.equal(pending.$('[data-action="confirm-bank-pay"]'), null);
+  } finally {
+    pending.close();
+  }
+
+  // Marked received with nothing added (typed into the balance, or entered as Dinero
+  // extra): this notification may be that same money, so it is not taken as the pay.
+  const big = fakeCapacitor({ bank: { enabled: true, permission: true, pending: [nuPay()] } });
+  const settled = await bootApp({ savedState: fixedPayState({ status: { applied: true, amount: 0 } }), beforeBoot: big.install });
+  try {
+    await waitFor(settled, '[data-action="register-bank-income"]');
+    assert.equal(settled.$('[data-action="confirm-bank-pay"]'), null);
+    assert.match(settled.text(), /¿Registrar este ingreso\?/);
+  } finally {
+    settled.close();
+  }
+});
+
+// Real case, October 2026: October's pay already settled, November's arrived on the 29th.
+test("a pay in the period's last days is offered as the next pay, paid early, and payday does not add it again", async () => {
+  const native = fakeCapacitor({ bank: { enabled: true, permission: true, pending: [nuPay("2.059.928,00")] } });
+  const ui = await bootApp({
+    savedState: fixedPayState({ status: { applied: true, amount: 0 }, start: startEndingSoon() }),
+    beforeBoot: native.install
+  });
+  try {
+    await waitFor(ui, '[data-action="confirm-bank-pay"]');
+    assert.match(ui.text(), /¿Es tu próximo sueldo, adelantado\?/);
+    await ui.click('[data-action="confirm-bank-pay"]');
+    assert.match(ui.text(), /ese día no lo vuelvo a sumar/);
+    const form = ui.$("#pay-received-form");
+    form.elements.namedItem("makeUsual").checked = true;
+    form.requestSubmit();
+    await settle(ui.window);
+
+    const saved = ui.saved();
+    assert.equal(saved.liquidity.account, 300_000 + 2_059_928);
+    assert.equal(saved.profile.incomeAmount, 2_059_928);
+    assert.equal(saved.budgetExtras?.length ?? 0, 0, "the pay is not Dinero extra");
+    assert.deepEqual(native.calls.bankDismissed, ["nu:pay"]);
+    const next = budgetWindow(saved.profile, saved.periodIncomeStatus.windowStart);
+    const nextStart = budgetWindow(saved.profile, next.end).start;
+    const logged = saved.periodIncomeApplied.find((entry) => entry.windowStart === nextStart);
+    assert.equal(logged?.amount, 2_059_928, "the next period is logged as paid");
+    assert.equal(saved.periodIncomeStatus.amount, 0, "this period's pay status is left alone");
   } finally {
     ui.close();
   }

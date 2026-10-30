@@ -1,24 +1,25 @@
 const CACHE_PREFIX = "finanzas-conductuales-";
-const CACHE_NAME = `${CACHE_PREFIX}1.1.86`;
+const CACHE_NAME = `${CACHE_PREFIX}1.1.89`;
 const APP_SHELL = [
   "./",
   "index.html",
-  "styles.css?v=1.1.86",
-  "app.js?v=1.1.86",
-  "finance-core.js?v=1.1.86",
-  "state-model.js?v=1.1.86",
-  "movements.js?v=1.1.86",
-  "bank-notifications.js?v=1.1.86",
-  "categorize.js?v=1.1.86",
-  "planned.js?v=1.1.86",
-  "sync-client.js?v=1.1.86",
-  "sync-config.js?v=1.1.86",
-  "vendor/supabase-2.108.1.min.js?v=1.1.86",
-  "manifest.webmanifest?v=1.1.86",
-  "assets/icon.svg?v=1.1.86",
-  "assets/icon-192.png?v=1.1.86",
-  "assets/icon-512.png?v=1.1.86",
-  "assets/apple-touch-icon.png?v=1.1.86",
+  "styles.css?v=1.1.89",
+  "app.js?v=1.1.89",
+  "finance-core.js?v=1.1.89",
+  "state-model.js?v=1.1.89",
+  "movements.js?v=1.1.89",
+  "bank-notifications.js?v=1.1.89",
+  "categorize.js?v=1.1.89",
+  "planned.js?v=1.1.89",
+  "period-review.js?v=1.1.89",
+  "sync-client.js?v=1.1.89",
+  "sync-config.js?v=1.1.89",
+  "vendor/supabase-2.108.1.min.js?v=1.1.89",
+  "manifest.webmanifest?v=1.1.89",
+  "assets/icon.svg?v=1.1.89",
+  "assets/icon-192.png?v=1.1.89",
+  "assets/icon-512.png?v=1.1.89",
+  "assets/apple-touch-icon.png?v=1.1.89",
   // Requested by styles.css without a version query, so cache that exact URL.
   "assets/fonts/manrope-latin-var.woff2"
 ];

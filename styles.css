@@ -8521,3 +8521,130 @@ html[data-theme="dark"] .money-math > * + * {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+
+/* Tu periodo (period close dashboard): stat tiles, spending by category, plain lists. */
+.period-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.period-stats > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid var(--ds-line);
+  border-radius: var(--ds-radius-md);
+  padding: 12px;
+  background: var(--ds-surface);
+  box-shadow: var(--ds-shadow-xs);
+}
+
+.period-stats span,
+.period-stats small {
+  color: var(--ds-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.period-stats strong {
+  color: var(--ds-ink);
+  font-size: 1.05rem;
+  font-weight: 860;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.period-share-list {
+  display: grid;
+  gap: 10px;
+}
+
+.period-share-row {
+  display: grid;
+  gap: 5px;
+}
+
+.period-share-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.82rem;
+}
+
+.period-share-top strong {
+  color: var(--ds-ink);
+  font-weight: 800;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.period-share-top span {
+  color: var(--ds-muted);
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.period-share-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ds-line);
+  overflow: hidden;
+}
+
+.period-share-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ds-primary);
+}
+
+.period-share-row.is-unclassified .period-share-bar span {
+  background: var(--ds-amber);
+}
+
+.period-plain-list {
+  display: grid;
+}
+
+.period-plain-list > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--ds-line);
+  font-size: 0.84rem;
+}
+
+.period-plain-list > div:last-child {
+  border-bottom: 0;
+}
+
+.period-plain-list span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  color: var(--ds-ink);
+  font-weight: 760;
+  overflow-wrap: anywhere;
+}
+
+.period-plain-list small {
+  color: var(--ds-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.period-plain-list strong {
+  color: var(--ds-ink);
+  font-weight: 850;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.period-report-card .period-report-actions {
+  display: grid;
+  gap: 10px;
+}

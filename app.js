@@ -19,25 +19,24 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.86";
+} from "./finance-core.js?v=1.1.89";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
   compareByRecent,
   dailyExpenseTotal,
-  dailyTotals,
   expenseCalendar,
   inWindow,
   listMovements,
-  merchantTotals,
   movementsCsv,
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.86";
-import { isStale, pendingSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.86";
-import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.86";
-import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.86";
+} from "./movements.js?v=1.1.89";
+import { isStale, looksLikeEarlyPay, looksLikePay, pendingSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.89";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.89";
+import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.89";
+import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.89";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -84,8 +83,9 @@ import {
   compactMergeBase,
   mergeStates,
   remoteChangedSinceLastSync,
+  CREDIT_PAYMENTS_LIMIT,
   uid
-} from "./state-model.js?v=1.1.86";
+} from "./state-model.js?v=1.1.89";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -101,7 +101,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.86";
+} from "./sync-client.js?v=1.1.89";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -355,6 +355,8 @@ let bankStatus = { available: false, enabled: false, permission: false, connecte
 let bankUnreadable = [];
 // Money a bank notification said arrived, prefilling the "Dinero extra" sheet.
 let extraDraft = null;
+// The pay a bank notification seems to be, prefilling "¿Cuánto te llegó?".
+let payDraft = null;
 
 render();
 initializeNativeNotificationActions();
@@ -1132,7 +1134,7 @@ function render() {
     ${editingExtraId ? renderExtraEditor() : ""}
     ${quickClassifyQueue.length ? renderQuickClassifyPanel() : ""}
     ${predictionDetailsOpen ? renderPredictionDetailsModal() : ""}
-    ${periodReportOpen ? renderPeriodReportModal(plan) : ""}
+    ${periodReportOpen ? renderPeriodReportModal() : ""}
     ${profileNeedsOnboarding() || state.showDiagnosis ? renderDiagnosisModal() : ""}
     ${renderSnackbar()}
   `;
@@ -2520,7 +2522,7 @@ function renderBudget(plan) {
             ? ""
             : `<button class="plan-action" type="button" data-view="periodClose">
                 <span class="plan-action-icon" aria-hidden="true">${renderIcon("list")}</span>
-                <span><strong>Resumen del periodo</strong><small>Gastos por categoría y reporte para compartir</small></span>
+                <span><strong>Tu periodo en detalle</strong><small>En qué se fue, la tarjeta y un documento para analizar con IA</small></span>
                 <b>&rsaquo;</b>
               </button>`
         }
@@ -2573,85 +2575,106 @@ function renderBudget(plan) {
 }
 
 function renderPeriodCloseCard(summary = budgetSummary(), plan = calculatePlan(), report = periodCloseReport(plan, summary)) {
-  const freeClass = report.freeFinal < 0 ? "negative" : "";
-
+  const prediction = report.prediction;
   return `
     <article class="period-close-card ${report.status}">
       <div class="period-close-heading">
         <div>
-          <p class="eyebrow">Cierre de periodo</p>
-          <h2>${report.isFinal ? "Resultado listo para guardar" : "Prepara el próximo plan"}</h2>
+          <p class="eyebrow">${report.isFinal ? "Fin del periodo" : "Pre-cierre"}</p>
+          <h2>${report.isFinal ? "Así cerró tu periodo" : `Faltan ${formatDays(report.remainingDays)}`}</h2>
         </div>
       </div>
       <div class="period-close-metrics">
-        <div><span>${report.isFinal ? "Libre final" : "Libre si cerrarás hoy"}</span><strong class="${freeClass}">${formatMoney(report.freeFinal)}</strong></div>
-        <div><span>Categorías excedidas</span><strong>${report.exceededCategories.length}</strong></div>
-        <div><span>Ahorro posible</span><strong>${formatMoney(report.possibleSavings)}</strong></div>
+        <div><span>${report.isFinal ? "Libre al cerrar" : "Libre hoy"}</span><strong class="${report.freeFinal < 0 ? "negative" : ""}">${formatMoney(report.freeFinal)}</strong></div>
+        ${
+          report.isFinal
+            ? ""
+            : `<div><span>Por día</span><strong>${formatMoney(dailyAllowance(report))}</strong></div>
+               <div><span>Al cerrar, a tu ritmo</span><strong>${formatMoney(Math.max(0, prediction.projectedEndFree))}</strong></div>`
+        }
       </div>
-      <p>${periodCloseCardText(report)}</p>
-      <button class="btn secondary" type="button" data-view="periodClose">Ver cierre</button>
+      <button class="btn secondary" type="button" data-view="periodClose">Ver tu periodo</button>
     </article>
   `;
+}
+
+// What can go out each day until the period ends without touching what is reserved.
+function dailyAllowance(report) {
+  return Math.max(0, Math.floor(report.freeFinal / Math.max(1, report.remainingDays)));
+}
+
+function currentPeriodReview(summary = budgetSummary()) {
+  return periodReview({
+    transactions: state.transactions,
+    extras: state.budgetExtras,
+    creditPayments: state.creditPayments,
+    window: summary.window,
+    previous: getBudgetWindow(state.profile, previousDay(summary.window.start)),
+    categoryName
+  });
+}
+
+// The next period, as far as it can be known today: its pay (already in if it came
+// early), the recurring categories that start over, and the planned expenses that fall
+// in it.
+function nextPeriodOutlook(summary = budgetSummary()) {
+  const next = getBudgetWindow(state.profile, summary.window.end);
+  const fixed = state.profile.incomeType === "fixed";
+  const logged = findLoggedIncome(state.periodIncomeApplied, next.start);
+  const payReceived = Boolean(logged && logged.status === "applied" && Number(logged.amount) > 0);
+  const pay = payReceived ? Number(logged.amount) : fixed ? getPeriodIncome(state.profile) : 0;
+  const recurring = categoryStatus()
+    .filter((category) => category.id !== FREE_CATEGORY_ID && state.budgetJobs.find((job) => job.id === category.id)?.cadence !== "once")
+    .reduce((total, category) => total + Number(category.budget || 0), 0);
+  const planned = plannedTotal(state.calendarEvents || [], next.start, previousDay(next.end));
+  return { window: next, startLabel: formatShortDate(next.start), pay, payReceived, recurring, planned, fixed };
+}
+
+function periodLabel(window) {
+  return `${formatShortDate(window.start)} - ${formatShortDate(previousDay(window.end))}`;
 }
 
 function renderPeriodCloseScreen(plan = calculatePlan()) {
   const summary = budgetSummary();
   const report = periodCloseReport(plan, summary);
-  if (!shouldShowPeriodClose(report)) {
-    return renderPeriodCloseWaiting(summary, report);
-  }
-  const period = `${formatShortDate(summary.window.start)} - ${formatShortDate(previousDay(summary.window.end))}`;
-  const freeClass = report.freeFinal < 0 ? "negative" : "positive";
+  const review = currentPeriodReview(summary);
+  const next = nextPeriodOutlook(summary);
+  const closing = shouldShowPeriodClose(report);
+  const eyebrow = report.isFinal ? "Fin del periodo" : closing ? "Pre-cierre" : "Así va tu periodo";
 
   return `
-    <section class="screen-view period-close-view" aria-label="Cierre de periodo">
+    <section class="screen-view period-close-view" aria-label="Tu periodo">
       <div class="screen-title-row">
         <div>
-          <p class="eyebrow">${report.isFinal ? "Fin del periodo" : "Pre-cierre"}</p>
-          <h1>Cierre de periodo</h1>
+          <p class="eyebrow">${eyebrow}</p>
+          <h1>Tu periodo</h1>
         </div>
-        <span class="period-chip">${period}</span>
+        <span class="period-chip">${periodLabel(summary.window)}</span>
       </div>
 
-      <article class="period-close-hero ${freeClass}">
-        <span>${report.isFinal ? "Libre final" : "Libre si cerrarás hoy"}</span>
+      <article class="period-close-hero ${report.freeFinal < 0 ? "negative" : "positive"}">
+        <span>${report.isFinal ? "Libre al cerrar" : "Libre hoy"}</span>
         <strong>${formatMoney(report.freeFinal)}</strong>
         <p>${periodCloseHeroText(report)}</p>
       </article>
 
-      <div class="period-close-grid">
-        <article class="period-close-panel">
-          <div class="period-close-panel-head">
-            <p class="eyebrow">Categorías excedidas</p>
-            <h2>${report.exceededCategories.length ? `${report.exceededCategories.length} por ajustar` : "Sin excedidos"}</h2>
-          </div>
-          ${renderExceededCategories(report)}
-        </article>
+      ${renderPeriodStats(summary, review, plan)}
+      ${renderPeriodCategories(review)}
+      ${renderPeriodMerchants(review)}
+      ${renderPeriodPayments(review)}
+      ${renderNextPeriod(next)}
 
-        <article class="period-close-panel">
-          <div class="period-close-panel-head">
-            <p class="eyebrow">Ahorro sugerido vs posible</p>
-            <h2>${report.savingsGap > 0 ? `Faltaría ${formatMoney(report.savingsGap)}` : "Cabe en el plan"}</h2>
-          </div>
-          <div class="savings-compare">
-            <div><span>Sugerido ideal</span><strong>${formatMoney(report.suggestedSavings)}</strong></div>
-            <div><span>Posible real</span><strong>${formatMoney(report.possibleSavings)}</strong></div>
-          </div>
-          <p>${periodCloseSavingsText(report)}</p>
-        </article>
+      <article class="period-close-panel period-close-adjust-panel">
+        <div class="period-close-panel-head">
+          <p class="eyebrow">Para el próximo periodo</p>
+          <h2>${report.adjustments.length ? "Qué ajustar" : "Mantén el plan"}</h2>
+        </div>
+        <ol class="period-adjustments">
+          ${report.adjustments.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ol>
+      </article>
 
-        <article class="period-close-panel period-close-adjust-panel">
-          <div class="period-close-panel-head">
-            <p class="eyebrow">Qué ajustar para el próximo</p>
-            <h2>${report.adjustments.length ? "Acciones concretas" : "Mantener plan"}</h2>
-          </div>
-          <ol class="period-adjustments">
-            ${report.adjustments.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-          </ol>
-        </article>
-      </div>
-
-      ${renderPeriodReportCard(summary, plan, report)}
+      ${renderPeriodExportCard(review)}
 
       <div class="period-close-actions">
         <p class="period-close-auto-note">No tienes que guardar nada: cuando termine el periodo, este resumen queda en Progreso.</p>
@@ -2661,74 +2684,176 @@ function renderPeriodCloseScreen(plan = calculatePlan()) {
   `;
 }
 
-function renderPeriodCloseWaiting(summary, report) {
-  const period = `${formatShortDate(summary.window.start)} - ${formatShortDate(previousDay(summary.window.end))}`;
+function renderPeriodStats(summary, review, plan) {
+  const change = review.previous.change;
+  const changeText =
+    change === null
+      ? "Aún no hay un periodo completo para comparar"
+      : Math.abs(change) < 0.01
+        ? "Igual que el anterior"
+        : `${change > 0 ? "+" : "−"}${Math.round(Math.abs(change) * 100)}% que el anterior`;
+  // The pay counts only when the app added it: one settled as Dinero extra is already
+  // among the extras.
+  const payIn = summary.incomeApplied ? Number(state.periodIncomeStatus?.amount || 0) : 0;
+  const income = payIn + review.extraIncome;
   return `
-    <section class="screen-view period-close-view" aria-label="Cierre de periodo">
-      <div class="screen-title-row">
-        <div>
-          <p class="eyebrow">Cierre de periodo</p>
-          <h1>Todavía no toca cerrar</h1>
-        </div>
-        <span class="period-chip">${period}</span>
-      </div>
-      <article class="period-close-panel period-close-waiting">
-        <div class="period-close-panel-head">
-          <p class="eyebrow">Disponible al final</p>
-          <h2>Faltan ${formatDays(report.remainingDays)}</h2>
-        </div>
-        <p>El cierre aparece cuando falten ${PERIOD_CLOSE_NOTICE_DAYS} días o menos para el próximo periodo, incluyendo el día que se vence.</p>
-        <button class="btn ghost" type="button" data-view="budget">Volver al plan</button>
-      </article>
-      ${renderPeriodReportCard(summary, calculatePlan(), report)}
-    </section>
+    <div class="period-stats" aria-label="Números del periodo">
+      <div><span>Entró</span><strong>${formatMoney(income)}</strong><small>${review.incomeCount} ${review.incomeCount === 1 ? "ingreso extra" : "ingresos extra"}${payIn > 0 ? " + sueldo" : ""}</small></div>
+      <div><span>Gastaste</span><strong>${formatMoney(review.spent)}</strong><small>${review.expenseCount} ${review.expenseCount === 1 ? "gasto" : "gastos"}</small></div>
+      <div><span>Contra el anterior</span><strong>${change === null ? "—" : formatMoney(review.previous.spent)}</strong><small>${changeText}</small></div>
+      <div><span>Ahorro apartado</span><strong>${formatMoney(plan.savingsReserved)}</strong><small>Sigue reservado</small></div>
+    </div>
   `;
 }
 
-function renderPeriodReportCard(summary = budgetSummary(), plan = calculatePlan(), report = periodCloseReport(plan, summary)) {
-  const movements = movementsForSummary(summary);
-  const expenses = movements.filter((movement) => movement.kind === "expense");
-  const totalExpenses = dailyExpenseTotal(movements);
-  const period = `${formatShortDate(summary.window.start)} - ${formatShortDate(previousDay(summary.window.end))}`;
+function renderPeriodCategories(review) {
+  if (!review.categories.length) {
+    return "";
+  }
+  const shown = review.categories.slice(0, 6);
   return `
-    <article class="period-report-card" aria-label="Reporte completo del periodo">
-      <div class="period-report-head">
-        <div>
-          <p class="eyebrow">Reporte del periodo</p>
-          <h2>Resumen completo listo</h2>
-        </div>
-        <span class="metric-badge">${period}</span>
+    <article class="period-close-panel">
+      <div class="period-close-panel-head">
+        <p class="eyebrow">En qué se fue</p>
+        <h2>${formatMoney(review.spent)} por categoría</h2>
       </div>
-      <div class="period-report-mini">
-        <div><span class="mini-icon" aria-hidden="true">${renderIcon("wallet")}</span><span>Gastos</span><strong>${formatMoney(totalExpenses)}</strong></div>
-        <div><span class="mini-icon" aria-hidden="true">${renderIcon("list")}</span><span>Movimientos</span><strong>${movements.length}</strong></div>
-        <div><span class="mini-icon" aria-hidden="true">${renderIcon("ban")}</span><span>Excedidas</span><strong>${report.exceededCategories.length}</strong></div>
+      <div class="period-share-list">
+        ${shown
+          .map(
+            (category) => `
+          <div class="period-share-row ${category.id === FREE_CATEGORY_ID ? "is-unclassified" : ""}">
+            <div class="period-share-top">
+              <strong>${escapeHtml(category.name)}</strong>
+              <span>${formatMoney(category.total)} · ${Math.round(category.share * 100)}%</span>
+            </div>
+            <div class="period-share-bar" aria-hidden="true"><span style="width:${Math.max(2, Math.round(category.share * 100))}%"></span></div>
+          </div>
+        `
+          )
+          .join("")}
       </div>
-      <p>Genera un texto con libre, categorías, ahorro, predicción, días con gasto, comercios y movimientos del periodo.</p>
-      <button class="btn secondary" type="button" data-action="open-period-report">${expenses.length ? "Generar reporte" : "Ver reporte"}</button>
+      ${
+        review.unclassified.share >= 0.2
+          ? `<p>${formatMoney(review.unclassified.total)} (${Math.round(review.unclassified.share * 100)}%) no tienen categoría, así que no sabes en qué se fueron. Clasificarlos te muestra a dónde se va tu plata de verdad.</p>
+             <button class="btn secondary" type="button" data-action="review-uncategorized">Clasificar ${review.unclassified.count} ${review.unclassified.count === 1 ? "gasto" : "gastos"}</button>`
+          : ""
+      }
     </article>
   `;
 }
 
-function renderPeriodReportModal(plan = calculatePlan()) {
-  const summary = budgetSummary();
-  const report = periodCloseReport(plan, summary);
-  const content = generatePeriodReport(plan, summary, report);
+function renderPeriodMerchants(review) {
+  if (!review.merchants.length) {
+    return "";
+  }
+  return `
+    <article class="period-close-panel">
+      <div class="period-close-panel-head">
+        <p class="eyebrow">Dónde gastaste más</p>
+        <h2>Tus comercios principales</h2>
+      </div>
+      <div class="period-plain-list">
+        ${review.merchants
+          .map(
+            (merchant) => `<div><span>${escapeHtml(merchant.name)}<small>${merchant.count} ${merchant.count === 1 ? "vez" : "veces"}</small></span><strong>${formatMoney(merchant.total)}</strong></div>`
+          )
+          .join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderPeriodPayments(review) {
+  const owed = liquiditySummary().credit;
+  return `
+    <article class="period-close-panel">
+      <div class="period-close-panel-head">
+        <p class="eyebrow">Cómo pagaste</p>
+        <h2>Cuenta, efectivo y tarjeta</h2>
+      </div>
+      <div class="period-plain-list">
+        <div><span>Cuenta</span><strong>${formatMoney(review.paidWith.account)}</strong></div>
+        <div><span>Efectivo</span><strong>${formatMoney(review.paidWith.cash)}</strong></div>
+        <div><span>Tarjeta de crédito<small>${review.credit.purchaseCount} ${review.credit.purchaseCount === 1 ? "compra" : "compras"}</small></span><strong>${formatMoney(review.paidWith.credit)}</strong></div>
+        ${review.paidWith.unknown > 0 ? `<div><span>Sin dato</span><strong>${formatMoney(review.paidWith.unknown)}</strong></div>` : ""}
+      </div>
+      <p>${
+        review.credit.paymentCount
+          ? `Le pagaste ${formatMoney(review.credit.payments)} a la tarjeta en este periodo. `
+          : ""
+      }${owed > 0 ? `Hoy le debes ${formatMoney(owed)}.` : "Hoy no le debes nada a la tarjeta."}</p>
+    </article>
+  `;
+}
+
+function renderNextPeriod(next) {
+  if (!next.fixed && !next.recurring && !next.planned) {
+    return "";
+  }
+  const left = next.pay - next.recurring - next.planned;
+  return `
+    <article class="period-close-panel">
+      <div class="period-close-panel-head">
+        <p class="eyebrow">Tu próximo periodo</p>
+        <h2>Desde el ${escapeHtml(next.startLabel)}</h2>
+      </div>
+      <div class="period-plain-list">
+        ${
+          next.fixed || next.payReceived
+            ? `<div><span>Sueldo<small>${next.payReceived ? "Ya te llegó, adelantado" : "Esperado"}</small></span><strong>+${formatMoney(next.pay)}</strong></div>`
+            : ""
+        }
+        <div><span>Categorías que se renuevan</span><strong>−${formatMoney(next.recurring)}</strong></div>
+        <div><span>Gastos planeados</span><strong>−${formatMoney(next.planned)}</strong></div>
+      </div>
+      ${
+        next.pay > 0
+          ? `<p>${
+              left >= 0
+                ? `Te quedarían unos ${formatMoney(left)} libres para el resto, más lo que te sobre de este periodo.`
+                : `Lo que ya tienes comprometido supera tu sueldo por ${formatMoney(Math.abs(left))}: revisa categorías o gastos planeados antes de que empiece.`
+            }</p>`
+          : ""
+      }
+    </article>
+  `;
+}
+
+function renderPeriodExportCard(review) {
+  return `
+    <article class="period-report-card" aria-label="Exportar el periodo">
+      <div class="period-report-head">
+        <div>
+          <p class="eyebrow">Analízalo con una IA</p>
+          <h2>Exporta tu periodo</h2>
+        </div>
+      </div>
+      <p>Un documento con tus ${review.expenseCount} gastos, ${review.incomeCount} ingresos, la tarjeta y tu plan, listo para guardarlo o pegarlo en un chat de IA y pedirle que lo analice. No incluye tu nombre ni tu correo.</p>
+      <div class="period-report-actions">
+        <button class="btn primary" type="button" data-action="share-period-export">Compartir documento</button>
+        <button class="btn secondary" type="button" data-action="open-period-report">Ver y copiar</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderPeriodReportModal() {
+  const content = currentPeriodReportText();
   return `
     <div class="sheet-backdrop" role="presentation" data-action="close-period-report">
       <section class="bottom-sheet period-report-modal" role="dialog" aria-modal="true" aria-labelledby="period-report-title">
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
           <div>
-            <p class="eyebrow">Reporte del periodo</p>
-            <h2 id="period-report-title">Resumen completo</h2>
+            <p class="eyebrow">Para una IA o para guardar</p>
+            <h2 id="period-report-title">Tu periodo en un documento</h2>
           </div>
           <button class="icon-btn muted" type="button" data-action="close-period-report" aria-label="Cerrar">${renderIcon("close")}</button>
         </div>
         <textarea id="period-report-output" class="period-report-output" readonly>${escapeHtml(content)}</textarea>
         <div class="period-report-actions">
-          <button class="btn primary" type="button" data-action="copy-period-report">Copiar reporte</button>
-          <button class="btn secondary" type="button" data-action="download-period-report">Descargar .txt</button>
+          <button class="btn primary" type="button" data-action="copy-period-report">Copiar</button>
+          <button class="btn secondary" type="button" data-action="share-period-export">Compartir</button>
           <button class="btn ghost" type="button" data-action="close-period-report">Cerrar</button>
         </div>
       </section>
@@ -2790,55 +2915,14 @@ function periodCloseStatus(summary, exceededCategories, freeFinal, savingsGap) {
   return "healthy";
 }
 
-function periodCloseCardText(report) {
-  if (!report.isFinal) {
-    return `Faltan ${formatDays(report.remainingDays)}. Puedes revisar el cierre hoy y ajustar el siguiente plan antes de que se acabe el periodo.`;
-  }
-  if (report.freeFinal < 0) {
-    return `El periodo cerro con faltante de dinero libre. Guarda el cierre y baja gasto libre o sube límites realistas.`;
-  }
-  return `Guarda una foto del resultado final y usa los ajustes para el próximo periodo.`;
-}
-
 function periodCloseHeroText(report) {
   if (!report.isFinal) {
-    return `Todavía no termina: faltan ${formatDays(report.remainingDays)}. Este número muestra como quedaría si cerrarás el periodo hoy.`;
+    return `Para ${report.remainingDays === 1 ? "el día que falta" : `los ${formatDays(report.remainingDays)} que faltan`}: unos ${formatMoney(dailyAllowance(report))} al día. Si sigues a tu ritmo, terminas con ${formatMoney(Math.max(0, report.prediction.projectedEndFree))}.`;
   }
   if (report.freeFinal < 0) {
     return `Faltaron ${formatMoney(Math.abs(report.freeFinal))} de dinero libre después de gastos sin categoría y excesos.`;
   }
   return `Quedaron ${formatMoney(report.freeFinal)} libres después de gastos sin categoría y excesos.`;
-}
-
-function renderExceededCategories(report) {
-  if (!report.exceededCategories.length) {
-    return `<div class="empty-state compact-empty">No hay categorías por encima del límite. Buen cierre.</div>`;
-  }
-  return `
-    <div class="period-close-list">
-      ${report.exceededCategories
-        .map(
-          (category) => `
-            <div class="period-close-row">
-              <span>${escapeHtml(category.name)}</span>
-              <strong>${formatMoney(category.over)} de exceso</strong>
-              <small>${formatMoney(category.spent)} usados de ${formatMoney(category.budget)}</small>
-            </div>
-          `
-        )
-        .join("")}
-    </div>
-  `;
-}
-
-function periodCloseSavingsText(report) {
-  if (report.savingsGap > 0) {
-    return `El ahorro ideal no cupo completo. Lo posible incluye lo ya reservado más ${formatMoney(report.additionalSavingsNow)} que todavía caben desde el libre.`;
-  }
-  if (report.possibleSavings > 0) {
-    return `El ahorro sugerido cabe en este periodo. Puedes separar hasta ${formatMoney(report.additionalSavingsNow)} adicionales sin forzar el plan.`;
-  }
-  return `No hay ahorro posible en este cierre. Primero libera gasto libre o reduce categorías excedidas.`;
 }
 
 function periodCloseAdjustments(summary, plan, exceededCategories, freeFinal, remainingDays = 0) {
@@ -2873,121 +2957,6 @@ function periodCloseAdjustments(summary, plan, exceededCategories, freeFinal, re
     adjustments.push("Mantén el plan actual y registra gastos desde el primer día del próximo periodo.");
   }
   return adjustments.slice(0, 5);
-}
-
-function generatePeriodReport(plan = calculatePlan(), summary = budgetSummary(), report = periodCloseReport(plan, summary)) {
-  const prediction = report.prediction || periodPrediction();
-  const liquidity = liquiditySummary(summary);
-  const periodEnd = previousDay(summary.window.end);
-  const transactions = transactionsForSummary(summary);
-  const movements = movementsForSummary(summary).slice().sort(compareByRecent);
-  const totalExpenses = transactions.reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
-  const oneOffTotal = transactions
-    .filter((transaction) => transaction.oneOff)
-    .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
-  const unclassified = transactions.filter((transaction) => !transaction.labeled || !transaction.category || transaction.category === FREE_CATEGORY_ID);
-  const unclassifiedTotal = unclassified.reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
-  const dailyTotals = periodReportDailyTotals(summary);
-  const merchants = periodReportMerchantTotals(summary);
-  const categories = periodReportCategoryLines();
-  const movementLines = periodReportMovementLines(movements);
-  const cadence = capitalize(summary.cadenceLabel || cadenceLabel(state.profile.incomeCadence));
-  const lines = [
-    "Reporte del periodo",
-    `Periodo: ${summary.window.start} a ${periodEnd}`,
-    `Frecuencia: ${cadence}`,
-    `Generado: ${todayKey()}`,
-    "",
-    "Resumen de dinero",
-    `Ingreso base: ${formatMoney(summary.baseIncome)}`,
-    `Dinero extra: ${formatMoney(summary.extraIncome)}`,
-    `Ingreso total del periodo: ${formatMoney(summary.income)}`,
-    `Reservado en categorías: ${formatMoney(summary.reserved)}`,
-    `Dinero libre inicial: ${formatMoney(summary.freeBudget)}`,
-    `Gasto total registrado: ${formatMoney(totalExpenses)}`,
-    `Gasto libre real: ${formatMoney(summary.freeImpactSpent)}`,
-    `Saldo no comprometido (ya en tu cuenta/efectivo): ${formatMoney(summary.unclaimedLiquidity)}`,
-    `Libre hoy: ${formatMoney(prediction.freeToday)}`,
-    `Libre disponible visible: ${formatMoney(summary.freeRemaining)}`,
-    `Libre de cierre: ${formatMoney(report.freeFinal)}`,
-    `Saldo real en cuenta: ${formatMoney(liquidity.account)}`,
-    `Saldo real en efectivo: ${formatMoney(liquidity.cash)}`,
-    `Saldo real total: ${formatMoney(liquidity.total)}`,
-    "",
-    "Predicción",
-    predictionOutcomeText(prediction),
-    predictionPaceText(prediction),
-    `Resultado proyectado: ${formatMoney(prediction.projectedEndFree)}`,
-    `Días restantes: ${prediction.remainingDays}`,
-    "",
-    "Ahorro",
-    `Ahorro sugerido ideal: ${formatMoney(report.suggestedSavings)}`,
-    `Ahorro posible real: ${formatMoney(report.possibleSavings)}`,
-    `Ahorro adicional que cabe hoy: ${formatMoney(report.additionalSavingsNow)}`,
-    `Brecha contra ideal: ${formatMoney(report.savingsGap)}`,
-    "",
-    "Categorías",
-    ...categories,
-    "",
-    "Control de gasto libre",
-    `Gastos sin categoría o libre: ${formatMoney(summary.freeSpent)}`,
-    `Excesos de categorías: ${formatMoney(summary.categoryOverspent)}`,
-    `Movimientos sin clasificar: ${unclassified.length} por ${formatMoney(unclassifiedTotal)}`,
-    `Gastos únicos ignorados para ritmo diario: ${formatMoney(oneOffTotal)}`,
-    "",
-    "Días con gasto",
-    ...(dailyTotals.length ? dailyTotals.map((day) => `${day.date}: ${formatMoney(day.total)} en ${day.count} ${day.count === 1 ? "gasto" : "gastos"}`) : ["Sin gastos registrados en este periodo."]),
-    "",
-    "Comercios principales",
-    ...(merchants.length ? merchants.map((merchant) => `${merchant.name}: ${formatMoney(merchant.total)} en ${merchant.count} ${merchant.count === 1 ? "gasto" : "gastos"}`) : ["Sin comercios registrados."]),
-    "",
-    "Qué ajustar para el próximo periodo",
-    ...report.adjustments.map((item, index) => `${index + 1}. ${item}`),
-    "",
-    "Movimientos",
-    ...(movementLines.length ? movementLines : ["Sin movimientos registrados en este periodo."])
-  ];
-  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-}
-
-function periodReportCategoryLines() {
-  const categories = categoryStatus()
-    .slice()
-    .sort((a, b) => Number(b.spent || 0) - Number(a.spent || 0) || String(a.name).localeCompare(String(b.name)));
-  if (!categories.length) {
-    return ["Sin categorías creadas."];
-  }
-  return categories.map((category) => {
-    const budget = Number(category.budget || 0);
-    const spent = Number(category.spent || 0);
-    const remaining = budget - spent;
-    const status = remaining < 0 ? `excedida por ${formatMoney(Math.abs(remaining))}` : `quedan ${formatMoney(remaining)}`;
-    return `${category.name}: ${formatMoney(spent)} de ${formatMoney(budget)} (${status})`;
-  });
-}
-
-function periodReportDailyTotals(summary = budgetSummary()) {
-  return dailyTotals(transactionsForSummary(summary), todayKey());
-}
-
-function periodReportMerchantTotals(summary = budgetSummary()) {
-  return merchantTotals(transactionsForSummary(summary));
-}
-
-function periodReportMovementLines(movements = []) {
-  return movements.map((movement) => {
-    if (movement.kind === "income") {
-      const extra = movement.extra;
-      const savingsAmount = Number(extra.allocation?.savingsAmount || 0);
-      const savingsText = savingsAmount > 0 ? `, ahorro ${formatMoney(savingsAmount)}` : "";
-      return `+ ${String(extra.date || "").slice(0, 10)} - ${extra.source} - ${formatMoney(extra.amount)} (${locationLabel(extra.location)}${savingsText})`;
-    }
-    const transaction = movement.transaction;
-    const category = !transaction.labeled || !transaction.category || transaction.category === FREE_CATEGORY_ID ? "Sin clasificar" : categoryName(transaction.category);
-    const oneOff = transaction.oneOff ? " - gasto único" : "";
-    const description = transaction.description ? ` - ${transaction.description}` : "";
-    return `- ${String(transaction.date || "").slice(0, 10)} - ${transaction.merchant}${description} - ${category} - ${locationLabel(transaction.source)} - ${formatMoney(transaction.amount)}${oneOff}`;
-  });
 }
 
 function renderBudgetJobForm() {
@@ -5832,7 +5801,8 @@ function handleAction(event) {
     "open-period-report",
     "close-period-report",
     "copy-period-report",
-    "download-period-report",
+    "share-period-export",
+    "review-uncategorized",
     "export-movements-csv",
     "open-diagnosis",
     "close-diagnosis",
@@ -5851,7 +5821,8 @@ function handleAction(event) {
     "register-bank-suggestion",
     "register-bank-income",
     "dismiss-bank-suggestion",
-    "open-pay-received"
+    "open-pay-received",
+    "confirm-bank-pay"
   ]);
 
   const actions = {
@@ -6011,7 +5982,12 @@ function handleAction(event) {
       periodReportOpen = false;
     },
     "copy-period-report": copyPeriodReport,
-    "download-period-report": downloadPeriodReport,
+    "share-period-export": sharePeriodExport,
+    "review-uncategorized": () => {
+      transactionHistoryFilter = "uncategorized";
+      movementsPeriodOffset = 0;
+      activateView("movements");
+    },
     "export-movements-csv": downloadMovementsCsv,
     "open-diagnosis": () => {
       diagnosisValidation = { field: "", message: "" };
@@ -6108,7 +6084,9 @@ function handleAction(event) {
     "open-bank-background-settings": () => nativeBankNotifications()?.openBackgroundSettings().catch(() => {}),
     "register-bank-suggestion": () => registerBankSuggestion(id),
     "register-bank-income": () => registerBankIncome(id),
+    "confirm-bank-pay": () => registerBankPay(id),
     "open-pay-received": () => {
+      payDraft = null;
       planSheet = "pay-received";
       menuOpen = false;
     },
@@ -6650,33 +6628,72 @@ function handleExtraEditSubmit(event) {
 // Paying the card moves money from a real source to what is owed. It creates no
 // transaction: the expense was recorded when the card was used; recording it again would
 // count it twice and charge its category a second time.
-// "Ya me llegó": the way back after telling the app on payday that the pay had not arrived
-// ("Aún no me llega"). Without it the pay could only be entered as Dinero extra, and the
-// app then kept waiting for a pay that was already in the account. The amount can differ
-// from the usual pay (a bonus month, a raise), so it is asked, not assumed.
+// "Ya me llegó" / "¿Es tu sueldo?": the pay of this period, confirmed for the amount that
+// really came. Two situations:
+//   - still pending (the user said "aún no me llega" on payday): the amount is added;
+//   - already added by the app on payday for the usual amount: only the difference is
+//     corrected, so the same pay is never counted twice.
+// The amount can differ from the usual pay (a bonus month, a raise), so it is asked, not
+// assumed; and the user can make it the usual pay from now on.
+function payAlreadyDeposited() {
+  const summary = budgetSummary();
+  const status = state.periodIncomeStatus;
+  return summary.incomeApplied && Number(status?.amount || 0) > 0;
+}
+
 function renderPayReceivedSheet() {
   const usual = getPeriodIncome(state.profile);
+  const draft = payDraft || {};
+  const early = draft.nextWindow || null;
+  const deposited = !early && payAlreadyDeposited();
+  const depositedAmount = Number(state.periodIncomeStatus?.amount || 0);
+  const amount = draft.amount || usual;
   return `
     <div class="sheet-backdrop" role="presentation" data-action="close-plan-sheet">
       <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="pay-received-title">
         <div class="sheet-handle"></div>
         <div class="sheet-heading">
-          <div><p class="eyebrow">Tu pago</p><h2 id="pay-received-title">¿Cuánto te llegó?</h2></div>
+          <div><p class="eyebrow">Tu sueldo</p><h2 id="pay-received-title">¿Cuánto te llegó?</h2></div>
           <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">${renderIcon("close")}</button>
         </div>
-        <p class="setaside-note">Se suma a tu saldo y deja de aparecer como por recibir.</p>
+        ${
+          draft.bankNotificationId
+            ? `<p class="data-note quick-bank-note">De tu notificación de ${escapeHtml(draft.bank)}, ${escapeHtml(bankDateLabel(draft.date))}.</p>`
+            : ""
+        }
+        <p class="setaside-note">${
+          early
+            ? `Es el sueldo de tu periodo que empieza el ${escapeHtml(formatShortDate(early.start))}: lo sumo a tu saldo ahora y ese día no lo vuelvo a sumar.`
+            : deposited
+            ? `El día de pago sumé ${formatMoney(depositedAmount)} por tu sueldo. Si te llegó otro monto, corrijo solo la diferencia.`
+            : "Se suma a tu saldo y deja de aparecer como por recibir."
+        }</p>
         <form class="sheet-form" id="pay-received-form">
-          <label>Monto<input name="amount" type="number" min="1000" step="1000" inputmode="numeric" value="${usual > 0 ? usual : ""}" required data-autofocus></label>
-          <div class="sheet-field">
-            <span class="sheet-label">¿Dónde entró?</span>
-            ${renderChoicePills("location", [
-              { value: "account", label: "Cuenta" },
-              { value: "cash", label: "Efectivo" }
-            ], "account")}
-          </div>
-          <button class="btn primary" type="submit" name="intent" value="add">Sumar a mi saldo</button>
-          <button class="btn ghost" type="submit" name="intent" value="already-recorded" formnovalidate>Ya lo anoté como dinero extra</button>
-          <p class="data-note">Esta opción solo deja de esperarlo: no suma nada, porque esa plata ya está en tu saldo.</p>
+          ${draft.bankNotificationId ? `<input name="bankNotificationId" type="hidden" value="${escapeAttr(draft.bankNotificationId)}">` : ""}
+          ${early ? `<input name="earlyWindowStart" type="hidden" value="${escapeAttr(early.start)}">` : ""}
+          <label>Monto<input name="amount" type="number" min="1000" step="1000" inputmode="numeric" value="${amount > 0 ? amount : ""}" required data-autofocus></label>
+          ${
+            deposited
+              ? `<input name="location" type="hidden" value="${escapeAttr(state.periodIncomeStatus?.location || "account")}">`
+              : `<div class="sheet-field">
+                  <span class="sheet-label">¿Dónde entró?</span>
+                  ${renderChoicePills("location", [
+                    { value: "account", label: "Cuenta" },
+                    { value: "cash", label: "Efectivo" }
+                  ], "account")}
+                </div>`
+          }
+          <label class="check-row">
+            <input name="makeUsual" type="checkbox">
+            <span>Este es mi sueldo de ahora en adelante</span>
+          </label>
+          <button class="btn primary" type="submit" name="intent" value="add">${deposited ? "Corregir mi saldo" : "Sumar a mi saldo"}</button>
+          ${
+            deposited || draft.bankNotificationId
+              ? ""
+              : `<button class="btn ghost" type="submit" name="intent" value="already-recorded" formnovalidate>Ya lo anoté como dinero extra</button>
+                 <p class="data-note">Esta opción solo deja de esperarlo: no suma nada, porque esa plata ya está en tu saldo.</p>`
+          }
         </form>
       </section>
     </div>
@@ -6695,11 +6712,19 @@ function handlePayReceivedSubmit(event) {
     showNoticeSnackbar("Escribe cuánto te llegó.", { kind: "error" });
     return;
   }
-  const location = normalizeIncomeLocation(data.get("location"));
+  const earlyWindowStart = cleanText(data.get("earlyWindowStart"), "");
+  if (earlyWindowStart) {
+    receiveEarlyPay(data, amount, earlyWindowStart);
+    return;
+  }
+  const deposited = payAlreadyDeposited();
+  const previous = deposited ? Number(state.periodIncomeStatus.amount || 0) : 0;
+  const location = deposited ? normalizeIncomeLocation(state.periodIncomeStatus.location) : normalizeIncomeLocation(data.get("location"));
   const now = new Date().toISOString();
   const window = budgetSummary().window;
-  if (amount > 0) {
-    adjustLiquidity(location, amount, "ingreso-periodico");
+  const delta = amount - previous;
+  if (delta !== 0) {
+    adjustLiquidity(location, delta, "ingreso-periodico");
   }
   state.periodIncomeStatus = {
     ...(state.periodIncomeStatus || {}),
@@ -6721,10 +6746,68 @@ function handlePayReceivedSubmit(event) {
       { windowStart: window.start, windowEnd: window.end, status: "applied", amount, appliedAt: now }
     ].slice(-12);
   }
+  const makeUsual = data.get("makeUsual") === "on" && amount > 0 && amount !== getPeriodIncome(state.profile);
+  if (makeUsual) {
+    state.profile = {
+      ...state.profile,
+      incomeAmount: amount,
+      monthlyIncome: getMonthlyIncome({ ...state.profile, incomeAmount: amount }),
+      updated_at: now
+    };
+  }
+  const bankNotificationId = cleanText(data.get("bankNotificationId"), "");
+  if (bankNotificationId) {
+    forgetBankNotification(bankNotificationId);
+  }
+  payDraft = null;
   planSheet = "";
+  const where = location === "cash" ? "efectivo" : "cuenta";
   state.lastAlert = alreadyRecorded
     ? "Listo: tu pago de este periodo ya cuenta como recibido."
-    : `Listo: sumé ${formatMoney(amount)} a tu ${location === "cash" ? "efectivo" : "cuenta"}.`;
+    : deposited
+      ? delta === 0
+        ? "Listo: tu sueldo ya estaba sumado completo."
+        : `Listo: ${delta > 0 ? "sumé" : "resté"} ${formatMoney(Math.abs(delta))} para que tu ${where} tenga el sueldo que te llegó.`
+      : `Listo: sumé ${formatMoney(amount)} a tu ${where}.`;
+  if (makeUsual) {
+    state.lastAlert += ` Tu sueldo ahora es ${formatMoney(amount)}.`;
+  }
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
+  saveState();
+  render();
+}
+
+// The next period's pay, arrived early: the money goes into the balance now, and that
+// period is logged as paid so its payday (resolvePeriodIncome) does not add it again.
+// This period's own pay status is left as it is.
+function receiveEarlyPay(data, amount, windowStart) {
+  const next = getBudgetWindow(state.profile, windowStart);
+  const location = normalizeIncomeLocation(data.get("location"));
+  const now = new Date().toISOString();
+  adjustLiquidity(location, amount, "ingreso-periodico");
+  state.periodIncomeApplied = [
+    ...(state.periodIncomeApplied || []).filter((entry) => entry.windowStart !== next.start),
+    { windowStart: next.start, windowEnd: next.end, status: "applied", amount, appliedAt: now }
+  ].slice(-12);
+  const makeUsual = data.get("makeUsual") === "on" && amount !== getPeriodIncome(state.profile);
+  if (makeUsual) {
+    state.profile = {
+      ...state.profile,
+      incomeAmount: amount,
+      monthlyIncome: getMonthlyIncome({ ...state.profile, incomeAmount: amount }),
+      updated_at: now
+    };
+  }
+  const bankNotificationId = cleanText(data.get("bankNotificationId"), "");
+  if (bankNotificationId) {
+    forgetBankNotification(bankNotificationId);
+  }
+  payDraft = null;
+  planSheet = "";
+  state.lastAlert = `Listo: sumé ${formatMoney(amount)} a tu ${location === "cash" ? "efectivo" : "cuenta"}. El ${formatShortDate(next.start)} ya cuenta como pagado.`;
+  if (makeUsual) {
+    state.lastAlert += ` Tu sueldo ahora es ${formatMoney(amount)}.`;
+  }
   showNoticeSnackbar(state.lastAlert, { renderNow: false });
   saveState();
   render();
@@ -6750,6 +6833,10 @@ function handleCreditPaymentSubmit(event) {
   const applied = Math.min(amount, owed);
   adjustLiquidity(source, -applied, "credit-payment");
   adjustLiquidity("credit", applied, "credit-payment");
+  state.creditPayments = [
+    ...(state.creditPayments || []),
+    { id: uid("credit-payment"), date: todayKey(), amount: applied, source, updated_at: new Date().toISOString() }
+  ].slice(-CREDIT_PAYMENTS_LIMIT);
 
   planSheet = "";
   const overdraft = overdraftNotice(source);
@@ -7282,7 +7369,48 @@ function buildPeriodClosure() {
 function currentPeriodReportText() {
   const summary = budgetSummary();
   const plan = calculatePlan();
-  return generatePeriodReport(plan, summary, periodCloseReport(plan, summary));
+  const report = periodCloseReport(plan, summary);
+  const next = nextPeriodOutlook(summary);
+  const liquidity = liquiditySummary(summary);
+  const status = state.periodIncomeStatus;
+  const payStatus = !summary.hasFixedIncomeSchedule
+    ? ""
+    : summary.incomeApplied
+      ? Number(status?.amount || 0) > 0 ? `recibido: ${formatMoney(status.amount)}` : "recibido, anotado como dinero extra"
+      : "todavía no llega";
+  const movements = movementsForSummary(summary).map((movement) =>
+    movement.kind === "income"
+      ? { kind: "income", date: movement.date, amount: movement.amount, detail: movement.extra.source, location: movement.extra.location }
+      : {
+          kind: "expense",
+          date: movement.date,
+          amount: movement.amount,
+          detail: [movement.transaction.merchant, movement.transaction.description].filter(Boolean).join(" - "),
+          category: !movement.transaction.labeled || !movement.transaction.category || movement.transaction.category === FREE_CATEGORY_ID ? "Sin categoría" : categoryName(movement.transaction.category),
+          source: movement.transaction.source
+        }
+  );
+  return periodExportMarkdown(currentPeriodReview(summary), {
+    generatedOn: todayKey(),
+    periodLabel: periodLabel(summary.window),
+    cadenceLabel: capitalize(summary.cadenceLabel || ""),
+    remainingDays: report.remainingDays,
+    pay: { amount: summary.hasFixedIncomeSchedule ? getPeriodIncome(state.profile) : 0, status: payStatus },
+    free: { today: report.freeFinal, projectedEnd: report.prediction.projectedEndFree, reserved: summary.reservedRemaining },
+    balances: { account: liquidity.account, cash: liquidity.cash, credit: liquidity.credit },
+    plan: categoryStatus()
+      .filter((category) => category.id !== FREE_CATEGORY_ID)
+      .map((category) => ({ name: category.name, budget: Number(category.budget || 0), spent: Number(category.spent || 0) })),
+    savings: { reserved: plan.savingsReserved, suggested: report.suggestedSavings },
+    nextPeriod: next.fixed || next.recurring || next.planned ? next : null,
+    movements,
+    locationLabel
+  });
+}
+
+function sharePeriodExport() {
+  const summary = budgetSummary();
+  exportFile(`mi-periodo-${summary.window.start}.md`, currentPeriodReportText(), "text/markdown", "Documento listo.");
 }
 
 function copyPeriodReport() {
@@ -7501,6 +7629,59 @@ function registerBankIncome(id) {
   menuOpen = false;
 }
 
+// The income suggestion that is probably this period's fixed pay, if any: while the pay
+// is still pending, or after the app added it on payday for the usual amount (then only
+// the difference is corrected). Not when the pay was settled with nothing added (already
+// typed into the balance at onboarding, or entered as Dinero extra): then this
+// notification may be that same money, so it is offered as plain income for the user
+// to judge.
+function bankPaySuggestion() {
+  if (state.profile.incomeType !== "fixed") {
+    return null;
+  }
+  const early = bankSuggestions.find((suggestion) => earlyPayWindow(suggestion));
+  if (early) {
+    return early;
+  }
+  const summary = budgetSummary();
+  if (summary.incomeApplied && !payAlreadyDeposited()) {
+    return null;
+  }
+  const usualPay = getPeriodIncome(state.profile);
+  return bankSuggestions.find((suggestion) => looksLikePay(suggestion, { usualPay, window: summary.window })) || null;
+}
+
+// The next period, when this income is probably its pay arriving early: this period's
+// pay is settled, it came in the last days, and the next one is not logged yet. Logging it
+// for that period (handlePayReceivedSubmit) keeps payday from adding it a second time.
+function earlyPayWindow(suggestion) {
+  const summary = budgetSummary();
+  if (state.profile.incomeType !== "fixed" || !summary.incomeApplied) {
+    return null;
+  }
+  if (!looksLikeEarlyPay(suggestion, { usualPay: getPeriodIncome(state.profile), window: summary.window })) {
+    return null;
+  }
+  const next = getBudgetWindow(state.profile, summary.window.end);
+  return findLoggedIncome(state.periodIncomeApplied, next.start) ? null : next;
+}
+
+function registerBankPay(id) {
+  const suggestion = bankSuggestions.find((item) => item.id === id);
+  if (!suggestion) {
+    return;
+  }
+  payDraft = {
+    bankNotificationId: suggestion.id,
+    bank: suggestion.bank,
+    date: suggestion.date,
+    amount: suggestion.amount,
+    nextWindow: earlyPayWindow(suggestion)
+  };
+  planSheet = "pay-received";
+  menuOpen = false;
+}
+
 async function enableBankNotifications() {
   const plugin = nativeBankNotifications();
   planSheet = "";
@@ -7539,9 +7720,40 @@ function bankDateLabel(date) {
 // Inicio: what the bank said went out, and what it said came in, each in its own card so
 // the question ("¿gasto?" / "¿ingreso?") is never ambiguous.
 function renderBankSuggestions() {
+  const pay = bankPaySuggestion();
   const expenses = bankSuggestions.filter((suggestion) => suggestion.kind !== "income");
-  const income = bankSuggestions.filter((suggestion) => suggestion.kind === "income");
-  return `${renderBankSuggestionCard(expenses, "expense")}${renderBankSuggestionCard(income, "income")}`;
+  const income = bankSuggestions.filter((suggestion) => suggestion.kind === "income" && suggestion !== pay);
+  return `${renderBankPayCard(pay)}${renderBankSuggestionCard(expenses, "expense")}${renderBankSuggestionCard(income, "income")}`;
+}
+
+function renderBankPayCard(pay) {
+  if (!pay) {
+    return "";
+  }
+  const nextWindow = earlyPayWindow(pay);
+  return `
+    <article class="cooldown-panel bank-suggestions is-income" aria-label="¿Es tu sueldo?">
+      <div class="home-section-heading compact-heading">
+        <div>
+          <p class="eyebrow">De tus notificaciones de ${escapeHtml(pay.bank)}</p>
+          <h2>${nextWindow ? "¿Es tu próximo sueldo, adelantado?" : "¿Es tu sueldo?"}</h2>
+          ${nextWindow ? `<p class="data-note">Tu periodo nuevo empieza el ${escapeHtml(formatShortDate(nextWindow.start))}.</p>` : ""}
+        </div>
+      </div>
+      <div class="cooldown-list">
+        <div class="cooldown-item">
+          <div>
+            <strong>${escapeHtml(pay.origin || `Te llegó plata a ${pay.bank}`)}</strong>
+            <span>+${formatMoney(pay.amount)} · ${escapeHtml(locationLabel(pay.location))} · ${escapeHtml(bankDateLabel(pay.date))}</span>
+          </div>
+          <div class="cooldown-actions">
+            <button class="btn ghost" type="button" data-action="register-bank-income" data-id="${escapeAttr(pay.id)}">No, es otra cosa</button>
+            <button class="btn secondary" type="button" data-action="confirm-bank-pay" data-id="${escapeAttr(pay.id)}">Sí, es mi sueldo</button>
+          </div>
+        </div>
+      </div>
+    </article>
+  `;
 }
 
 function renderBankSuggestionCard(suggestions, kind) {
@@ -8036,11 +8248,6 @@ async function exportFile(filename, content, mimeType, successMessage) {
   showNoticeSnackbar(successMessage, { duration: 3500, renderNow: false });
 }
 
-function downloadPeriodReport() {
-  const summary = budgetSummary();
-  const reportText = currentPeriodReportText();
-  exportFile(`reporte-periodo-${summary.window.start}.txt`, reportText, "text/plain", "Reporte listo.");
-}
 
 
 function buildMovementsCsv() {

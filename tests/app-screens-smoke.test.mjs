@@ -195,3 +195,52 @@ test("'Omitir esta vez' moves a repeating plan on without recording anything", a
     ui.close();
   }
 });
+
+test("Tu periodo: where the money went, the card, and a document of the period to hand to an AI", async () => {
+  const ui = await bootApp({
+    savedState: returningUserState({
+      budgetJobs: [{ id: "mercado", name: "Mercado", amount: 300_000, cadence: "monthly" }],
+      liquidity: { account: 500_000, cash: 0, credit: 90_000, initialized: true },
+      transactions: [
+        expense({ id: "a", merchant: "Éxito", amount: 80_000, category: "mercado", labeled: true }),
+        expense({ id: "b", merchant: "Rappi", amount: 60_000, source: "credit" }),
+        expense({ id: "c", merchant: "Rappi", amount: 30_000, source: "credit", description: "domicilio | noche" })
+      ]
+    })
+  });
+  try {
+    // A card payment is kept for the period's card summary (it is not an expense).
+    await waitFor(ui, '[data-view="profile"]');
+    await ui.click('[data-view="profile"]');
+    await waitFor(ui, '[data-action="open-credit-payment"]');
+    await ui.click('[data-action="open-credit-payment"]');
+    const payment = ui.$("#credit-payment-form");
+    payment.elements.namedItem("amount").value = "40000";
+    payment.requestSubmit();
+    await settle(ui.window);
+    assert.deepEqual(ui.saved().creditPayments.map((item) => [item.amount, item.source]), [[40_000, "account"]]);
+
+    await ui.click('[data-view="budget"]');
+    await waitFor(ui, '[data-view="periodClose"]');
+    await ui.click('[data-view="periodClose"]');
+    const text = ui.text();
+    assert.match(text, /En qué se fue/);
+    assert.match(text, /Sin categoría\s*\$\s?90\.000 · 53%/);
+    assert.match(text, /Tarjeta de crédito\s*2 compras\s*\$\s?90\.000/);
+    assert.match(text, /Le pagaste \$\s?40\.000 a la tarjeta en este periodo\. Hoy le debes \$\s?50\.000\./);
+
+    await ui.click('[data-action="open-period-report"]');
+    const markdown = ui.$("#period-report-output").value;
+    assert.match(markdown, /^# Mis finanzas: periodo/);
+    assert.match(markdown, /\| Total gastado \| \$170\.000 en 3 gastos \|/);
+    assert.match(markdown, /Pagos a la tarjeta en el periodo: \$40\.000 en 1 pago\. Hoy debo \$50\.000\./);
+    assert.match(markdown, /\| Gasto \| Rappi - domicilio \/ noche \| Sin categoría \| Tarjeta[^|]* \| -\$30\.000 \|/);
+    assert.doesNotMatch(markdown, /@/, "no email in the export");
+
+    await ui.click('[data-action="close-period-report"]');
+    await ui.click('[data-action="review-uncategorized"]');
+    assert.equal(ui.window.document.querySelectorAll("#transaction-history-results .history-row").length, 2, "only the unclassified ones");
+  } finally {
+    ui.close();
+  }
+});

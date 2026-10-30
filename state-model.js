@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.86";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.89";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
@@ -443,6 +443,21 @@ export function filterMerchantRulesForJobs(rules, jobs) {
   return (rules || []).filter((rule) => validCategories.has(rule.category));
 }
 
+export const CREDIT_PAYMENTS_LIMIT = 60;
+
+export function normalizeCreditPayments(payments, today) {
+  return (Array.isArray(payments) ? payments : [])
+    .filter((payment) => Number(payment?.amount) > 0)
+    .map((payment) => ({
+      id: payment.id || uid("credit-payment"),
+      date: cleanDate(payment.date, today),
+      amount: Math.round(Number(payment.amount)),
+      source: payment.source === "cash" ? "cash" : "account",
+      updated_at: payment.updated_at || ""
+    }))
+    .slice(-CREDIT_PAYMENTS_LIMIT);
+}
+
 export function normalizeCalendarEvents(events, today) {
   return events.map((event) => ({
     id: event.id || uid("event"),
@@ -612,6 +627,9 @@ export function createDefaultState(today, defaultView) {
     periodIncomeApplied: [],
     budgetJobs: [],
     transactions: [],
+    // Payments of the credit card statement: they move money, they are not expenses (see
+    // handleCreditPaymentSubmit), so they are kept apart for the period's card summary.
+    creditPayments: [],
     cooldowns: [],
     periodClosures: [],
     merchantRules: [],
@@ -646,6 +664,7 @@ export function migrateState(savedState, today, defaultView) {
     },
     transactions: normalizeTransactions(savedState.transactions || defaults.transactions, today),
     budgetExtras: normalizeBudgetExtras(savedState.budgetExtras || defaults.budgetExtras, today),
+    creditPayments: normalizeCreditPayments(savedState.creditPayments, today),
     calendarEvents: normalizeCalendarEvents(savedState.calendarEvents || defaults.calendarEvents, today),
     dailyReminder: normalizeDailyReminder(savedState.dailyReminder || defaults.dailyReminder),
     liquidity: normalizeLiquidity(savedState.liquidity || defaults.liquidity),
@@ -688,6 +707,7 @@ const MERGE_COLLECTIONS = {
   transactions: "id",
   budgetJobs: "id",
   budgetExtras: "id",
+  creditPayments: "id",
   calendarEvents: "id",
   cooldowns: "id",
   merchantRules: "id",

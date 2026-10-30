@@ -133,6 +133,33 @@ export function suggestionFromNotification(notification) {
   return null;
 }
 
+// Money in that is probably the fixed pay: within this pay period and at least 60% of the
+// usual pay (a pay that came smaller than usual still qualifies; a $60.000 transfer from a
+// friend does not). Only a guess: the user confirms "¿Es tu sueldo?" before it counts.
+export function looksLikePay(suggestion, { usualPay = 0, window } = {}) {
+  return (
+    suggestion?.kind === "income" &&
+    usualPay > 0 &&
+    suggestion.amount >= usualPay * 0.6 &&
+    Boolean(window) &&
+    suggestion.date >= window.start &&
+    suggestion.date < window.end
+  );
+}
+
+// Employers pay early before a weekend or a holiday: a pay in the last days of a period
+// whose own pay is settled is probably the NEXT period's. Up to a week early, or half the
+// period for short ones (3 days when paid weekly).
+export const EARLY_PAY_DAYS = 7;
+
+export function looksLikeEarlyPay(suggestion, { usualPay = 0, window } = {}) {
+  if (!looksLikePay(suggestion, { usualPay, window })) {
+    return false;
+  }
+  const lead = Math.min(EARLY_PAY_DAYS, Math.floor(daysApart(window.start, window.end) / 2));
+  return daysApart(suggestion.date, window.end) <= lead;
+}
+
 function daysApart(a, b) {
   return Math.abs(Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) / 86_400_000;
 }

@@ -2,7 +2,7 @@
 // typical Colombian banking wording, to be replaced with real samples as they show up.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { alreadyRecorded, isStale, parseAmount, unreadableNotifications, parseMerchant, parseOrigin, pendingSuggestions, suggestionFromNotification } from "../bank-notifications.js";
+import { alreadyRecorded, isStale, looksLikeEarlyPay, looksLikePay, parseAmount, unreadableNotifications, parseMerchant, parseOrigin, pendingSuggestions, suggestionFromNotification } from "../bank-notifications.js";
 
 const NU = "com.nu.production";
 const at = (iso) => new Date(iso).getTime();
@@ -174,4 +174,32 @@ test("recent bank notifications the app cannot read are listed, newest first, wi
   const purchase = notification("Compra", "Compraste $10.000 en Café", at("2026-10-19T11:00:00"));
   const oldPromo = notification("Oferta", "Promo vieja", at("2026-08-01T10:00:00"));
   assert.deepEqual(unreadableNotifications([promo, code, purchase, oldPromo], now).map((item) => item.title), ["Código", "Oferta"]);
+});
+
+test("a big income inside the pay period looks like the pay; small ones or other periods do not", () => {
+  const october = { start: "2026-10-01", end: "2026-11-01" };
+  const pay = suggestionFromNotification(notification("Recibiste 2.068.000,00 en tu cuenta", "Te llegó dinero de EMPRESA SAS."));
+  assert.equal(looksLikePay(pay, { usualPay: 1_500_000, window: october }), true, "more than usual still is the pay");
+  const smaller = { ...pay, amount: 1_000_000 };
+  assert.equal(looksLikePay(smaller, { usualPay: 1_500_000, window: october }), true, "a smaller pay (60%+) too");
+  const friend = { ...pay, amount: 60_000 };
+  assert.equal(looksLikePay(friend, { usualPay: 1_500_000, window: october }), false);
+  assert.equal(looksLikePay(pay, { usualPay: 1_500_000, window: { start: "2026-11-01", end: "2026-12-01" } }), false);
+  assert.equal(looksLikePay(pay, { usualPay: 0, window: october }), false, "no fixed pay, nothing to recognize");
+  const purchase = suggestionFromNotification(notification("Compra aprobada por $2.000.000,00", "Compra en ALKOSTO con tu tarjeta débito."));
+  assert.equal(looksLikePay(purchase, { usualPay: 1_500_000, window: october }), false);
+});
+
+// Real case, October 2026: the November pay arrived on October 29, with October's paid.
+test("a pay in the last days of the period looks like the next period's, paid early", () => {
+  const october = { start: "2026-10-01", end: "2026-11-01" };
+  const pay = suggestionFromNotification(notification("Nu", "Bancolombia te envió 2.059.928,00.", at("2026-10-29T15:00:00")));
+  assert.equal(looksLikeEarlyPay(pay, { usualPay: 1_500_000, window: october }), true);
+  assert.equal(looksLikeEarlyPay({ ...pay, date: "2026-10-25" }, { usualPay: 1_500_000, window: october }), true, "a week early");
+  assert.equal(looksLikeEarlyPay({ ...pay, date: "2026-10-20" }, { usualPay: 1_500_000, window: october }), false, "mid-month is not early");
+  assert.equal(looksLikeEarlyPay({ ...pay, amount: 60_000 }, { usualPay: 1_500_000, window: october }), false, "a small transfer is no pay");
+
+  const week = { start: "2026-10-26", end: "2026-11-02" };
+  assert.equal(looksLikeEarlyPay({ ...pay, date: "2026-10-30" }, { usualPay: 400_000, window: week }), true, "3 days before, paid weekly");
+  assert.equal(looksLikeEarlyPay({ ...pay, date: "2026-10-28" }, { usualPay: 400_000, window: week }), false, "4 days is mid-week");
 });
