@@ -8663,3 +8663,219 @@ html[data-theme="dark"] .money-math > * + * {
 .btn.destructive-link {
   color: var(--coral);
 }
+
+/* Inicio: libre split into account and cash (renderFreeByLocation). */
+.money-free-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  margin-top: 10px;
+}
+
+.money-free-split span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  border: 1px solid var(--ds-line);
+  border-radius: 14px;
+  padding: 9px 11px;
+  color: var(--ds-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  background: rgb(var(--rgb-white) / 0.06);
+}
+
+.money-free-split strong {
+  color: var(--ds-ink);
+  font-size: 1.05rem;
+  font-weight: 860;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.money-free-split-note {
+  width: 100%;
+  margin: 6px 0 0;
+  color: var(--ds-muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+/* Cuadrar con tu banco (renderReconcileScreen). Status is said in words and a mark, not
+   only by color. */
+.reconcile-view {
+  display: grid;
+  gap: 14px;
+}
+
+.reconcile-intro,
+.reconcile-note {
+  margin: 0;
+  color: var(--ds-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.reconcile-intro strong {
+  color: var(--ds-ink);
+}
+
+.reconcile-list {
+  display: grid;
+  gap: 10px;
+}
+
+.reconcile-row {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--ds-line);
+  border-left-width: 4px;
+  border-radius: var(--ds-radius-md);
+  padding: 13px 14px;
+  background: var(--ds-surface);
+  box-shadow: var(--ds-shadow-xs);
+}
+
+.reconcile-row.is-match,
+.reconcile-row.is-interest {
+  border-left-color: var(--ds-primary);
+}
+
+.reconcile-row.is-more,
+.reconcile-row.is-less {
+  border-left-color: var(--ds-amber);
+}
+
+.reconcile-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.reconcile-head strong {
+  color: var(--ds-ink);
+  font-size: 0.98rem;
+  font-weight: 850;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.reconcile-head span {
+  color: var(--ds-muted);
+  font-size: 0.82rem;
+  font-weight: 760;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.reconcile-hint,
+.reconcile-foot small {
+  color: var(--ds-muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.reconcile-input {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: var(--ds-muted);
+  font-size: 0.8rem;
+  font-weight: 760;
+}
+
+.reconcile-input input {
+  width: 100%;
+  border: 1px solid var(--ds-line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: var(--ds-ink);
+  background: transparent;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.reconcile-status {
+  margin: 0;
+  color: var(--ds-ink);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.reconcile-row.is-match .reconcile-status span,
+.reconcile-row.is-interest .reconcile-status span {
+  color: var(--ds-primary);
+  font-weight: 900;
+}
+
+.reconcile-row.is-more .reconcile-status span,
+.reconcile-row.is-less .reconcile-status span {
+  color: var(--ds-amber);
+  font-weight: 900;
+}
+
+.reconcile-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.reconcile-foot:has(> small:only-child:empty) {
+  display: none;
+}
+
+.field-optional {
+  color: var(--ds-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.bank-box-field .setaside-note {
+  margin: 0;
+  color: var(--ds-muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.fund-change-preview {
+  margin: 0;
+  color: var(--ds-primary-strong);
+  font-size: 0.9rem;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+}
+
+.fund-change-preview:empty {
+  display: none;
+}
+
+.fund-change-field .setaside-note {
+  margin: 0;
+  color: var(--ds-muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+/* Re-rendering what is already on screen does not replay its entrance (keepRenderStill
+   in app.js): only a new screen, sheet, amount or notice animates. */
+#app.is-same-view .screen-view,
+#app.is-same-view .budget-ring-line,
+#app.is-same-view .budget-ring-label-name,
+#app.is-same-view .budget-ring-label-amount,
+#app.is-same-view .budget-ring-center-eyebrow,
+#app.is-same-view .budget-ring-center-amount,
+#app.is-same-view .budget-ring-center-free,
+#app.keeps-dialog .sheet-backdrop,
+#app.keeps-dialog .quick-expense-backdrop,
+#app.keeps-dialog .bottom-sheet,
+#app.keeps-dialog .quick-expense-panel,
+#app.keeps-free .money-bar > strong,
+#app.keeps-snackbar .snackbar {
+  animation: none;
+}

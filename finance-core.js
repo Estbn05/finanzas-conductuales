@@ -702,6 +702,24 @@ export function resolvePeriodIncome(state, today, nowIso = new Date().toISOStrin
   };
 }
 
+// "Libre" split into what is in the account and what is cash, so the account part can be
+// checked against the bank's balance without the wallet mixed in. Categories do not say
+// where their money is, so what is reserved (and what is owed on the card) is taken from
+// the account; cash only covers the part the account cannot. The two always add up to
+// the single "libre" (max(0, account + cash - credit - reserved)).
+export function freeByLocation({ account = 0, cash = 0, credit = 0, reserved = 0 }) {
+  const cashOnHand = Math.max(0, Number(cash) || 0);
+  const accountFree = Math.round((Number(account) || 0) - Math.max(0, Number(credit) || 0) - Math.max(0, Number(reserved) || 0));
+  if (accountFree >= 0) {
+    return { account: accountFree, cash: Math.round(cashOnHand), fromCash: 0 };
+  }
+  return {
+    account: 0,
+    cash: Math.round(Math.max(0, cashOnHand + accountFree)),
+    fromCash: Math.round(Math.min(cashOnHand, -accountFree))
+  };
+}
+
 // Share of this period's budget that is still free, for the "N% sigue libre" note.
 // For fixed income with a real balance on file, "libre" is the real balance minus
 // reserves, which can exceed the period budget (money carried over from before) —

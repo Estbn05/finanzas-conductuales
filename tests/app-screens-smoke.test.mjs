@@ -302,7 +302,7 @@ test("Editar categoría: rename it and change its limit from this period on, wit
     await ui.click(`[data-action="open-edit-job"][data-id="${id}"]`);
     const form = ui.$("#edit-job-form");
     for (const [name, value] of Object.entries(values)) {
-      if (name === "cadence") await ui.click(`#edit-job-form [data-choice-name="cadence"][data-choice-value="${value}"]`);
+      if (name === "cadence" || name === "fundMode") await ui.click(`#edit-job-form [data-choice-name="${name}"][data-choice-value="${value}"]`);
       else form.elements.namedItem(name).value = value;
     }
     form.requestSubmit();
@@ -325,25 +325,251 @@ test("Editar categoría: rename it and change its limit from this period on, wit
     await edit("gas", { amount: "50000", cadence: "weekly" });
     assert.deepEqual([job("gas").amount, job("gas").cadence], [50_000, "weekly"]);
 
-    // Money set aside: raising it sets the difference aside, lowering it releases it, never
-    // below what was already spent from it.
-    await edit("soat", { fund: "450000" });
+    // Money set aside: say how much to add or take out, not the new total (no adding up by
+    // hand); taking out never goes below what was already spent from it.
+    await ui.click('[data-action="open-edit-job"][data-id="soat"]');
+    assert.match(ui.text(), /Apartado ahora: \$\s?400\.000/);
+    const typed = ui.$("#edit-job-form").elements.namedItem("fundDelta");
+    typed.value = "50000";
+    typed.dispatchEvent(new ui.window.Event("input", { bubbles: true }));
+    assert.match(ui.$("[data-fund-preview]").textContent, /Quedará en \$\s?450\.000/);
+    await ui.click('[data-action="close-plan-sheet"]');
+
+    await edit("soat", { fundDelta: "50000" });
     assert.deepEqual(job("soat").topUps.map((topUp) => topUp.amount), [50_000]);
-    await edit("soat", { fund: "300000" });
+    await edit("soat", { fundMode: "remove", fundDelta: "150000" });
     assert.deepEqual(job("soat").released.map((release) => release.amount), [150_000]);
     assert.match(ui.text(), /Soat ahora tiene \$\s?300\.000 apartados \(antes \$\s?450\.000\)/);
-    await ui.click('[data-action="open-edit-job"][data-id="soat"]');
-    const form = ui.$("#edit-job-form");
-    assert.equal(form.elements.namedItem("fund").min, "100000", "it cannot go below the $100.000 already spent");
-    form.elements.namedItem("fund").min = "0";
-    form.elements.namedItem("fund").value = "50000";
-    form.requestSubmit();
-    await settle(ui.window);
-    assert.equal(job("soat").released.length, 1, "and the app refuses it even past the field's limit");
+    await edit("soat", { fundMode: "remove", fundDelta: "250000" });
+    assert.equal(job("soat").released.length, 1, "it cannot go below the $100.000 already spent");
+    assert.match(ui.text(), /Solo puedes quitar \$\s?200\.000 de Soat/);
+    await ui.click('[data-action="close-plan-sheet"]');
 
     await ui.click('[data-action="open-edit-job"][data-id="soat"]');
     await ui.click('#edit-job-form [data-action="request-remove-job"]');
     assert.ok(ui.$("#remove-category-title"), "deleting still asks for confirmation");
+  } finally {
+    ui.close();
+  }
+});
+
+test("Inicio splits libre into the account and cash, so the account can be checked against the bank", async () => {
+  const start = todayKey();
+  const fixed = (liquidity) =>
+    returningUserState({
+      profile: { ...returningUserState().profile, incomeType: "fixed", incomeAmount: 1_500_000, periodStart: start },
+      liquidity: { initialized: true, ...liquidity },
+      periodIncomeStatus: { windowStart: start, applied: true, amount: 0, bannerDismissed: true, location: "account" },
+      budgetJobs: [{ id: "gas", name: "Gasolina", amount: 300_000, cadence: "once", windowStart: start }]
+    });
+  const amounts = (ui) => [...ui.window.document.querySelectorAll(".money-free-split strong")].map((node) => node.textContent.replace(/\D/g, ""));
+
+  const ui = await bootApp({ savedState: fixed({ account: 500_000, cash: 80_000, credit: 20_000 }) });
+  try {
+    await waitFor(ui, ".money-free-split");
+    assert.deepEqual(amounts(ui), ["180000", "80000"], "500.000 - 20.000 owed - 300.000 reserved; the cash apart");
+    assert.equal(ui.$(".money-free-split-note"), null, "no note while the account covers it all");
+  } finally {
+    ui.close();
+  }
+
+  const short = await bootApp({ savedState: fixed({ account: 250_000, cash: 80_000, credit: 0 }) });
+  try {
+    await waitFor(short, ".money-free-split");
+    assert.deepEqual(amounts(short), ["0", "30000"]);
+    assert.match(short.text(), /Lo reservado no cabe en tu cuenta: \$\s?50\.000 salen del efectivo/);
+  } finally {
+    short.close();
+  }
+
+  const noCash = await bootApp({ savedState: fixed({ account: 500_000, cash: 0, credit: 0 }) });
+  try {
+    await waitFor(noCash, ".money-bar");
+    assert.equal(noCash.$(".money-free-split"), null, "without cash, libre is all in the account already");
+  } finally {
+    noCash.close();
+  }
+});
+
+test("Cuadrar con tu banco: each pocket against the bank, interest noted into its category, and pockets shared by several", async () => {
+  const start = todayKey();
+  const ui = await bootApp({
+    savedState: returningUserState({
+      profile: { ...returningUserState().profile, incomeType: "fixed", incomeAmount: 1_500_000, periodStart: start },
+      liquidity: { initialized: true, account: 2_000_000, cash: 50_000, credit: 40_000 },
+      periodIncomeStatus: { windowStart: start, applied: true, amount: 0, bannerDismissed: true, location: "account" },
+      budgetJobs: [
+        { id: "soat", name: "Soat", amount: 350_000, cadence: "once", windowStart: start },
+        { id: "plan", name: "Plan pospago", amount: 31_000, cadence: "once", windowStart: start, bankBox: "Varios" },
+        { id: "park", name: "Parqueadero", amount: 20_000, cadence: "once", windowStart: start }
+      ]
+    })
+  });
+  const row = (label) => [...ui.window.document.querySelectorAll(".reconcile-row")].find((item) => item.querySelector(".reconcile-head strong").textContent === label);
+  const type = async (key, value) => {
+    const input = ui.$(`[data-reconcile-key="${key}"]`);
+    input.value = value;
+    input.dispatchEvent(new ui.window.Event("change", { bubbles: true }));
+    await settle(ui.window);
+  };
+  try {
+    await waitFor(ui, '[data-view="budget"]');
+    await ui.click('[data-view="budget"]');
+    await ui.click('[data-view="reconcile"]');
+    await waitFor(ui, ".reconcile-row");
+    assert.deepEqual(
+      [...ui.window.document.querySelectorAll(".reconcile-head")].map((head) => head.textContent.replace(/\s+/g, " ").trim()),
+      ["Libre La app: $ 1.559.000", "Soat La app: $ 350.000", "Varios La app: $ 31.000", "Parqueadero La app: $ 20.000", "Para pagar la tarjeta La app: $ 40.000"]
+    );
+
+    await type("box:soat", "351729");
+    assert.match(row("Soat").textContent, /Cuadra, y tu banco tiene \$\s?1\.729 más: son rendimientos/);
+    assert.equal(ui.saved().bankChecks["box:soat"].amount, 351_729);
+
+    await ui.click('[data-action="register-interest"][data-id="box:soat"]');
+    const saved = ui.saved();
+    assert.equal(saved.liquidity.account, 2_001_729, "the interest is in the account now");
+    assert.deepEqual(saved.budgetJobs.find((job) => job.id === "soat").topUps.map((topUp) => topUp.amount), [1729], "and set aside in Soat");
+    assert.equal(saved.budgetExtras.at(-1).source, "Rendimientos Soat");
+    assert.match(row("Soat").textContent, /Cuadra\./);
+
+    await type("free", "1400000");
+    assert.match(row("Libre").textContent, /Tu banco tiene \$\s?159\.000 menos/);
+    assert.match(ui.text(), /Cuadran 1 de 2/);
+    assert.match(ui.text(), /Tu efectivo \(\$\s?50\.000\) no está en el banco/);
+
+    // Parqueadero joins the "Varios" pocket from Editar categoría, picked from a list:
+    // its own pocket, the other categories' and "Otra…".
+    await ui.click('[data-view="budget"]');
+    await ui.click('[data-action="open-edit-job"][data-id="park"]');
+    assert.deepEqual(
+      [...ui.window.document.querySelectorAll('#edit-job-form [data-choice-name="bankBox"]')].map((pill) => pill.textContent.trim()),
+      ["Su propia cajita", "Soat", "Varios", "Otra…"]
+    );
+    await ui.click('#edit-job-form [data-choice-name="bankBox"][data-choice-value="Varios"]');
+    ui.$("#edit-job-form").requestSubmit();
+    await settle(ui.window);
+    await ui.click('[data-view="reconcile"]');
+    await waitFor(ui, ".reconcile-row");
+    assert.match(row("Varios").textContent, /La app: \$\s?51\.000/);
+    assert.match(row("Varios").textContent, /Plan pospago \$\s?31\.000 · Parqueadero \$\s?20\.000/);
+    assert.equal(row("Parqueadero"), undefined);
+  } finally {
+    ui.close();
+  }
+});
+
+test("a category's pocket can be a new shared name with 'Otra…', and going back to its own clears it", async () => {
+  const ui = await bootApp({
+    savedState: returningUserState({ budgetJobs: [{ id: "soat", name: "Soat", amount: 350_000, cadence: "once", windowStart: todayKey() }] })
+  });
+  const save = async (choice, other) => {
+    await ui.click('[data-action="open-edit-job"][data-id="soat"]');
+    await ui.click(`#edit-job-form [data-choice-name="bankBox"][data-choice-value="${choice}"]`);
+    if (other !== undefined) {
+      assert.equal(ui.$("#edit-job-form").elements.namedItem("bankBoxOther").hidden, false, "'Otra…' shows the name field");
+      ui.$("#edit-job-form").elements.namedItem("bankBoxOther").value = other;
+    }
+    ui.$("#edit-job-form").requestSubmit();
+    await settle(ui.window);
+  };
+  try {
+    await waitFor(ui, '[data-view="budget"]');
+    await ui.click('[data-view="budget"]');
+    await waitFor(ui, '[data-action="open-edit-job"]');
+    await save("__other", "Moto");
+    assert.equal(ui.saved().budgetJobs[0].bankBox, "Moto");
+    await ui.click('[data-action="open-edit-job"][data-id="soat"]');
+    assert.equal(ui.$('#edit-job-form [data-choice-name="bankBox"].is-active').textContent.trim(), "Moto", "the saved pocket comes selected");
+    await ui.click('[data-action="close-plan-sheet"]');
+    await save("");
+    assert.equal(ui.saved().budgetJobs[0].bankBox, "");
+  } finally {
+    ui.close();
+  }
+});
+
+// Real case, October 2026: "1244082" typed into Libre was saved as 12.440 and the message
+// said the bank had $1.231.251 less: a background re-render (a sync, the network coming
+// back) rebuilt the screen mid-number. Now nothing rebuilds the screen while a field on it
+// has the cursor, the message follows each keystroke, and the amount gets its dots.
+test("Cuadrar: the message follows the number as it is typed, and nothing re-renders the field mid-typing", async () => {
+  const start = todayKey();
+  const ui = await bootApp({
+    savedState: returningUserState({
+      profile: { ...returningUserState().profile, incomeType: "fixed", incomeAmount: 1_500_000, periodStart: start },
+      liquidity: { initialized: true, account: 1_243_691, cash: 0, credit: 0 },
+      periodIncomeStatus: { windowStart: start, applied: true, amount: 0, bannerDismissed: true, location: "account" }
+    })
+  });
+  const status = () => ui.$(".reconcile-status").textContent;
+  const typeKeys = (input, text) => {
+    for (const digit of text) {
+      input.value += digit;
+      input.dispatchEvent(new ui.window.Event("input", { bubbles: true }));
+    }
+  };
+  try {
+    await waitFor(ui, '[data-view="budget"]');
+    await ui.click('[data-view="budget"]');
+    await ui.click('[data-view="reconcile"]');
+    await waitFor(ui, '[data-reconcile-key="free"]');
+    const input = ui.$('[data-reconcile-key="free"]');
+    input.focus();
+    typeKeys(input, "12440");
+    assert.match(status(), /Tu banco tiene \$\s?1\.231\.251 menos/, "half typed, said as it is");
+
+    assert.equal(input.value, "12.440", "thousands dots as it is typed");
+
+    // The network drops and comes back mid-typing: that re-renders in the background.
+    ui.window.dispatchEvent(new ui.window.Event("offline"));
+    ui.window.dispatchEvent(new ui.window.Event("online"));
+    await settle(ui.window);
+    const again = ui.$('[data-reconcile-key="free"]');
+    assert.equal(again, input, "the field was not rebuilt under the finger");
+    assert.equal(again.value, "12.440");
+    assert.equal(ui.saved().bankChecks?.free, undefined, "and nothing was saved yet");
+
+    typeKeys(again, "82");
+    assert.match(status(), /Cuadra, y tu banco tiene \$\s?391 más: son rendimientos/);
+    again.dispatchEvent(new ui.window.Event("change", { bubbles: true }));
+    await settle(ui.window);
+    assert.equal(ui.saved().bankChecks.free.amount, 1_244_082);
+  } finally {
+    ui.close();
+  }
+});
+
+// Every save, sync or bank notification rebuilds the app from HTML; replaying the entrance
+// animations each time made it blink as if reloading. Only what is new animates.
+test("re-rendering the same screen keeps it still; a new screen, sheet or amount animates", async () => {
+  const ui = await bootApp({ savedState: returningUserState() });
+  const app = ui.$("#app");
+  const rerender = async () => {
+    ui.window.dispatchEvent(new ui.window.Event("online"));
+    await settle(ui.window);
+  };
+  try {
+    await waitFor(ui, ".money-bar");
+    await rerender();
+    assert.ok(app.classList.contains("is-same-view"), "Inicio re-rendered: no fade-in");
+    assert.ok(app.classList.contains("keeps-free"), "same free money: no pop");
+
+    await ui.click('[data-view="budget"]');
+    assert.ok(!app.classList.contains("is-same-view"), "entering Plan fades in");
+
+    await ui.click('[data-action="open-add-category-choice"]');
+    assert.ok(!app.classList.contains("keeps-dialog"), "a sheet that just opened animates in");
+    await ui.click('[data-action="open-setaside-sheet"]');
+    assert.ok(!app.classList.contains("keeps-dialog"), "and so does the next, different sheet");
+    await ui.click('[data-action="close-plan-sheet"]');
+    await ui.click('[data-view="today"]');
+    await ui.click('[data-action="open-expense"]');
+    const form = ui.$("#transaction-form");
+    form.elements.namedItem("amount").value = "15000";
+    form.requestSubmit();
+    await settle(ui.window);
+    assert.ok(!app.classList.contains("keeps-free"), "a new free amount pops");
   } finally {
     ui.close();
   }

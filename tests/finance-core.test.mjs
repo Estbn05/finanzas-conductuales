@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  freeByLocation,
   budgetAmountForJob,
   budgetRingAllocation,
   budgetSummary,
@@ -1096,4 +1097,15 @@ test("a fixed pay not received yet counts in the end-of-period prediction, not i
     "2026-10-16"
   );
   assert.equal(paid.pendingIncome, 0, "once paid, the pay is already inside the balance");
+});
+
+// Real numbers, October 2026: $3.389.278 in Nu, $86.000 cash, $50.900 owed on the card.
+test("libre splits into the account and cash: what is reserved and owed comes out of the account", () => {
+  const split = freeByLocation({ account: 3_389_278, cash: 86_000, credit: 50_900, reserved: 1_277_697 });
+  assert.deepEqual(split, { account: 2_060_681, cash: 86_000, fromCash: 0 });
+  assert.equal(split.account + split.cash, 3_389_278 + 86_000 - 50_900 - 1_277_697, "the two add up to libre");
+
+  // The account cannot cover what is reserved: the rest comes out of the cash.
+  assert.deepEqual(freeByLocation({ account: 100_000, cash: 80_000, reserved: 150_000 }), { account: 0, cash: 30_000, fromCash: 50_000 });
+  assert.deepEqual(freeByLocation({ account: 0, cash: 20_000, reserved: 90_000 }), { account: 0, cash: 0, fromCash: 20_000 }, "never below zero");
 });

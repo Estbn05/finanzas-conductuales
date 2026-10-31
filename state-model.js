@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.92";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.100";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
@@ -443,6 +443,20 @@ export function filterMerchantRulesForJobs(rules, jobs) {
   return (rules || []).filter((rule) => validCategories.has(rule.category));
 }
 
+export function normalizeBankChecks(checks) {
+  const result = {};
+  if (!checks || typeof checks !== "object") {
+    return result;
+  }
+  Object.entries(checks).forEach(([key, check]) => {
+    const amount = Number(check?.amount);
+    if (key && Number.isFinite(amount) && amount >= 0) {
+      result[key] = { amount: Math.round(amount), at: cleanText(check.at, "") };
+    }
+  });
+  return result;
+}
+
 export const CREDIT_PAYMENTS_LIMIT = 60;
 
 export function normalizeCreditPayments(payments, today) {
@@ -630,6 +644,9 @@ export function createDefaultState(today, defaultView) {
     // Payments of the credit card statement: they move money, they are not expenses (see
     // handleCreditPaymentSubmit), so they are kept apart for the period's card summary.
     creditPayments: [],
+    // "Cuadrar con tu banco": the last balance typed for each pocket, by row key
+    // (reconcile.js), with the day it was checked.
+    bankChecks: {},
     cooldowns: [],
     periodClosures: [],
     merchantRules: [],
@@ -665,6 +682,7 @@ export function migrateState(savedState, today, defaultView) {
     transactions: normalizeTransactions(savedState.transactions || defaults.transactions, today),
     budgetExtras: normalizeBudgetExtras(savedState.budgetExtras || defaults.budgetExtras, today),
     creditPayments: normalizeCreditPayments(savedState.creditPayments, today),
+    bankChecks: normalizeBankChecks(savedState.bankChecks),
     calendarEvents: normalizeCalendarEvents(savedState.calendarEvents || defaults.calendarEvents, today),
     dailyReminder: normalizeDailyReminder(savedState.dailyReminder || defaults.dailyReminder),
     liquidity: normalizeLiquidity(savedState.liquidity || defaults.liquidity),
@@ -717,7 +735,7 @@ const MERGE_COLLECTIONS = {
   periodIncomeApplied: "windowStart"
 };
 // Merged field by field.
-const MERGE_FIELDS = ["profile", "settings", "dailyReminder", "retiredCategoryNames"];
+const MERGE_FIELDS = ["profile", "settings", "dailyReminder", "retiredCategoryNames", "bankChecks"];
 // Balances: each side's change since the base is added, so two expenses on two phones
 // both come out of the account.
 const MERGE_BALANCES = ["account", "cash", "credit"];

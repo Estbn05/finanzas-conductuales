@@ -10,6 +10,7 @@ import {
   calculatePlan as calculateFinancePlan,
   categoryStatus as getCategoryStatus,
   findLoggedIncome,
+  freeByLocation,
   hasFund,
   freeShareOfBudget,
   isSavingsJob,
@@ -20,7 +21,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.92";
+} from "./finance-core.js?v=1.1.100";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -33,11 +34,12 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.92";
-import { isStale, looksLikeEarlyPay, looksLikePay, pendingSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.92";
-import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.92";
-import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.92";
-import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.92";
+} from "./movements.js?v=1.1.100";
+import { isStale, looksLikeEarlyPay, looksLikePay, pendingSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.100";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.100";
+import { bankBoxKey, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.100";
+import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.100";
+import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.100";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -86,7 +88,7 @@ import {
   remoteChangedSinceLastSync,
   CREDIT_PAYMENTS_LIMIT,
   uid
-} from "./state-model.js?v=1.1.92";
+} from "./state-model.js?v=1.1.100";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -102,7 +104,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.92";
+} from "./sync-client.js?v=1.1.100";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -222,8 +224,8 @@ const NAV_ITEMS = [
   { id: "calendar", label: "Gastos planeados", icon: "calendar" },
   { id: "profile", label: "Datos", icon: "user" }
 ];
-// Progreso and the period close are reached from Plan.
-const APP_VIEWS = new Set([...NAV_ITEMS.map((item) => item.id), "periodClose", "progress"]);
+// Progreso, the period close and "Cuadrar con tu banco" are reached from Plan.
+const APP_VIEWS = new Set([...NAV_ITEMS.map((item) => item.id), "periodClose", "progress", "reconcile"]);
 
 const app = document.querySelector("#app");
 let state = loadState();
@@ -302,6 +304,16 @@ let planSheet = "";
 let pendingJobRemovalId = "";
 // The category open in "Editar categoría" (planSheet "edit-job").
 let editingJobId = "";
+// "Cuadrar con tu banco": what is being typed in each pocket, by row key, and the pocket
+// being typed in, so a re-render (a sync, a bank notification) neither saves half a
+// number nor takes the field away mid-typing.
+let reconcileDrafts = {};
+// The screen the last render() drew, so a re-render of the same screen (a save, a sync, a
+// bank notification) does not replay its entrance animation (keepRenderStill).
+let lastRenderedView = "";
+let reconcileFocusKey = "";
+// "Otra…" in "¿En qué cajita de tu banco está?" (renderBankBoxField).
+const OTHER_BANK_BOX = "__other";
 // The cadences a recurring category can be edited to (the same as when it is created).
 const EDITABLE_CADENCES = [
   { value: "weekly", label: "Semanal" },
@@ -1036,7 +1048,8 @@ function syncQuickExpenseWithLocation(options = {}) {
 // el DOM, asi que `app.innerHTML = ...` lo borra sin dejar rastro.
 function hasOpenUserInput() {
   return Boolean(
-    quickExpenseOpen ||
+    isTypingOnScreen() ||
+      quickExpenseOpen ||
       planSheet ||
       state.showDiagnosis ||
       profileNeedsOnboarding() ||
@@ -1049,6 +1062,56 @@ function hasOpenUserInput() {
       periodReportOpen ||
       lockMode
   );
+}
+
+// A field on the screen itself (not in a sheet) that has the cursor: Cuadrar con tu banco,
+// the Movimientos search. Rebuilding the DOM there took the field away mid-number.
+function isTypingOnScreen() {
+  const active = document.activeElement;
+  return Boolean(
+    active &&
+      app.contains(active) &&
+      (active.tagName === "TEXTAREA" || (active.tagName === "INPUT" && !["checkbox", "radio", "button", "submit"].includes(active.type)))
+  );
+}
+
+// render() rebuilds the whole app from HTML, so every entrance animation (the screen
+// fading in, the free money "pop", the Plan ring drawing itself, a sheet's backdrop)
+// replayed on every save, sync or bank notification: the app blinked as if reloading.
+// Before the rebuild, what is already on screen marks itself to stay still; after it,
+// anything that turned out new (another screen, another sheet, a new amount or notice)
+// gets its animation back. A sheet's scroll position is kept too.
+function renderedDialogKey() {
+  const dialog = app.querySelector('[role="dialog"], [role="alertdialog"]');
+  return dialog ? dialog.getAttribute("aria-labelledby") || dialog.getAttribute("aria-label") || "dialog" : "";
+}
+
+function keepRenderStill() {
+  const before = {
+    view: lastRenderedView,
+    dialog: renderedDialogKey(),
+    dialogScroll: app.querySelector(".bottom-sheet, .quick-expense-panel")?.scrollTop || 0,
+    free: app.querySelector(".money-bar > strong")?.textContent || "",
+    snackbar: app.querySelector(".snackbar")?.textContent || ""
+  };
+  app.classList.toggle("is-same-view", Boolean(before.view) && before.view === state.activeView);
+  app.classList.toggle("keeps-dialog", Boolean(before.dialog));
+  app.classList.toggle("keeps-free", Boolean(before.free));
+  app.classList.toggle("keeps-snackbar", Boolean(before.snackbar));
+  return {
+    settle() {
+      lastRenderedView = state.activeView;
+      const dialog = renderedDialogKey();
+      if (dialog && dialog === before.dialog) {
+        const sheet = app.querySelector(".bottom-sheet, .quick-expense-panel");
+        if (sheet && before.dialogScroll) sheet.scrollTop = before.dialogScroll;
+      } else {
+        app.classList.remove("keeps-dialog");
+      }
+      if ((app.querySelector(".money-bar > strong")?.textContent || "") !== before.free) app.classList.remove("keeps-free");
+      if ((app.querySelector(".snackbar")?.textContent || "") !== before.snackbar) app.classList.remove("keeps-snackbar");
+    }
+  };
 }
 
 // Para los re-render que el usuario NO pidio: la red que aparece o se cae, el tema del
@@ -1101,6 +1164,7 @@ function render() {
   const plan = calculatePlan();
   app.classList.toggle("is-menu-open", menuOpen);
   app.classList.toggle("is-expense-open", quickExpenseOpen);
+  const still = keepRenderStill();
   app.innerHTML = `
     <button class="drawer-scrim" type="button" data-action="close-menu" aria-label="Cerrar menú"></button>
     <aside class="sidebar" aria-label="Menú principal">
@@ -1147,6 +1211,7 @@ function render() {
     ${profileNeedsOnboarding() || state.showDiagnosis ? renderDiagnosisModal() : ""}
     ${renderSnackbar()}
   `;
+  still.settle();
 
   bindEvents();
   if (tour) scheduleTourLayout();
@@ -1430,7 +1495,7 @@ function renderThemeSwitcher() {
 
 function renderNavItem(item) {
   const active =
-    state.activeView === item.id || (item.id === "budget" && ["periodClose", "progress"].includes(state.activeView)) ? "is-active" : "";
+    state.activeView === item.id || (item.id === "budget" && ["periodClose", "progress", "reconcile"].includes(state.activeView)) ? "is-active" : "";
   return `
     <button class="nav-item ${active} ${item.inBottomNav ? "is-in-bottom-nav" : ""}" type="button" data-view="${item.id}">
       <span class="nav-number" aria-hidden="true">${renderIcon(item.icon)}</span>
@@ -1494,7 +1559,7 @@ function renderBottomNavigation() {
         <span class="bottom-nav-icon" aria-hidden="true">${renderIcon("home")}</span>
         <span>Inicio</span>
       </button>
-      <button class="bottom-nav-item ${["budget", "periodClose", "progress"].includes(state.activeView) ? "is-active" : ""}" type="button" data-view="budget">
+      <button class="bottom-nav-item ${["budget", "periodClose", "progress", "reconcile"].includes(state.activeView) ? "is-active" : ""}" type="button" data-view="budget">
         <span class="bottom-nav-icon" aria-hidden="true">${renderIcon("plan")}</span>
         <span>Plan</span>
       </button>
@@ -1971,8 +2036,25 @@ function renderHeader(plan) {
           ? `<span class="money-split danger-text">Exceso sobre topes: ${formatMoney(summary.categoryOverspent)}</span>`
           : ""
       }
+      ${summary.usesLiquidityBasedFree ? renderFreeByLocation(summary, liquidity) : ""}
       ${summary.usesLiquidityBasedFree ? renderMoneyMathFromBalance(summary, liquidity) : renderMoneyMathFromBudget(summary, liquidity)}
     </header>
+  `;
+}
+
+// Libre in the account and in cash, so the account part can be checked against the bank
+// without the wallet mixed in (freeByLocation). Only worth showing when there is cash.
+function renderFreeByLocation(summary, liquidity) {
+  const split = freeByLocation({ account: liquidity.account, cash: liquidity.cash, credit: liquidity.credit, reserved: summary.reservedRemaining });
+  if (liquidity.cash <= 0 && !split.fromCash) {
+    return "";
+  }
+  return `
+    <div class="money-free-split" aria-label="Dónde está tu dinero libre">
+      <span>En la cuenta<strong>${formatMoney(split.account)}</strong></span>
+      <span>En efectivo<strong>${formatMoney(split.cash)}</strong></span>
+    </div>
+    ${split.fromCash > 0 ? `<p class="money-free-split-note">Lo reservado no cabe en tu cuenta: ${formatMoney(split.fromCash)} salen del efectivo.</p>` : ""}
   `;
 }
 
@@ -2117,6 +2199,7 @@ function renderView(plan) {
     today: renderToday,
     budget: renderBudget,
     periodClose: renderPeriodCloseScreen,
+    reconcile: renderReconcileScreen,
     savings: renderSavings,
     calendar: renderCalendar,
     movements: renderMovements,
@@ -2417,7 +2500,7 @@ function animateBudgetRingCharts() {
   if (!arcs.length) {
     return;
   }
-  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches || app.classList.contains("is-same-view");
   const items = Array.from(arcs).map((arc) => ({
     arc,
     cx: Number(arc.dataset.cx),
@@ -2535,6 +2618,11 @@ function renderBudget(plan) {
                 <b>&rsaquo;</b>
               </button>`
         }
+        <button class="plan-action" type="button" data-view="reconcile">
+          <span class="plan-action-icon" aria-hidden="true">${renderIcon("wallet")}</span>
+          <span><strong>Cuadrar con tu banco</strong><small>Compara cada categoría con su cajita o bolsillo</small></span>
+          <b>&rsaquo;</b>
+        </button>
         <button class="plan-action" type="button" data-view="progress">
           <span class="plan-action-icon" aria-hidden="true">${renderIcon("trend")}</span>
           <span><strong>Periodos anteriores</strong><small>Cómo te fue y cómo cambia de un periodo a otro</small></span>
@@ -2605,6 +2693,181 @@ function renderPeriodCloseCard(summary = budgetSummary(), plan = calculatePlan()
       <button class="btn secondary" type="button" data-view="periodClose">Ver tu periodo</button>
     </article>
   `;
+}
+
+// "Cuadrar con tu banco" (reconcile.js): each pocket of the bank account next to what the
+// app says it should hold, so checking Nu's cajitas takes no adding up by hand.
+function currentReconcileRows() {
+  const summary = budgetSummary();
+  const liquidity = liquiditySummary(summary);
+  const split = freeByLocation({ account: liquidity.account, cash: liquidity.cash, credit: liquidity.credit, reserved: summary.reservedRemaining });
+  const categories = categoryStatus()
+    .filter((category) => category.id !== FREE_CATEGORY_ID)
+    .map((category) => ({
+      id: category.id,
+      name: category.name,
+      remaining: Number(category.budget || 0) - Number(category.spent || 0),
+      box: state.budgetJobs.find((job) => job.id === category.id)?.bankBox || ""
+    }));
+  return reconcileRows({ categories, freeInAccount: split.account, owedOnCard: liquidity.credit, checks: state.bankChecks || {} });
+}
+
+function reconcileStatusText(row) {
+  const { kind, difference } = row.status;
+  if (kind === "unchecked") return "Escribe cuánto dice tu banco.";
+  if (kind === "match") return "Cuadra.";
+  if (kind === "interest") return `Cuadra, y tu banco tiene ${formatMoney(difference)} más: son rendimientos.`;
+  const amount = formatMoney(Math.abs(difference));
+  if (row.key === "free") {
+    return kind === "more"
+      ? `Tu banco tiene ${amount} más. ¿Te faltó anotar un ingreso, o dejaste ahí plata que es de una categoría?`
+      : `Tu banco tiene ${amount} menos. ¿Te faltó anotar un gasto, o esa plata está en otra cajita?`;
+  }
+  if (row.key === "credit") {
+    return kind === "more" ? `Tienes ${amount} más de lo que debes en la tarjeta.` : `Te faltan ${amount} para cubrir lo que debes en la tarjeta.`;
+  }
+  return kind === "more"
+    ? `Tu banco tiene ${amount} más. Si es plata para esto, súbela en la categoría (Editar).`
+    : `Tu banco tiene ${amount} menos. ¿Te faltó anotar un gasto, o lo pagaste desde otra cajita?`;
+}
+
+function checkedAgoLabel(at) {
+  if (!at) return "";
+  const today = todayKey();
+  if (at === today) return "Revisado hoy";
+  if (at === previousDay(today)) return "Revisado ayer";
+  return `Revisado el ${formatShortDate(at)}`;
+}
+
+function renderReconcileScreen() {
+  const rows = currentReconcileRows();
+  const totals = reconcileSummary(rows);
+  const cash = liquiditySummary().cash;
+  return `
+    <section class="screen-view reconcile-view" aria-label="Cuadrar con tu banco">
+      <div class="screen-title-row">
+        <div>
+          <p class="eyebrow">Plan</p>
+          <h1>Cuadrar con tu banco</h1>
+        </div>
+      </div>
+      <p class="reconcile-intro">Escribe lo que dice cada cajita o bolsillo de tu banco y la app te dice si coincide con lo que le queda a cada categoría.${
+        totals.checked ? ` <strong>Cuadran ${totals.matching} de ${totals.checked}.</strong>` : ""
+      }</p>
+      <div class="reconcile-list">
+        ${rows.map((row) => renderReconcileRow(row)).join("")}
+      </div>
+      ${cash > 0 ? `<p class="reconcile-note">Tu efectivo (${formatMoney(cash)}) no está en el banco, así que no entra aquí.</p>` : ""}
+      <p class="reconcile-note">Si pagas algo de una categoría con efectivo o con la tarjeta, en la app baja lo que le queda pero la cajita no se mueve hasta que pasas esa plata.</p>
+      <button class="btn ghost" type="button" data-view="budget">Volver al plan</button>
+    </section>
+  `;
+}
+
+function renderReconcileRow(row) {
+  const kind = row.status.kind;
+  const hint =
+    row.key === "free"
+      ? "Tu disponible, más tu cajita de libre si tienes una"
+      : row.key === "credit"
+        ? "La cajita donde guardas para pagar la tarjeta, si tienes una"
+        : row.members.length > 1
+          ? row.members.map((member) => `${escapeHtml(member.name)} ${formatMoney(member.remaining)}`).join(" · ")
+          : "";
+  return `
+    <article class="reconcile-row is-${kind}">
+      <div class="reconcile-head">
+        <strong>${escapeHtml(row.label)}</strong>
+        <span>La app: ${formatMoney(row.expected)}</span>
+      </div>
+      ${hint ? `<small class="reconcile-hint">${hint}</small>` : ""}
+      <label class="reconcile-input">
+        <span>En tu banco</span>
+        <input type="text" data-money-input="true" inputmode="numeric" placeholder="$0" value="${escapeAttr(row.key in reconcileDrafts ? reconcileDrafts[row.key] : row.check ? row.check.amount : "")}" data-reconcile-key="${escapeAttr(row.key)}" data-reconcile-expected="${escapeAttr(row.expected)}" data-reconcile-label="${escapeAttr(row.label)}" aria-label="Cuánto dice tu banco en ${escapeAttr(row.label)}">
+      </label>
+      <p class="reconcile-status"><span aria-hidden="true">${kind === "match" || kind === "interest" ? "✓" : kind === "unchecked" ? "·" : "!"}</span> ${reconcileStatusText(row)}</p>
+      <div class="reconcile-foot">
+        ${row.check?.at ? `<small>${checkedAgoLabel(row.check.at)}</small>` : "<small></small>"}
+        ${
+          kind === "interest"
+            ? `<button class="btn ghost" type="button" data-action="register-interest" data-id="${escapeAttr(row.key)}">Anotar ${formatMoney(row.status.difference)}</button>`
+            : ""
+        }
+      </div>
+    </article>
+  `;
+}
+
+// While typing, the row's message follows the number without re-rendering; the number is
+// saved when the field is left (or Enter), never in between.
+function bindReconcileInputs() {
+  document.querySelectorAll("[data-reconcile-key]").forEach((input) => {
+    const key = input.dataset.reconcileKey;
+    const row = input.closest(".reconcile-row");
+    input.addEventListener("focus", () => {
+      reconcileFocusKey = key;
+    });
+    input.addEventListener("input", () => {
+      reconcileDrafts[key] = input.value;
+      const raw = String(input.value || "").trim();
+      const status = reconcileStatus(Number(input.dataset.reconcileExpected || 0), raw === "" ? undefined : numberFrom(raw));
+      row.className = `reconcile-row is-${status.kind}`;
+      const mark = status.kind === "match" || status.kind === "interest" ? "✓" : status.kind === "unchecked" ? "·" : "!";
+      row.querySelector(".reconcile-status").innerHTML = `<span aria-hidden="true">${mark}</span> ${reconcileStatusText({ key, label: input.dataset.reconcileLabel, status })}`;
+    });
+    input.addEventListener("change", () => {
+      if (!input.isConnected) {
+        return;
+      }
+      delete reconcileDrafts[key];
+      reconcileFocusKey = "";
+      const checks = { ...(state.bankChecks || {}) };
+      const raw = String(input.value || "").trim();
+      if (raw === "") {
+        delete checks[key];
+      } else {
+        checks[key] = { amount: Math.max(0, Math.round(numberFrom(raw))), at: todayKey() };
+      }
+      state.bankChecks = checks;
+      saveState();
+      render();
+    });
+  });
+  // Re-rendered while typing: back into the same field, cursor at the end.
+  const focused = reconcileFocusKey && document.querySelector(`[data-reconcile-key="${CSS.escape(reconcileFocusKey)}"]`);
+  if (focused && document.activeElement !== focused && reconcileFocusKey in reconcileDrafts) {
+    focused.focus();
+  }
+}
+
+// Interest the bank paid into a pocket: income to the account, and, for a category's
+// pocket, set aside in that category (the one with the most left when several share the
+// pocket), so libre stays the same and the pocket adds up. Recorded like the savings share
+// of Dinero extra, so deleting that income takes it back out of the category too.
+function registerBankInterest(key) {
+  const row = currentReconcileRows().find((item) => item.key === key);
+  if (!row || row.status.kind !== "interest") {
+    return;
+  }
+  const amount = row.status.difference;
+  const now = new Date().toISOString();
+  const member = row.members.slice().sort((a, b) => b.remaining - a.remaining)[0];
+  const job = member ? state.budgetJobs.find((item) => item.id === member.id) : null;
+  adjustLiquidity("account", amount, "extra");
+  if (job) {
+    setAsideForThisPeriod(job, job.name, amount, now);
+  }
+  state.budgetExtras.push({
+    id: uid("extra"),
+    source: `Rendimientos ${row.label}`.slice(0, 60),
+    amount,
+    date: todayKey(),
+    location: "account",
+    allocation: { savingsPercent: job ? 100 : 0, savingsAmount: job ? amount : 0, freeAmount: job ? 0 : amount, savingsJobId: job?.id || "" },
+    updated_at: now
+  });
+  state.lastAlert = `Anoté ${formatMoney(amount)} de rendimientos${job ? ` en ${job.name}` : ""}.`;
+  showNoticeSnackbar(state.lastAlert, { renderNow: false });
 }
 
 // What can go out each day until the period ends without touching what is reserved.
@@ -3332,13 +3595,21 @@ function renderEditJobSheet() {
           </label>
           ${
             isFundOnly
-              ? `<label>
-                  Apartado
-                  <input name="fund" type="number" min="${escapeAttr(Math.max(1000, standing.fund.total - standing.releasable))}" step="1000" inputmode="numeric" value="${escapeAttr(standing.fund.total)}" required>
-                </label>
-                <p class="setaside-note">Si lo subes, la diferencia sale de lo libre (tienes ${formatMoney(budgetSummary().freeRemaining)}). Si lo bajas, vuelve a lo libre${
-                  standing.fund.total - standing.releasable > 0 ? `, hasta ${formatMoney(standing.fund.total - standing.releasable)}, porque eso ya lo usaste` : ""
-                }.</p>`
+              ? `<div class="sheet-field fund-change-field" data-fund-total="${escapeAttr(standing.fund.total)}">
+                  <span class="sheet-label">Apartado ahora: ${formatMoney(standing.fund.total)}</span>
+                  ${renderChoicePills("fundMode", [
+                    { value: "add", label: "Agregar" },
+                    { value: "remove", label: "Quitar" }
+                  ], "add")}
+                  <label>
+                    ¿Cuánto?
+                    <input name="fundDelta" type="number" min="0" step="1000" inputmode="numeric" placeholder="$0">
+                  </label>
+                  <p class="fund-change-preview" data-fund-preview aria-live="polite"></p>
+                  <p class="setaside-note">Agregar sale de lo libre (tienes ${formatMoney(budgetSummary().freeRemaining)}). Quitar vuelve a lo libre${
+                    standing.releasable < standing.fund.total ? `, hasta ${formatMoney(standing.releasable)}, porque el resto ya lo usaste` : ""
+                  }.</p>
+                </div>`
               : `<label>
                   Monto
                   <input name="amount" type="number" min="1000" step="1000" inputmode="numeric" value="${escapeAttr(job.amount)}" required>
@@ -3349,12 +3620,93 @@ function renderEditJobSheet() {
                 </div>
                 <p class="setaside-note">El cambio rige desde este periodo. Lo que ya gastaste no cambia${hasFund(job) ? ", y lo que apartaste en ella sigue apartado" : ""}.</p>`
           }
+          ${renderBankBoxField(job)}
           <button class="btn primary" type="submit">Guardar cambios</button>
           <button class="btn ghost destructive-link" type="button" data-action="request-remove-job" data-id="${escapeAttr(job.id)}">Eliminar categoría</button>
         </form>
       </section>
     </div>
   `;
+}
+
+// "¿En qué cajita de tu banco está?": its own (the usual case), the pocket of another
+// category to be checked together, or a new shared name ("Otra…"). Picked, not typed, so
+// the same pocket is never spelled two ways.
+function bankBoxOptions(job) {
+  const ownKey = bankBoxKey(job.name);
+  const seen = new Set([ownKey]);
+  const options = [{ value: "", label: "Su propia cajita" }];
+  state.budgetJobs
+    .filter((item) => item.id !== job.id)
+    .forEach((item) => {
+      const label = String(item.bankBox || "").trim() || item.name;
+      const key = bankBoxKey(label);
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        options.push({ value: label, label });
+      }
+    });
+  const current = String(job.bankBox || "").trim();
+  if (current && !seen.has(bankBoxKey(current))) {
+    options.push({ value: current, label: current });
+  }
+  options.push({ value: OTHER_BANK_BOX, label: "Otra…" });
+  return options;
+}
+
+function renderBankBoxField(job) {
+  const options = bankBoxOptions(job);
+  const currentKey = bankBoxKey(job.bankBox || "");
+  const selected = currentKey && currentKey !== bankBoxKey(job.name) ? options.find((option) => option.value && bankBoxKey(option.value) === currentKey)?.value || "" : "";
+  return `
+    <div class="sheet-field bank-box-field">
+      <span class="sheet-label">¿En qué cajita de tu banco está?</span>
+      ${renderChoicePills("bankBox", options, selected)}
+      <input name="bankBoxOther" type="text" maxlength="32" placeholder="Nombre de la cajita, ej. Varios" autocomplete="off" aria-label="Nombre de la cajita" hidden>
+      <p class="setaside-note">Si la guardas junto con otra, elige esa: en "Cuadrar con tu banco" se suman.</p>
+    </div>
+  `;
+}
+
+// "Quedará en $626.000" while typing how much to add or take out of a fund.
+function bindFundChangeField(form) {
+  const field = form.querySelector("[data-fund-total]");
+  const preview = form.querySelector("[data-fund-preview]");
+  const input = form.elements.namedItem("fundDelta");
+  if (!field || !preview || !input) {
+    return;
+  }
+  const update = () => {
+    const total = Number(field.dataset.fundTotal || 0);
+    const delta = numberFrom(input.value);
+    const removing = form.elements.namedItem("fundMode").value === "remove";
+    preview.textContent = delta > 0 ? `Quedará en ${formatMoney(Math.max(0, total + (removing ? -delta : delta)))}.` : "";
+  };
+  input.addEventListener("input", update);
+  form.querySelectorAll('[data-choice-name="fundMode"]').forEach((pill) => pill.addEventListener("click", () => window.setTimeout(update)));
+  update();
+}
+
+function bindBankBoxField(form) {
+  const other = form.elements.namedItem("bankBoxOther");
+  if (!other) {
+    return;
+  }
+  form.querySelectorAll('[data-choice-name="bankBox"]').forEach((pill) => {
+    pill.addEventListener("click", () => {
+      other.hidden = pill.dataset.choiceValue !== OTHER_BANK_BOX;
+      if (!other.hidden) {
+        other.focus();
+      }
+    });
+  });
+}
+
+// The pocket chosen in the form, "" when it is the category's own.
+function bankBoxFromForm(data, job, name) {
+  const choice = String(data.get("bankBox") || "");
+  const box = choice === OTHER_BANK_BOX ? cleanText(data.get("bankBoxOther"), "") : choice;
+  return bankBoxKey(box) === bankBoxKey(name) ? "" : box.slice(0, 32);
 }
 
 function handleEditJobSubmit(event) {
@@ -3370,17 +3722,18 @@ function handleEditJobSubmit(event) {
     failCategoryForm(`Ya tienes una categoría llamada ${duplicate.name}.`);
     return;
   }
-  const changes = { name };
+  const changes = { name, bankBox: bankBoxFromForm(data, job, name) };
   let before = 0;
   let after = 0;
   let fundChange = 0;
   if (job.cadence === "once") {
     const standing = fundStanding(job);
-    const wanted = numberFrom(data.get("fund"));
+    const delta = numberFrom(data.get("fundDelta"));
+    const wanted = standing.fund.total + (data.get("fundMode") === "remove" ? -delta : delta);
     const floor = standing.fund.total - standing.releasable;
     fundChange = wanted - standing.fund.total;
     if (wanted <= 0 || wanted < floor) {
-      failCategoryForm(floor > 0 ? `Ya usaste ${formatMoney(floor)} de ${job.name}: no puede quedar en menos.` : "Escribe un monto mayor que cero.");
+      failCategoryForm(floor > 0 ? `Solo puedes quitar ${formatMoney(standing.releasable)} de ${job.name}: el resto ya lo usaste.` : "No puedes quitar todo: para eso usa Liberar o Eliminar categoría.");
       return;
     }
     const error = fundChange > 0 ? categoryReserveError({ name, amount: fundChange, createsCategory: false }) : "";
@@ -5110,8 +5463,12 @@ function bindEvents() {
     diagnosisForm.addEventListener("submit", handleDiagnosisSubmit);
   }
 
+  bindReconcileInputs();
+
   const editJobForm = document.querySelector("#edit-job-form");
   if (editJobForm) {
+    bindBankBoxField(editJobForm);
+    bindFundChangeField(editJobForm);
     editJobForm.addEventListener("submit", handleEditJobSubmit);
   }
 
@@ -6191,6 +6548,7 @@ function handleAction(event) {
     },
     "copy-period-report": copyPeriodReport,
     "share-period-export": sharePeriodExport,
+    "register-interest": () => registerBankInterest(id),
     "review-uncategorized": () => {
       transactionHistoryFilter = "uncategorized";
       movementsPeriodOffset = 0;
@@ -9443,6 +9801,7 @@ function viewFromHash(fallback) {
     calendario: "calendar",
     eventos: "calendar",
     cierre: "periodClose",
+    cuadre: "reconcile",
     "cierre-periodo": "periodClose",
     movimientos: "movements",
     historial: "movements",
@@ -9485,6 +9844,7 @@ function hashFromView(view) {
     today: "inicio",
     budget: "plan",
     periodClose: "cierre",
+    reconcile: "cuadre",
     savings: "ahorro",
     calendar: "calendario",
     movements: "movimientos",
