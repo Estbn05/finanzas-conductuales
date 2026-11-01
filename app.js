@@ -21,7 +21,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.101";
+} from "./finance-core.js?v=1.1.104";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -34,12 +34,12 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.101";
-import { isStale, looksLikeEarlyPay, looksLikePay, pendingSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.101";
-import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.101";
-import { bankBoxKey, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.101";
-import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.101";
-import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.101";
+} from "./movements.js?v=1.1.104";
+import { isStale, looksLikeEarlyPay, looksLikePay, readSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.104";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.104";
+import { bankBoxKey, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.104";
+import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.104";
+import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.104";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -88,7 +88,7 @@ import {
   remoteChangedSinceLastSync,
   CREDIT_PAYMENTS_LIMIT,
   uid
-} from "./state-model.js?v=1.1.101";
+} from "./state-model.js?v=1.1.104";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -104,7 +104,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.101";
+} from "./sync-client.js?v=1.1.104";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -121,7 +121,7 @@ const BACKUP_STORE = "backups";
 const BACKUP_LIMIT = 3;
 // Categories: kept few so the plan stays readable. Learned merchant shortcuts: the
 // least recently used are forgotten beyond this many.
-const MAX_CATEGORIES = 10;
+const MAX_CATEGORIES = 15;
 const MAX_MERCHANT_RULES = 30;
 // In-memory list the UI reads synchronously; IndexedDB is its durable copy.
 let localBackups = [];
@@ -2601,10 +2601,11 @@ function renderBudget(plan) {
             { key: "spent", label: "Gastado", ratio: spentRatio, amountLabel: formatCompactMoney(ring.spent), color: "var(--ds-amber)" },
             { key: "free", label: "Sin reservar", ratio: freeRatio, amountLabel: formatCompactMoney(ring.free), color: "#69d5b5" }
           ],
-          formatMoney(summary.income),
+          formatMoney(ring.total),
           `${Math.round(freeRatio)}% sin reservar`
         )}
-        ${ring.outside > 0 ? `<p class="inline-warning">Gastos fuera del presupuesto: ${formatMoney(ring.outside)}.</p>` : ""}
+        ${ring.outside > 0 ? `<p class="inline-warning">Gastaste y apartaste ${formatMoney(ring.outside)} más de lo que entró este periodo.</p>` : ""}
+        ${ring.short > 0 ? `<p class="inline-warning">Apartaste ${formatMoney(ring.short)} más de lo que tienes en la cuenta y en efectivo.</p>` : ""}
       </article>
 
       ${shouldShowPeriodClose(closeReport) ? renderPeriodCloseCard(summary, plan, closeReport) : ""}
@@ -6379,6 +6380,7 @@ function handleAction(event) {
     "forget-bank-unreadable",
     "register-bank-suggestion",
     "register-bank-income",
+    "register-bank-refund",
     "dismiss-bank-suggestion",
     "open-pay-received",
     "confirm-bank-pay"
@@ -6650,6 +6652,8 @@ function handleAction(event) {
     "open-bank-background-settings": () => nativeBankNotifications()?.openBackgroundSettings().catch(() => {}),
     "register-bank-suggestion": () => registerBankSuggestion(id),
     "register-bank-income": () => registerBankIncome(id),
+    "register-bank-refund": () => registerBankIncome(id),
+    "remove-refunded-expense": () => removeRefundedExpense(id),
     "confirm-bank-pay": () => registerBankPay(id),
     "open-pay-received": () => {
       payDraft = null;
@@ -8148,7 +8152,13 @@ async function refreshBankSuggestions({ recheck = true } = {}) {
     if (stale.length) {
       plugin.dismiss({ ids: stale })?.catch?.(() => {});
     }
-    bankSuggestions = pendingSuggestions(pending, { transactions: state.transactions, extras: state.budgetExtras });
+    const read = readSuggestions(pending, { transactions: state.transactions, extras: state.budgetExtras });
+    bankSuggestions = read.suggestions;
+    // A purchase given back before it was confirmed: neither is offered, and the phone
+    // forgets both.
+    if (read.settled.length) {
+      plugin.dismiss({ ids: read.settled })?.catch?.(() => {});
+    }
     bankUnreadable = unreadableNotifications(pending);
   } catch {
     bankStatus = { ...bankStatus, available: true };
@@ -8184,13 +8194,14 @@ function registerBankIncome(id) {
   if (!suggestion) {
     return;
   }
+  const refund = suggestion.kind === "refund";
   extraDraft = {
     bankNotificationId: suggestion.id,
     bank: suggestion.bank,
     date: suggestion.date,
     amount: suggestion.amount,
-    source: suggestion.origin || `Recibido en ${suggestion.bank}`,
-    location: suggestion.location
+    source: refund ? `Devolución de ${suggestion.bank}` : suggestion.origin || `Recibido en ${suggestion.bank}`,
+    location: refund ? "account" : suggestion.location
   };
   planSheet = "extra";
   menuOpen = false;
@@ -8285,12 +8296,74 @@ function bankDateLabel(date) {
 }
 
 // Inicio: what the bank said went out, and what it said came in, each in its own card so
-// the question ("¿gasto?" / "¿ingreso?") is never ambiguous.
+// the question ("¿gasto?" / "¿ingreso?") is never ambiguous. Refunds come first: they undo
+// something.
 function renderBankSuggestions() {
   const pay = bankPaySuggestion();
-  const expenses = bankSuggestions.filter((suggestion) => suggestion.kind !== "income");
+  const expenses = bankSuggestions.filter((suggestion) => suggestion.kind === "expense");
   const income = bankSuggestions.filter((suggestion) => suggestion.kind === "income" && suggestion !== pay);
-  return `${renderBankPayCard(pay)}${renderBankSuggestionCard(expenses, "expense")}${renderBankSuggestionCard(income, "income")}`;
+  const refunds = bankSuggestions.filter((suggestion) => suggestion.kind === "refund");
+  return `${renderBankRefundCard(refunds)}${renderBankPayCard(pay)}${renderBankSuggestionCard(expenses, "expense")}${renderBankSuggestionCard(income, "income")}`;
+}
+
+// The bank gave a purchase back. When the purchase is recorded, the question is whether to
+// remove it (which returns its money to libre); when it is not, whether the money that
+// came back should count as money in.
+function renderBankRefundCard(refunds) {
+  if (!refunds.length) {
+    return "";
+  }
+  return `
+    <article class="cooldown-panel bank-suggestions is-income" aria-label="Devoluciones">
+      <div class="home-section-heading compact-heading">
+        <div>
+          <p class="eyebrow">De tus notificaciones de ${escapeHtml(refunds[0].bank)}</p>
+          <h2>${refunds.length === 1 ? "Te devolvieron una compra" : "Te devolvieron compras"}</h2>
+        </div>
+      </div>
+      <div class="cooldown-list">
+        ${refunds
+          .slice(0, 3)
+          .map((refund) => {
+            const found = Boolean(refund.transactionId);
+            const title = found
+              ? `¿Quitar el gasto${refund.merchant ? ` de ${refund.merchant}` : ""}?`
+              : "No encontré esa compra en la app";
+            const detail = found
+              ? `${refund.bank} te devolvió ${formatMoney(refund.amount)} · ${bankDateLabel(refund.date)}`
+              : `+${formatMoney(refund.amount)} · ${bankDateLabel(refund.date)}`;
+            return `
+          <div class="cooldown-item">
+            <div>
+              <strong>${escapeHtml(title)}</strong>
+              <span>${escapeHtml(detail)}</span>
+            </div>
+            <div class="cooldown-actions">
+              <button class="btn ghost" type="button" data-action="dismiss-bank-suggestion" data-id="${escapeAttr(refund.id)}">${found ? "Dejarlo" : "Ignorar"}</button>
+              ${
+                found
+                  ? `<button class="btn secondary" type="button" data-action="remove-refunded-expense" data-id="${escapeAttr(refund.id)}">Quitar gasto</button>`
+                  : `<button class="btn secondary" type="button" data-action="register-bank-refund" data-id="${escapeAttr(refund.id)}">Sumarlo como entrada</button>`
+              }
+            </div>
+          </div>
+        `;
+          })
+          .join("")}
+      </div>
+    </article>
+  `;
+}
+
+function removeRefundedExpense(id) {
+  const refund = bankSuggestions.find((item) => item.id === id && item.kind === "refund");
+  const transaction = refund && state.transactions.find((item) => item.id === refund.transactionId);
+  if (!transaction) {
+    return;
+  }
+  removeTransaction(transaction.id);
+  forgetBankNotification(refund.id);
+  showNoticeSnackbar(`Quité ${transaction.merchant || "el gasto"}: ${refund.bank} te devolvió ${formatMoney(refund.amount)}.`, { renderNow: false });
 }
 
 function renderBankPayCard(pay) {

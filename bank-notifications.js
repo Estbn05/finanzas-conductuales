@@ -3,8 +3,8 @@
 // or null when it is neither. Pure: unit-tested in tests/bank-notifications.test.mjs.
 //
 // The reading is deliberately conservative: a notification only becomes a suggestion when
-// it has an amount AND clearly says money went out or came in. Anything else (refunds,
-// declined payments, promotions, security codes) is not offered, because a wrong
+// it has an amount AND clearly says money went out, came in, or was given back. Anything
+// else (declined payments, promotions, security codes) is not offered, because a wrong
 // suggestion costs the user more than a missed one.
 //
 // Real Nu notifications (October 2026):
@@ -15,6 +15,9 @@
 //   from a bank  title "Nu"   text "Bancolombia te envió 2.059.928,00."   (a pay)
 //   sent      title "Enviaste $80.000,00"
 //             text  "Le enviaste a HEY***** ALE******** en su cuenta de Bancolombia."
+//   refund    title "Te hicimos una devolución por $71.900,00"
+//             text  "Reversamos esta compra y tu dinero está nuevamente en tu cuenta."
+//             (it does not name the store: the purchase is found by its amount)
 // Other kinds (credit card) are still read with the usual Colombian
 // banking wording until real samples confirm them. On a debug build, what the listener
 // kept can be read with: adb shell run-as com.estbn05.finanzasconductuales cat
@@ -23,8 +26,7 @@
 export const BANK_NAMES = { "com.nu.production": "Nu" };
 
 const OUTGOING = /\b(compra(ste)?|pag(o|aste|ado)|retir(o|aste)|transferiste|enviaste|debito|cargo)\b/;
-// Money that arrived. Refunds and reversals are left out on purpose: whether they return
-// to the account or lower a card's debt is not something the text reliably says.
+// Money that arrived. Refunds are their own kind (REFUND): they undo a purchase.
 const INCOMING = /\b(recibiste|te (llego|envio|enviaron|transfirieron|pagaron|consignaron))\b/;
 const REFUND = /\b(reembolso|devolucion|devolvimos|reversion|reversamos)\b/;
 const NOT_A_MOVEMENT = /\b(rechazad[ao]|declinad[ao]|fallid[ao]|no (pudimos|fue posible|se pudo)|codigo|clave|oferta|promo)/;
@@ -108,7 +110,7 @@ export function suggestionFromNotification(notification) {
   const text = `${notification?.title || ""}\n${notification?.text || ""}`;
   const words = plain(text);
   const amount = parseAmount(text);
-  if (amount <= 0 || REFUND.test(words) || NOT_A_MOVEMENT.test(words)) {
+  if (amount <= 0 || NOT_A_MOVEMENT.test(words)) {
     return null;
   }
   const base = {
@@ -118,6 +120,9 @@ export function suggestionFromNotification(notification) {
     date: dateKey(notification.postedAt),
     postedAt: Number(notification.postedAt) || 0
   };
+  if (REFUND.test(words)) {
+    return { ...base, kind: "refund", source: parseSource(text) };
+  }
   if (INCOMING.test(words)) {
     // Money only lands in the account: a bank does not deposit into the user's cash.
     return { ...base, kind: "income", origin: parseOrigin(notification.text) || parseOrigin(notification.title), location: "account" };
@@ -185,6 +190,50 @@ export function alreadyRecorded(suggestion, { transactions = [], extras = [] } =
   return suggestion.kind === "income" ? extras.some(matches) : transactions.some(matches);
 }
 
+// How far back a refund looks for the purchase it gives back.
+export const REFUND_LOOKBACK_DAYS = 30;
+
+// A refund undoes a purchase of the same amount made before it (the bank's text does not
+// name the store, so the amount is the match; the most recent purchase wins):
+// - a purchase the bank notified that is still waiting to be confirmed: both go away, the
+//   user never sees either (settled);
+// - a purchase already recorded: the refund asks to remove it (transactionId);
+// - neither: the refund stays as money that came back, for the user to judge.
+// Each purchase is matched by one refund only.
+export function matchRefunds(suggestions = [], { transactions = [] } = {}) {
+  const settled = [];
+  const used = new Set();
+  const refunds = suggestions
+    .filter((suggestion) => suggestion.kind === "refund")
+    .sort((a, b) => a.postedAt - b.postedAt);
+  const resolved = new Map();
+  const inReach = (refund, date) => date <= refund.date && daysApart(date, refund.date) <= REFUND_LOOKBACK_DAYS;
+  for (const refund of refunds) {
+    const pending = suggestions
+      .filter((item) => item.kind === "expense" && !used.has(item.id) && item.amount === refund.amount && item.postedAt <= refund.postedAt && inReach(refund, item.date))
+      .sort((a, b) => b.postedAt - a.postedAt)[0];
+    if (pending) {
+      used.add(pending.id);
+      settled.push(pending.id, refund.id);
+      continue;
+    }
+    const recorded = transactions
+      .filter((item) => !used.has(item.id) && Number(item.amount) === refund.amount && inReach(refund, String(item.date || "").slice(0, 10)))
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+    if (recorded) {
+      used.add(recorded.id);
+      resolved.set(refund.id, { ...refund, transactionId: recorded.id, merchant: recorded.merchant || "" });
+    } else {
+      resolved.set(refund.id, { ...refund, transactionId: "" });
+    }
+  }
+  const gone = new Set(settled);
+  return {
+    suggestions: suggestions.filter((item) => !gone.has(item.id)).map((item) => resolved.get(item.id) || item),
+    settled
+  };
+}
+
 // A notification this old is not offered any more: it would land in a period that may be
 // closed already, and by then the user has either recorded it by hand or let it go.
 export const SUGGESTION_MAX_AGE_DAYS = 30;
@@ -193,13 +242,20 @@ export function isStale(notification, now = Date.now()) {
   return now - Number(notification?.postedAt || 0) > SUGGESTION_MAX_AGE_DAYS * 86_400_000;
 }
 
-// Newest first; recorded and stale ones left out.
-export function pendingSuggestions(notifications = [], recorded = {}, now = Date.now()) {
-  return notifications
+// Newest first; recorded and stale ones left out, and refunds matched to their purchase
+// (matchRefunds). settled: the ids of the purchase+refund pairs that cancelled out, for
+// the phone to forget.
+export function readSuggestions(notifications = [], recorded = {}, now = Date.now()) {
+  const fresh = notifications
     .filter((notification) => !isStale(notification, now))
     .map(suggestionFromNotification)
-    .filter((suggestion) => suggestion && !alreadyRecorded(suggestion, recorded))
-    .sort((a, b) => b.postedAt - a.postedAt);
+    .filter((suggestion) => suggestion && (suggestion.kind === "refund" || !alreadyRecorded(suggestion, recorded)));
+  const { suggestions, settled } = matchRefunds(fresh, recorded);
+  return { suggestions: suggestions.sort((a, b) => b.postedAt - a.postedAt), settled };
+}
+
+export function pendingSuggestions(notifications = [], recorded = {}, now = Date.now()) {
+  return readSuggestions(notifications, recorded, now).suggestions;
 }
 
 // Recent notifications from the bank that are not a movement the app can read: promos,

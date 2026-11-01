@@ -659,3 +659,48 @@ test("a pay in the period's last days is offered as the next pay, paid early, an
     ui.close();
   }
 });
+
+// Real Nu wording (Oct 31 2026): the refund does not name the store.
+function nuRefund(amount, minutesAgo = 0) {
+  const postedAt = Date.now() - minutesAgo * 60_000;
+  return { id: `com.nu.production:${postedAt}:r`, packageName: "com.nu.production", title: `Te hicimos una devolución por $${amount},00`, text: "Reversamos esta compra y tu dinero está nuevamente en tu cuenta.", postedAt };
+}
+
+test("a refund of a recorded purchase offers to remove it, and the money goes back to the account", async () => {
+  const refund = nuRefund("71.900");
+  const native = fakeCapacitor({ bank: { enabled: true, permission: true, pending: [refund] } });
+  const savedState = returningUserState({
+    transactions: [{ id: "rappi", date: todayKey(), amount: 71_900, merchant: "Rappi", category: "free", labeled: true, source: "account" }],
+    liquidity: { account: 1_000_000, cash: 0, initialized: true }
+  });
+  const ui = await bootApp({ savedState, beforeBoot: native.install });
+  try {
+    await waitFor(ui, '[data-action="remove-refunded-expense"]');
+    assert.match(ui.text(), /¿Quitar el gasto de Rappi\?/);
+    await ui.click('[data-action="remove-refunded-expense"]');
+    const saved = ui.saved();
+    assert.equal(saved.transactions.length, 0);
+    assert.equal(saved.liquidity.account, 1_071_900);
+    assert.deepEqual(native.calls.bankDismissed, [refund.id]);
+    assert.equal(ui.$('[data-action="remove-refunded-expense"]'), null);
+  } finally {
+    ui.close();
+  }
+});
+
+test("a purchase refunded before it was confirmed is not offered at all", async () => {
+  const purchase = nuNotification("Compra en Rappi con tu tarjeta débito terminada en 3965.");
+  purchase.postedAt -= 60_000;
+  purchase.title = "Compra aprobada por $71.900,00";
+  const refund = nuRefund("71.900");
+  const native = fakeCapacitor({ bank: { enabled: true, permission: true, pending: [purchase, refund] } });
+  const ui = await bootApp({ savedState: returningUserState(), beforeBoot: native.install });
+  try {
+    await waitFor(ui, '[data-view="profile"]');
+    await settle(ui.window);
+    assert.equal(ui.$(".bank-suggestions"), null);
+    assert.deepEqual(native.calls.bankDismissed.sort(), [purchase.id, refund.id].sort());
+  } finally {
+    ui.close();
+  }
+});

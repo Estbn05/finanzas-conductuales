@@ -2,8 +2,8 @@
 // recorded expenses (transactions) and extra income (budgetExtras). Pure: everything
 // comes in as arguments, so these are unit-tested in tests/movements.test.mjs instead of
 // being searched for in app.js's source.
-import { FREE_CATEGORY_ID } from "./finance-core.js?v=1.1.101";
-import { cleanText, csvField, merchantKey } from "./state-model.js?v=1.1.101";
+import { FREE_CATEGORY_ID } from "./finance-core.js?v=1.1.104";
+import { cleanText, csvField, merchantKey } from "./state-model.js?v=1.1.104";
 
 export const SMALL_EXPENSE_THRESHOLD = 15000;
 

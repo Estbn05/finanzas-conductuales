@@ -2,7 +2,7 @@
 // typical Colombian banking wording, to be replaced with real samples as they show up.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { alreadyRecorded, isStale, looksLikeEarlyPay, looksLikePay, parseAmount, unreadableNotifications, parseMerchant, parseOrigin, pendingSuggestions, suggestionFromNotification } from "../bank-notifications.js";
+import { alreadyRecorded, isStale, looksLikeEarlyPay, looksLikePay, matchRefunds, parseAmount, readSuggestions, unreadableNotifications, parseMerchant, parseOrigin, pendingSuggestions, suggestionFromNotification } from "../bank-notifications.js";
 
 const NU = "com.nu.production";
 const at = (iso) => new Date(iso).getTime();
@@ -109,12 +109,11 @@ test("money another bank sent ('Bancolombia te envió') is income from that bank
   assert.equal(sent.source, "account");
 });
 
-test("refunds, declined payments, codes and promotions are never offered", () => {
+test("declined payments, codes and promotions are never offered", () => {
   for (const [title, text] of [
     ["Compra rechazada", "Tu compra por $45.000 en Terpel fue rechazada."],
     ["Código de seguridad", "Tu código es 483920. No lo compartas."],
     ["Oferta", "Paga $0 de cuota de manejo este mes con tu tarjeta"],
-    ["Reembolso", "Te devolvimos $12.000 de un pago en Rappi"],
     ["Hola", "Tu extracto ya está disponible."]
   ]) {
     assert.equal(suggestionFromNotification(notification(title, text)), null, `${title}: ${text}`);
@@ -202,4 +201,51 @@ test("a pay in the last days of the period looks like the next period's, paid ea
   const week = { start: "2026-10-26", end: "2026-11-02" };
   assert.equal(looksLikeEarlyPay({ ...pay, date: "2026-10-30" }, { usualPay: 400_000, window: week }), true, "3 days before, paid weekly");
   assert.equal(looksLikeEarlyPay({ ...pay, date: "2026-10-28" }, { usualPay: 400_000, window: week }), false, "4 days is mid-week");
+});
+
+// Real Nu, Oct 31 2026: a Rappi purchase at 18:03, given back at 19:46.
+const RAPPI = () => notification("Compra aprobada por $71.900,00", "Compra en Rappi con tu tarjeta débito terminada en 3965.", at("2026-10-31T18:03:22"));
+const RAPPI_REFUND = () => notification("Te hicimos una devolución por $71.900,00", "Reversamos esta compra y tu dinero está nuevamente en tu cuenta.", at("2026-10-31T19:46:04"));
+const NOW = at("2026-10-31T20:00:00");
+
+test("a refund is read as money given back, to the account it names", () => {
+  const refund = suggestionFromNotification(RAPPI_REFUND());
+  assert.equal(refund.kind, "refund");
+  assert.equal(refund.amount, 71_900);
+  assert.equal(refund.source, "account");
+  assert.equal(suggestionFromNotification(notification("Reembolso", "Te devolvimos $12.000 de un pago en Rappi")).kind, "refund");
+  assert.deepEqual(unreadableNotifications([RAPPI_REFUND()], NOW), [], "a refund is not a notice the app failed to read");
+});
+
+test("a refund of a purchase still waiting to be confirmed makes both go away", () => {
+  const verify = notification("Compra aprobada por $133,00", "Compra en Rappi CO - Verify con tu tarjeta débito terminada en 3965.", at("2026-10-31T18:02:55"));
+  const { suggestions, settled } = readSuggestions([verify, RAPPI(), RAPPI_REFUND()], {}, NOW);
+  assert.deepEqual(suggestions.map((item) => item.merchant), ["Rappi CO - Verify"]);
+  assert.deepEqual(settled.sort(), [RAPPI().id, RAPPI_REFUND().id].sort());
+});
+
+test("a refund of a purchase already recorded asks to remove that one, the most recent of that amount", () => {
+  const transactions = [
+    { id: "old", amount: 71_900, date: "2026-10-20", merchant: "Rappi" },
+    { id: "rappi", amount: 71_900, date: "2026-10-31", merchant: "Rappi" },
+    { id: "other", amount: 50_000, date: "2026-10-31", merchant: "Éxito" }
+  ];
+  const [refund] = pendingSuggestions([RAPPI(), RAPPI_REFUND()], { transactions }, NOW);
+  assert.equal(refund.kind, "refund", "the recorded purchase's notification is not offered again");
+  assert.equal(refund.transactionId, "rappi");
+  assert.equal(refund.merchant, "Rappi");
+});
+
+test("a refund matches only purchases before it and within 30 days, and each purchase once", () => {
+  const later = { id: "later", amount: 71_900, date: "2026-11-02" };
+  const tooOld = { id: "old", amount: 71_900, date: "2026-09-20" };
+  const [alone] = pendingSuggestions([RAPPI_REFUND()], { transactions: [later, tooOld] }, NOW);
+  assert.equal(alone.transactionId, "", "nothing to undo: it stays as money that came back");
+
+  const second = notification("Te hicimos una devolución por $71.900,00", "Reversamos esta compra.", at("2026-10-31T19:50:00"));
+  const { suggestions } = matchRefunds(
+    [suggestionFromNotification(RAPPI_REFUND()), suggestionFromNotification(second)],
+    { transactions: [{ id: "rappi", amount: 71_900, date: "2026-10-31" }] }
+  );
+  assert.deepEqual(suggestions.map((item) => item.transactionId), ["rappi", ""]);
 });

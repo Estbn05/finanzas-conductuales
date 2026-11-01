@@ -253,6 +253,7 @@ test("budget ring allocation is an exact non-overlapping partition of income", (
     spent: 371_000,
     free: 195_000,
     outside: 0,
+    short: 0,
     total: 1_690_000
   });
 });
@@ -592,8 +593,28 @@ test("gasoline reserved spending does not lower the screenshot free balance", ()
     spent: 411_000,
     free: 230_000,
     outside: 0,
+    short: 0,
     total: 1_705_000
   });
+});
+
+// The user's Plan on Oct 31 2026: October's pay was in, November's arrived early and went
+// into categories, and Ahorro came from an earlier balance. Spent + reserved passed the
+// period's income, and the ring said $839.164 were "fuera del presupuesto" while the real
+// libre was $352.179.
+test("with a real balance, the ring splits the money handled and reports nothing outside", () => {
+  const ring = budgetRingAllocation({
+    usesLiquidityBasedFree: true,
+    income: 4_617_699,
+    reservedRemaining: 2_359_980,
+    totalSpent: 3_096_883,
+    freeRemaining: 352_179,
+    liquidityTotal: 2_712_159
+  });
+  assert.deepEqual(ring, { reserved: 2_359_980, spent: 3_096_883, free: 352_179, outside: 0, short: 0, total: 5_809_042 });
+
+  const overReserved = budgetRingAllocation({ usesLiquidityBasedFree: true, reservedRemaining: 900_000, totalSpent: 0, freeRemaining: 0, liquidityTotal: 700_000 });
+  assert.equal(overReserved.short, 200_000, "reserving more than the account and cash hold is the real shortfall");
 });
 
 test("only category overspending and free spending reduce money available for new expenses", () => {

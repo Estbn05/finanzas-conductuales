@@ -199,7 +199,7 @@ function incomeFundedAmount(job, profile, windowStart, transactions) {
 }
 
 // A fund that has been spent or released and has nothing left is dropped at a new
-// period, so it stops cluttering the plan and counting toward the 10-category limit. One
+// period, so it stops cluttering the plan and counting toward the category limit. One
 // that still holds money is kept, period after period, until it is used. `retired`
 // keeps each dropped category's name, so older movements still say what they were for.
 export function pruneExpiredOneOffs(budgetJobs, windowStart, profile, transactions) {
@@ -472,7 +472,27 @@ function freeImpactForPrediction(state, summary, today) {
   };
 }
 
+// What the Plan ring splits. With a real balance on file (fixed income), it is the money
+// the period actually handled: what was spent, plus what is still there, reserved or
+// libre. The period's income is not the measure there: money set aside from an earlier
+// balance or from a pay that arrived early made spending + reserved exceed it, and the
+// ring called the difference "outside the budget" when nothing was wrong. The only real
+// shortfall then is reserving more than the account and cash hold (short).
+// Without a balance, it is the period's income: what does not fit is outside.
 export function budgetRingAllocation(summary) {
+  if (summary?.usesLiquidityBasedFree) {
+    const reserved = Math.max(0, Number(summary.reservedRemaining || 0));
+    const spent = Math.max(0, Number(summary.totalSpent || 0));
+    const free = Math.max(0, Number(summary.freeRemaining || 0));
+    return {
+      reserved,
+      spent,
+      free,
+      outside: 0,
+      short: Math.max(0, reserved - Math.max(0, Number(summary.liquidityTotal || 0))),
+      total: reserved + spent + free
+    };
+  }
   const income = Math.max(0, Number(summary?.income || 0));
   const reserved = Math.min(income, Math.max(0, Number((summary?.reservedRemaining ?? summary?.reserved) || 0)));
   const spent = Math.min(Math.max(0, income - reserved), Math.max(0, Number(summary?.totalSpent || 0)));
@@ -482,6 +502,7 @@ export function budgetRingAllocation(summary) {
     spent,
     free,
     outside: Math.max(0, Number(summary?.totalSpent || 0) - spent),
+    short: 0,
     total: reserved + spent + free
   };
 }

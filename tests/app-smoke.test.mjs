@@ -909,20 +909,20 @@ test("a damaged main save is recovered from the newest backup in IndexedDB", asy
   }
 });
 
-// Regression: with 10 categories and no savings one, extra money created "Ahorro" anyway
+// Regression: at the category limit (10 then, 15 now) with no savings one, extra money created "Ahorro" anyway
 // and the plan read "11 de 10".
 test("extra money at the category limit adds everything as free instead of an 11th category", async () => {
-  const jobs = Array.from({ length: 10 }, (_, i) => ({ id: `cat${i}`, name: `Categoría ${i}`, amount: 10_000, cadence: "monthly" }));
+  const jobs = Array.from({ length: 15 }, (_, i) => ({ id: `cat${i}`, name: `Categoría ${i}`, amount: 10_000, cadence: "monthly" }));
   const ui = await bootApp({ savedState: returningUserState({ budgetJobs: jobs }) });
   try {
     const form = await openExtraSheetFromExpense(ui);
     assert.equal(ui.$("[data-extra-range]"), null, "the savings split should not be offered");
-    assert.match(ui.text(), /Ya tienes 10 categorías/);
+    assert.match(ui.text(), /Ya tienes 15 categorías/);
     form.elements.namedItem("source").value = "Bono";
     await ui.type(form.elements.namedItem("amount"), "300000");
     form.requestSubmit(form.querySelector('[value="all-free"]'));
     await settle(ui.window);
-    assert.equal(ui.saved().budgetJobs.length, 10);
+    assert.equal(ui.saved().budgetJobs.length, 15);
     assert.equal(ui.saved().budgetExtras[0].allocation.savingsAmount, 0);
   } finally {
     ui.close();
