@@ -21,7 +21,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.110";
+} from "./finance-core.js?v=1.1.111";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -34,12 +34,12 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.110";
-import { isStale, looksLikeEarlyPay, looksLikePay, readSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.110";
-import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.110";
-import { bankBoxKey, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.110";
-import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.110";
-import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.110";
+} from "./movements.js?v=1.1.111";
+import { isStale, looksLikeEarlyPay, looksLikePay, readSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.111";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.111";
+import { bankBoxKey, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.111";
+import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.111";
+import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.111";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -88,7 +88,7 @@ import {
   remoteChangedSinceLastSync,
   CREDIT_PAYMENTS_LIMIT,
   uid
-} from "./state-model.js?v=1.1.110";
+} from "./state-model.js?v=1.1.111";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -104,7 +104,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.110";
+} from "./sync-client.js?v=1.1.111";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -306,6 +306,11 @@ let pendingJobRemovalId = "";
 let editingJobId = "";
 // "Registrar pago" of the card opened from a bank notification: its amount and date.
 let creditDraft = null;
+// The free money Inicio showed last, so a new amount counts up or down from it.
+let lastFreeShown = null;
+// The fills of every progress bar: they grow from zero when a screen opens (CSS), and on a
+// re-render of the same screen slide from their old length (growChangedBars).
+const BAR_FILL_SELECTOR = ".bar > span, .category-card-bar > span, .progress-track > span";
 // "Cuadrar con tu banco": what is being typed in each pocket, by row key, and the pocket
 // being typed in, so a re-render (a sync, a bank notification) neither saves half a
 // number nor takes the field away mid-typing.
@@ -1088,12 +1093,69 @@ function renderedDialogKey() {
   return dialog ? dialog.getAttribute("aria-labelledby") || dialog.getAttribute("aria-label") || "dialog" : "";
 }
 
+// 2: progress bars slide from their old length to the new one on a same-screen re-render
+// (BAR_FILL_SELECTOR, declared at the top).
+
+function barKey(fill, index) {
+  const bar = fill.parentElement;
+  return bar?.getAttribute("aria-label") || bar?.closest("[data-bar-key]")?.dataset.barKey || String(index);
+}
+
+function renderedBarWidths() {
+  return new Map(Array.from(app.querySelectorAll(BAR_FILL_SELECTOR), (fill, index) => [barKey(fill, index), parseFloat(fill.style.width) || 0]));
+}
+
+function growChangedBars(before) {
+  app.querySelectorAll(BAR_FILL_SELECTOR).forEach((fill, index) => {
+    const old = before?.get(barKey(fill, index));
+    const now = parseFloat(fill.style.width) || 0;
+    if (old === undefined || now <= 0 || Math.abs(old - now) < 0.5) return;
+    fill.style.setProperty("--bar-from", String(Math.min(4, old / now)));
+    fill.classList.add("bar-grow");
+  });
+}
+
+// 1: the free money counts from the amount shown before to the new one (a gasto, a
+// deposit), instead of jumping. Only where the browser animates (not with "reduce
+// motion", not in test environments without the Web Animations API).
+function animateFreeMoney() {
+  const amount = app.querySelector(".money-bar > strong[data-amount]");
+  if (!amount) return;
+  const target = Number(amount.dataset.amount);
+  const from = lastFreeShown;
+  lastFreeShown = target;
+  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  if (from === null || from === target || reduceMotion || typeof amount.animate !== "function") return;
+  const finalText = amount.textContent;
+  const duration = 650;
+  const start = performance.now();
+  const ease = (t) => 1 - Math.pow(1 - t, 3);
+  const step = (now) => {
+    if (!amount.isConnected) return;
+    const progress = Math.min(1, (now - start) / duration);
+    amount.textContent = progress < 1 ? formatMoney(Math.round(from + (target - from) * ease(progress))) : finalText;
+    if (progress < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+// 3: a short tick when something is recorded or undone; off in Datos > Ajustes.
+function hapticTick() {
+  if (state.settings?.haptics === false) return;
+  try {
+    navigator.vibrate?.(14);
+  } catch {
+    // No vibration on this device or browser.
+  }
+}
+
 function keepRenderStill() {
   const before = {
     view: lastRenderedView,
     dialog: renderedDialogKey(),
     dialogScroll: app.querySelector(".bottom-sheet, .quick-expense-panel")?.scrollTop || 0,
-    free: app.querySelector(".money-bar > strong")?.textContent || "",
+    free: app.querySelector(".money-bar > strong")?.dataset.amount || "",
+    bars: renderedBarWidths(),
     snackbar: app.querySelector(".snackbar")?.textContent || ""
   };
   app.classList.toggle("is-same-view", Boolean(before.view) && before.view === state.activeView);
@@ -1110,7 +1172,8 @@ function keepRenderStill() {
       } else {
         app.classList.remove("keeps-dialog");
       }
-      if ((app.querySelector(".money-bar > strong")?.textContent || "") !== before.free) app.classList.remove("keeps-free");
+      if ((app.querySelector(".money-bar > strong")?.dataset.amount || "") !== before.free) app.classList.remove("keeps-free");
+      if (app.classList.contains("is-same-view")) growChangedBars(before.bars);
       if ((app.querySelector(".snackbar")?.textContent || "") !== before.snackbar) app.classList.remove("keeps-snackbar");
     }
   };
@@ -1480,7 +1543,15 @@ function renderThemeSwitcher() {
     { value: "light", label: "Claro" },
     { value: "dark", label: "Oscuro" }
   ];
+  const haptics = state.settings?.haptics !== false;
   return `
+    <div class="theme-switcher" role="group" aria-label="Vibrar al registrar">
+      <span>Vibrar al registrar</span>
+      <div class="theme-options">
+        <button class="theme-choice ${haptics ? "is-active" : ""}" type="button" data-action="set-haptics" data-haptics-choice="on" aria-pressed="${haptics}">Sí</button>
+        <button class="theme-choice ${haptics ? "" : "is-active"}" type="button" data-action="set-haptics" data-haptics-choice="off" aria-pressed="${!haptics}">No</button>
+      </div>
+    </div>
     <div class="theme-switcher" role="group" aria-label="Cambiar tema">
       <span>Apariencia</span>
       <div class="theme-options">
@@ -2036,7 +2107,7 @@ function renderHeader(plan) {
     ${renderIncomeAppliedBanner()}
     <header class="money-bar ${summary.overReserved ? "danger" : ""}" aria-label="Tu dinero libre">
       <div class="money-context"><span>Tu dinero libre</span><span>${period}</span></div>
-      <strong>${formatMoney(summary.freeRemaining)}</strong>
+      <strong data-amount="${Math.round(summary.freeRemaining)}">${formatMoney(summary.freeRemaining)}</strong>
       <span class="money-caption">${summary.overReserved ? "Presupuesto sobreasignado" : "Disponible para nuevos gastos"}</span>
       ${
         summary.categoryOverspent > 0
@@ -3563,7 +3634,7 @@ function renderBudgetJob(job) {
   const status = categoryStatusLabel(ratio);
 
   return `
-    <article class="plan-category-card ${band}">
+    <article class="plan-category-card ${band}" data-bar-key="${escapeAttr(job.id)}">
       <div class="category-card-top">
         <div class="category-card-heading">
           <span class="category-card-icon" aria-hidden="true">${renderIcon(categoryIconFor(job.name))}</span>
@@ -5440,6 +5511,7 @@ function renderSnackbar() {
 
   return `
     <div class="snackbar ${snackbar.kind || ""}">
+      ${snackbar.action === "undo" ? `<span class="snackbar-check" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>` : ""}
       <span>${escapeHtml(snackbar.message)}</span>
       ${
         snackbar.action === "undo"
@@ -5474,6 +5546,7 @@ function bindEvents() {
     });
   });
   animateBudgetRingCharts();
+  animateFreeMoney();
 
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -5496,6 +5569,9 @@ function bindEvents() {
         return;
       }
       input.value = button.dataset.choiceValue;
+      button.classList.remove("just-picked");
+      void button.offsetWidth;
+      button.classList.add("just-picked");
       group.querySelectorAll("[data-choice-value]").forEach((choice) => {
         const active = choice === button;
         choice.classList.toggle("is-active", active);
@@ -6663,6 +6739,7 @@ function handleAction(event) {
       editingTransactionId = "";
     },
     "undo-snackbar": () => {
+      hapticTick();
       removeTransaction(id);
       clearSnackbar({ renderNow: false });
     },
@@ -6735,6 +6812,15 @@ function handleAction(event) {
     "disable-biometric": () => disableBiometric(),
     "retry-cloud-sync": () => {
       pushCloudState();
+    },
+    "set-haptics": () => {
+      state.settings = {
+        ...(state.settings || {}),
+        haptics: event.currentTarget.dataset.hapticsChoice === "on",
+        updated_at: new Date().toISOString()
+      };
+      saveState();
+      if (state.settings.haptics) hapticTick();
     },
     "set-theme": () => {
       state.settings = {
@@ -9333,6 +9419,7 @@ function showUndoSnackbar(transactionId, note = "") {
     kind: "",
     transactionId
   };
+  hapticTick();
   announce(snackbar.message);
   // 8s (not the original 5s) so there's enough time to read the message and react,
   // not just for users who need it — nobody benefits from a confirmation that vanishes

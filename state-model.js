@@ -1,4 +1,4 @@
-import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.110";
+import { FREE_CATEGORY_ID, JOB_CADENCES } from "./finance-core.js?v=1.1.111";
 
 // Huella de la plantilla "estudiante" que versiones viejas metian en el plan de todo
 // usuario nuevo. Ya no se crea nunca: esto sobrevive SOLO como patron de deteccion
@@ -621,6 +621,8 @@ export function createDefaultState(today, defaultView) {
       theme: "",
       // The guided tour of Inicio was seen (finished or skipped): do not show it again.
       tourDone: false,
+      // A short vibration when an expense is recorded or undone (Datos > Ajustes).
+      haptics: true,
       updated_at: now
     },
     budgetExtras: [],
@@ -677,6 +679,7 @@ export function migrateState(savedState, today, defaultView) {
           ? savedState.settings.theme
           : defaults.settings.theme,
       tourDone: Boolean(savedState.settings?.tourDone),
+      haptics: savedState.settings?.haptics !== false,
       updated_at: savedState.settings?.updated_at || defaults.settings.updated_at
     },
     transactions: normalizeTransactions(savedState.transactions || defaults.transactions, today),

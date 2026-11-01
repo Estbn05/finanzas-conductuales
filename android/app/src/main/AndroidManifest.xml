@@ -81,4 +81,6 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- navigator.vibrate() in the WebView: a short tick when an expense is recorded. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 </manifest>

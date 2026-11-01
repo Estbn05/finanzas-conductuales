@@ -1198,3 +1198,38 @@ test("Clasificar pendientes accepts the suggested categories at once and learns 
     ui.close();
   }
 });
+
+// "Vibración opcional al registrar o deshacer" (UI-UX brief): one short tick per expense,
+// and none once it is turned off in Datos > Ajustes.
+test("registering an expense vibrates once, unless vibration is turned off in Ajustes", async () => {
+  const vibrations = [];
+  const ui = await bootApp({
+    savedState: returningUserState(),
+    beforeBoot: (window) => {
+      window.navigator.vibrate = (pattern) => {
+        vibrations.push(pattern);
+        return true;
+      };
+    }
+  });
+  const register = async (merchant) => {
+    await ui.click('[data-action="open-expense"]');
+    const form = ui.$("#transaction-form");
+    form.elements.namedItem("amount").value = "5000";
+    form.elements.namedItem("merchant").value = merchant;
+    form.requestSubmit();
+    await settle(ui.window);
+  };
+  try {
+    await register("Pan");
+    assert.equal(vibrations.length, 1);
+
+    await ui.click('[data-view="profile"]');
+    await ui.click('[data-action="set-haptics"][data-haptics-choice="off"]');
+    assert.equal(ui.saved().settings.haptics, false);
+    await register("Café");
+    assert.equal(vibrations.length, 1, "no vibration once it is off");
+  } finally {
+    ui.close();
+  }
+});

@@ -2,8 +2,8 @@
 // read or hand to an AI ("Analízalo con una IA"). Pure: app.js passes the period's records
 // and the words it shows for ids (categoryName, locationLabel); tested in
 // tests/period-review.test.mjs.
-import { FREE_CATEGORY_ID } from "./finance-core.js?v=1.1.110";
-import { inWindow, merchantTotals, previousWindow } from "./movements.js?v=1.1.110";
+import { FREE_CATEGORY_ID } from "./finance-core.js?v=1.1.111";
+import { inWindow, merchantTotals, previousWindow } from "./movements.js?v=1.1.111";
 
 const sum = (items) => items.reduce((total, item) => total + Number(item.amount || 0), 0);
 
