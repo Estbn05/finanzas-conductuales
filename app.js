@@ -21,7 +21,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.100";
+} from "./finance-core.js?v=1.1.101";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -34,12 +34,12 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.100";
-import { isStale, looksLikeEarlyPay, looksLikePay, pendingSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.100";
-import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.100";
-import { bankBoxKey, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.100";
-import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.100";
-import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.100";
+} from "./movements.js?v=1.1.101";
+import { isStale, looksLikeEarlyPay, looksLikePay, pendingSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.101";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.101";
+import { bankBoxKey, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.101";
+import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.101";
+import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.101";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -88,7 +88,7 @@ import {
   remoteChangedSinceLastSync,
   CREDIT_PAYMENTS_LIMIT,
   uid
-} from "./state-model.js?v=1.1.100";
+} from "./state-model.js?v=1.1.101";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -104,7 +104,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.100";
+} from "./sync-client.js?v=1.1.101";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -3663,7 +3663,7 @@ function renderBankBoxField(job) {
       <span class="sheet-label">¿En qué cajita de tu banco está?</span>
       ${renderChoicePills("bankBox", options, selected)}
       <input name="bankBoxOther" type="text" maxlength="32" placeholder="Nombre de la cajita, ej. Varios" autocomplete="off" aria-label="Nombre de la cajita" hidden>
-      <p class="setaside-note">Si la guardas junto con otra, elige esa: en "Cuadrar con tu banco" se suman.</p>
+      <p class="setaside-note">Si la guardas junto con otra, elige esa. Para juntar varias en una cajita nueva, elige "Otra…" y escribe su nombre: no necesitas crear una categoría para eso. En "Cuadrar con tu banco" se suman.</p>
     </div>
   `;
 }

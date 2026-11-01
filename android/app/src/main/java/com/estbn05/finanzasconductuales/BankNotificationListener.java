@@ -7,6 +7,7 @@ import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
+import android.util.Log;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
@@ -22,6 +23,7 @@ import org.json.JSONObject;
  * own notification-access permission.
  */
 public class BankNotificationListener extends NotificationListenerService {
+    private static final String LOG_TAG = "BankNotif";
     static final String PREFS_NAME = "bank_notifications";
     static final String KEY_ENABLED = "enabled";
     static final String KEY_PENDING = "pending";
@@ -85,19 +87,51 @@ public class BankNotificationListener extends NotificationListenerService {
             return;
         }
         Notification notification = sbn.getNotification();
-        if (notification == null || (notification.flags & Notification.FLAG_GROUP_SUMMARY) != 0) {
+        if (notification == null) {
             return;
         }
+        // A group summary is kept too: some banks post a movement only as the summary of
+        // its group, and dropping it lost real transfers. When it merely repeats a child,
+        // store() sees the same text and skips it; a "2 avisos" summary ends up in Datos as
+        // a notice the app could not read, which is harmless.
+        boolean summary = (notification.flags & Notification.FLAG_GROUP_SUMMARY) != 0;
         Bundle extras = notification.extras;
-        String title = text(extras, Notification.EXTRA_TITLE);
+        String title = text(extras, Notification.EXTRA_TITLE_BIG);
+        if (title.isEmpty()) {
+            title = text(extras, Notification.EXTRA_TITLE);
+        }
         String body = text(extras, Notification.EXTRA_BIG_TEXT);
         if (body.isEmpty()) {
             body = text(extras, Notification.EXTRA_TEXT);
         }
+        if (body.isEmpty()) {
+            body = lines(extras);
+        }
+        // What was seen and whether it was kept, without its text, so a notice that never
+        // shows up in the app can be traced with logcat (tag BankNotif).
+        Log.i(LOG_TAG, "seen channel=" + notification.getChannelId()
+            + " summary=" + summary
+            + " titleLength=" + title.length()
+            + " textLength=" + body.length()
+            + " at=" + sbn.getPostTime());
         if (title.isEmpty() && body.isEmpty()) {
             return;
         }
         store(context, sbn.getPackageName(), title, body, sbn.getPostTime());
+    }
+
+    // InboxStyle notifications put their content in lines instead of the text.
+    private static String lines(Bundle extras) {
+        if (extras == null) return "";
+        CharSequence[] lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
+        if (lines == null) return "";
+        StringBuilder joined = new StringBuilder();
+        for (CharSequence line : lines) {
+            if (line == null) continue;
+            if (joined.length() > 0) joined.append(' ');
+            joined.append(line.toString().trim());
+        }
+        return joined.toString().trim();
     }
 
     private static String text(Bundle extras, String key) {
