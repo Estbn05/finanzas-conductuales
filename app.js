@@ -21,7 +21,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.112";
+} from "./finance-core.js?v=1.1.113";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -34,12 +34,12 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.112";
-import { isStale, looksLikeEarlyPay, looksLikePay, readSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.112";
-import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.112";
-import { bankBoxKey, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.112";
-import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.112";
-import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.112";
+} from "./movements.js?v=1.1.113";
+import { isStale, looksLikeEarlyPay, looksLikePay, readSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.113";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.113";
+import { bankBoxKey, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.113";
+import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.113";
+import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.113";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -88,7 +88,7 @@ import {
   remoteChangedSinceLastSync,
   CREDIT_PAYMENTS_LIMIT,
   uid
-} from "./state-model.js?v=1.1.112";
+} from "./state-model.js?v=1.1.113";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -104,7 +104,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.112";
+} from "./sync-client.js?v=1.1.113";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -177,6 +177,9 @@ const INTENT_ICONS = { combustible: "fuel", transporte: "car", mercado: "food", 
 // Matches FreeMoneyWidgetProvider.QUICK_ADD_URI and the intent-filter data (scheme +
 // host) declared in AndroidManifest.xml for the home screen widget's "+" button.
 const WIDGET_QUICK_ADD_HOST = "registrar-gasto";
+// "¿Lo registras?" notifications (BankSuggestionNotifier.java) open
+// finanzasconductuales://sugerencia?id=<bank notification id>.
+const BANK_SUGGESTION_HOST = "sugerencia";
 
 // Tope de digitos para cualquier campo de dinero: sin este limite, escribir muchos
 // ceros produce un numero formateado tan largo (ej. "100.000.000.000.000.000.000")
@@ -310,6 +313,8 @@ let creditDraft = null;
 let lastFreeShown = null;
 // Watches Inicio's free money card: once it scrolls away, a small "Libre" pill stays on top.
 let heroObserver = null;
+// "¿Lo registras?" was tapped: the bank movement to open once the suggestions are read.
+let pendingBankOpenId = "";
 // The fills of every progress bar: they grow from zero when a screen opens (CSS), and on a
 // re-render of the same screen slide from their old length (growChangedBars).
 const BAR_FILL_SELECTOR = ".bar > span, .category-card-bar > span, .progress-track > span";
@@ -380,7 +385,7 @@ let biometricPromptActive = false;
 // Expenses read from the bank app's notifications, waiting for the user to confirm them.
 // Device-only: they come from the Android listener and are never part of the synced state.
 let bankSuggestions = [];
-let bankStatus = { available: false, enabled: false, permission: false, connected: false };
+let bankStatus = { available: false, enabled: false, permission: false, connected: false, notify: true };
 // Recent bank notifications that are not a movement the app can read (shown in Datos).
 let bankUnreadable = [];
 // Money a bank notification said arrived, prefilling the "Dinero extra" sheet.
@@ -6565,6 +6570,7 @@ function handleAction(event) {
     "register-bank-income",
     "register-bank-refund",
     "register-bank-card-payment",
+    "set-bank-notify",
     "dismiss-bank-suggestion",
     "open-pay-received",
     "confirm-bank-pay"
@@ -6844,6 +6850,11 @@ function handleAction(event) {
     "register-bank-suggestion": () => registerBankSuggestion(id),
     "register-bank-income": () => registerBankIncome(id),
     "register-bank-refund": () => registerBankIncome(id),
+    "set-bank-notify": () => {
+      const notify = event.currentTarget.dataset.notifyChoice === "on";
+      bankStatus = { ...bankStatus, notify };
+      nativeBankNotifications()?.setNotify?.({ notify })?.catch?.(() => {});
+    },
     "register-bank-card-payment": () => {
       const suggestion = bankSuggestions.find((item) => item.id === id);
       if (suggestion) {
@@ -8352,7 +8363,8 @@ async function refreshBankSuggestions({ recheck = true } = {}) {
       available: true,
       enabled: Boolean(status?.enabled),
       permission: Boolean(status?.permission),
-      connected: status?.connected !== false
+      connected: status?.connected !== false,
+      notify: status?.notify !== false
     };
     // status() asks Android to reconnect an unbound listener, which takes a moment: look
     // again once before telling the user something is blocking it.
@@ -8377,7 +8389,33 @@ async function refreshBankSuggestions({ recheck = true } = {}) {
   } catch {
     bankStatus = { ...bankStatus, available: true };
   }
+  if (openPendingBankSuggestion()) {
+    return;
+  }
   renderBackground();
+}
+
+// "¿Lo registras?" opens the form for that movement, filled in from the bank's notice:
+// a purchase or transfer in Registrar gasto, money in as Dinero extra, a card payment in
+// Registrar pago. A refund, the pay question or a movement already recorded just land on
+// Inicio, where their card says what to do.
+function openPendingBankSuggestion() {
+  if (!pendingBankOpenId) {
+    return false;
+  }
+  const suggestion = bankSuggestions.find((item) => item.id === pendingBankOpenId);
+  pendingBankOpenId = "";
+  activateView("today");
+  if (suggestion?.kind === "expense") {
+    registerBankSuggestion(suggestion.id);
+  } else if (suggestion?.kind === "income" && suggestion !== bankPaySuggestion()) {
+    registerBankIncome(suggestion.id);
+  } else if (suggestion?.kind === "card-payment") {
+    creditDraft = { amount: suggestion.amount, date: suggestion.date, bankNotificationId: suggestion.id };
+    planSheet = "credit";
+  }
+  render();
+  return true;
 }
 
 function forgetBankNotification(id) {
@@ -8708,7 +8746,9 @@ function renderBankNotificationsPanel() {
       ? "Falta un paso: permite el acceso a notificaciones en los ajustes de Android."
       : blocked
         ? "Tu teléfono no deja que la app lea las notificaciones en segundo plano. Activa “Inicio automático” para Finanzas Conductuales y vuelve a abrir la app."
-        : "Activado. Cuando Nu te avise de una compra, aparece en Inicio para que la confirmes.";
+        : bankStatus.notify
+          ? "Activado. Cuando Nu te avise de un movimiento, te llega “¿Lo registras?” y queda en Inicio para que lo confirmes."
+          : "Activado. Cuando Nu te avise de un movimiento, aparece en Inicio para que lo confirmes.";
   return `
     <article class="data-section bank-notifications-section">
       <div class="data-section-heading"><span class="data-icon">${renderIcon("card")}</span><div><strong>Gastos desde Nu</strong><small>${note}</small></div></div>
@@ -8721,6 +8761,17 @@ function renderBankNotificationsPanel() {
                <button class="btn ghost" type="button" data-action="disable-bank-notifications">Desactivar</button>`
         }
       </div>
+      ${
+        enabled && permission
+          ? `<div class="theme-switcher" role="group" aria-label="Avisarme para registrar">
+              <span>Avisarme para registrar</span>
+              <div class="theme-options">
+                <button class="theme-choice ${bankStatus.notify ? "is-active" : ""}" type="button" data-action="set-bank-notify" data-notify-choice="on" aria-pressed="${bankStatus.notify}">Sí</button>
+                <button class="theme-choice ${bankStatus.notify ? "" : "is-active"}" type="button" data-action="set-bank-notify" data-notify-choice="off" aria-pressed="${!bankStatus.notify}">No</button>
+              </div>
+            </div>`
+          : ""
+      }
       ${
         enabled && bankUnreadable.length
           ? `<div class="bank-unreadable-row">
@@ -9776,8 +9827,12 @@ function routeIfWidgetQuickAddUrl(url) {
     return;
   }
   try {
-    if (new URL(url).host === WIDGET_QUICK_ADD_HOST) {
+    const link = new URL(url);
+    if (link.host === WIDGET_QUICK_ADD_HOST) {
       window.location.hash = QUICK_EXPENSE_HASH;
+    } else if (link.host === BANK_SUGGESTION_HOST && link.searchParams.get("id")) {
+      pendingBankOpenId = link.searchParams.get("id");
+      refreshBankSuggestions();
     }
   } catch {}
 }

@@ -10,7 +10,7 @@ import { bootApp, returningUserState, settle, todayKey } from "./helpers/boot-ap
 
 // What the native side would receive, recorded instead of acted on.
 function fakeCapacitor({ launchUrl = "", biometricResult = "success", bank = { enabled: false, permission: false, pending: [] } } = {}) {
-  const calls = { exited: 0, widget: [], files: [], shares: [], biometricPrompts: 0, bankSettingsOpened: 0, bankBackgroundOpened: 0, bankDismissed: [], bankEnabled: [] };
+  const calls = { exited: 0, widget: [], files: [], shares: [], biometricPrompts: 0, bankSettingsOpened: 0, bankBackgroundOpened: 0, bankDismissed: [], bankEnabled: [], bankNotify: [] };
   const listeners = {};
   const plugins = {
     App: {
@@ -38,7 +38,12 @@ function fakeCapacitor({ launchUrl = "", biometricResult = "success", bank = { e
     },
     // Stands in for BankNotificationsPlugin.java (the Android listener's store).
     BankNotifications: {
-      status: () => Promise.resolve({ enabled: bank.enabled, permission: bank.permission, connected: bank.connected !== false }),
+      status: () => Promise.resolve({ enabled: bank.enabled, permission: bank.permission, connected: bank.connected !== false, notify: bank.notify !== false }),
+      setNotify({ notify }) {
+        bank.notify = notify;
+        calls.bankNotify.push(notify);
+        return Promise.resolve();
+      },
       openBackgroundSettings() {
         calls.bankBackgroundOpened += 1;
         return Promise.resolve();
@@ -725,6 +730,44 @@ test("a card payment from Nu lowers what is owed instead of becoming an expense"
     assert.equal(saved.liquidity.account, 949_100);
     assert.equal(saved.creditPayments.length, 1);
     assert.deepEqual(native.calls.bankDismissed, [paid.id]);
+  } finally {
+    ui.close();
+  }
+});
+
+// "¿Lo registras?": the app's notification for a Nu movement opens straight into the form
+// filled in from it, and Datos turns those notifications off.
+test("tapping '¿Lo registras?' opens the prefilled form for that movement", async () => {
+  const purchase = nuNotification("Compra en Rappi con tu tarjeta débito terminada en 3965.");
+  purchase.title = "Compra aprobada por $71.900,00";
+  const native = fakeCapacitor({
+    launchUrl: `finanzasconductuales://sugerencia?id=${encodeURIComponent(purchase.id)}`,
+    bank: { enabled: true, permission: true, pending: [purchase] }
+  });
+  const ui = await bootApp({ savedState: returningUserState(), beforeBoot: native.install });
+  try {
+    await waitFor(ui, "#transaction-form");
+    const form = ui.$("#transaction-form");
+    assert.equal(form.elements.namedItem("amount").value.replace(/\D/g, ""), "71900");
+    assert.equal(form.elements.namedItem("merchant").value, "Rappi");
+    assert.equal(form.elements.namedItem("bankNotificationId").value, purchase.id);
+  } finally {
+    ui.close();
+  }
+});
+
+test("Datos turns the '¿Lo registras?' notifications off and on", async () => {
+  const native = fakeCapacitor({ bank: { enabled: true, permission: true, pending: [] } });
+  const ui = await bootApp({ savedState: returningUserState(), beforeBoot: native.install });
+  try {
+    await waitFor(ui, '[data-view="profile"]');
+    await ui.click('[data-view="profile"]');
+    await waitFor(ui, '[data-action="set-bank-notify"][data-notify-choice="off"]');
+    assert.match(ui.text(), /te llega “¿Lo registras\?”/);
+    await ui.click('[data-action="set-bank-notify"][data-notify-choice="off"]');
+    assert.deepEqual(native.calls.bankNotify, [false]);
+    assert.doesNotMatch(ui.text(), /te llega “¿Lo registras\?”/);
+    assert.equal(ui.$('[data-action="set-bank-notify"][data-notify-choice="off"]').getAttribute("aria-pressed"), "true");
   } finally {
     ui.close();
   }

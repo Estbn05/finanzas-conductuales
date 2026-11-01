@@ -39,6 +39,14 @@
                 <data android:scheme="finanzasconductuales" android:host="registrar-gasto" />
             </intent-filter>
 
+            <!-- "¿Lo registras?" (BankSuggestionNotifier): opens the prefilled form for the
+                 bank movement with that id. Handled next to the widget link in app.js. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="finanzasconductuales" android:host="sugerencia" />
+            </intent-filter>
+
         </activity>
 
         <provider

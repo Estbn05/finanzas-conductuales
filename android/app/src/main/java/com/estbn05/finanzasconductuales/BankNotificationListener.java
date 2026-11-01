@@ -117,7 +117,8 @@ public class BankNotificationListener extends NotificationListenerService {
         if (title.isEmpty() && body.isEmpty()) {
             return;
         }
-        store(context, sbn.getPackageName(), title, body, sbn.getPostTime());
+        String id = store(context, sbn.getPackageName(), title, body, sbn.getPostTime());
+        BankSuggestionNotifier.maybePost(context, id, title, body, sbn.getPostTime());
     }
 
     // InboxStyle notifications put their content in lines instead of the text.
@@ -152,7 +153,8 @@ public class BankNotificationListener extends NotificationListenerService {
         prefs(context).edit().putString(KEY_PENDING, pending.toString()).apply();
     }
 
-    private static synchronized void store(Context context, String packageName, String title, String body, long postedAt) {
+    // The id of the notice kept, or null when it was already there (a re-post).
+    private static synchronized String store(Context context, String packageName, String title, String body, long postedAt) {
         JSONArray pending = readPending(context);
         for (int i = 0; i < pending.length(); i++) {
             JSONObject existing = pending.optJSONObject(i);
@@ -160,24 +162,26 @@ public class BankNotificationListener extends NotificationListenerService {
                 && title.equals(existing.optString("title"))
                 && body.equals(existing.optString("text"))
                 && Math.abs(postedAt - existing.optLong("postedAt")) < DUPLICATE_WINDOW_MS) {
-                return;
+                return null;
             }
         }
+        String id = packageName + ":" + postedAt + ":" + Integer.toHexString((title + "\n" + body).hashCode());
         try {
             JSONObject item = new JSONObject();
-            item.put("id", packageName + ":" + postedAt + ":" + Integer.toHexString((title + "\n" + body).hashCode()));
+            item.put("id", id);
             item.put("packageName", packageName);
             item.put("title", title);
             item.put("text", body);
             item.put("postedAt", postedAt);
             pending.put(item);
         } catch (JSONException error) {
-            return;
+            return null;
         }
         JSONArray trimmed = new JSONArray();
         for (int i = Math.max(0, pending.length() - MAX_PENDING); i < pending.length(); i++) {
             trimmed.put(pending.opt(i));
         }
         writePending(context, trimmed);
+        return id;
     }
 }

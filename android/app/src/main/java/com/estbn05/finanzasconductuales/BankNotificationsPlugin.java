@@ -35,6 +35,7 @@ public class BankNotificationsPlugin extends Plugin {
         result.put("enabled", enabled);
         result.put("permission", permission);
         result.put("connected", BankNotificationListener.connected);
+        result.put("notify", BankSuggestionNotifier.isOn(context));
         call.resolve(result);
     }
 
@@ -47,6 +48,14 @@ public class BankNotificationsPlugin extends Plugin {
         if (!enabled) {
             BankNotificationListener.writePending(context, new JSONArray());
         }
+        call.resolve();
+    }
+
+    /** "¿Lo registras?" notifications for each movement the bank notifies, on or off. */
+    @PluginMethod
+    public void setNotify(PluginCall call) {
+        boolean notify = Boolean.TRUE.equals(call.getBoolean("notify", true));
+        BankNotificationListener.prefs(getContext()).edit().putBoolean(BankSuggestionNotifier.KEY_NOTIFY, notify).apply();
         call.resolve();
     }
 
@@ -107,6 +116,10 @@ public class BankNotificationsPlugin extends Plugin {
             if (item != null && !ids.contains(item.optString("id"))) {
                 kept.put(item);
             }
+        }
+        // Recorded or dismissed in the app: its "¿Lo registras?" is no longer needed.
+        for (String id : ids) {
+            BankSuggestionNotifier.cancel(context, id);
         }
         BankNotificationListener.writePending(context, kept);
         call.resolve();
