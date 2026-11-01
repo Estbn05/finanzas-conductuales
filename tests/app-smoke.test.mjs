@@ -1233,3 +1233,23 @@ test("registering an expense vibrates once, unless vibration is turned off in Aj
     ui.close();
   }
 });
+
+// Inicio says what today did to the free money, next to it: "−$50.000 hoy".
+test("the free money card shows today's change once something is recorded today", async () => {
+  const ui = await bootApp({ savedState: returningUserState() });
+  try {
+    assert.equal(ui.$(".money-today"), null, "nothing recorded today: no pill");
+    await ui.click('[data-action="open-expense"]');
+    const form = ui.$("#transaction-form");
+    form.elements.namedItem("amount").value = "50000";
+    form.elements.namedItem("merchant").value = "Mercado";
+    form.requestSubmit();
+    await settle(ui.window);
+    const pill = ui.$(".money-today");
+    assert.ok(pill, "the pill should appear after a gasto today");
+    assert.match(pill.textContent, /−\$\s?50\.000 hoy/);
+    assert.ok(pill.classList.contains("is-down"));
+  } finally {
+    ui.close();
+  }
+});

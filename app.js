@@ -21,7 +21,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.111";
+} from "./finance-core.js?v=1.1.112";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -34,12 +34,12 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.111";
-import { isStale, looksLikeEarlyPay, looksLikePay, readSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.111";
-import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.111";
-import { bankBoxKey, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.111";
-import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.111";
-import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.111";
+} from "./movements.js?v=1.1.112";
+import { isStale, looksLikeEarlyPay, looksLikePay, readSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.112";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.112";
+import { bankBoxKey, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.112";
+import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.112";
+import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.112";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -88,7 +88,7 @@ import {
   remoteChangedSinceLastSync,
   CREDIT_PAYMENTS_LIMIT,
   uid
-} from "./state-model.js?v=1.1.111";
+} from "./state-model.js?v=1.1.112";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -104,7 +104,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.111";
+} from "./sync-client.js?v=1.1.112";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -308,6 +308,8 @@ let editingJobId = "";
 let creditDraft = null;
 // The free money Inicio showed last, so a new amount counts up or down from it.
 let lastFreeShown = null;
+// Watches Inicio's free money card: once it scrolls away, a small "Libre" pill stays on top.
+let heroObserver = null;
 // The fills of every progress bar: they grow from zero when a screen opens (CSS), and on a
 // re-render of the same screen slide from their old length (growChangedBars).
 const BAR_FILL_SELECTOR = ".bar > span, .category-card-bar > span, .progress-track > span";
@@ -1863,6 +1865,12 @@ function renderSessionCheck() {
     : ["Comprobando tu sesión", "Trayendo tus datos", "Calculando tu dinero libre"];
   return `
     <main class="session-check" aria-busy="true">
+      <div class="skeleton-preview" aria-hidden="true">
+        <div class="skeleton sk-hero"></div>
+        <div class="skeleton sk-card"></div>
+        <div class="skeleton sk-card"></div>
+        <div class="skeleton sk-card sk-short"></div>
+      </div>
       <section class="startup-fallback-card loading-card">
         <h1>${signin ? "Entrando a tu cuenta" : "Preparando todo"}</h1>
         <ol class="loading-steps">
@@ -2098,6 +2106,49 @@ function renderIncomeAppliedBanner() {
   `;
 }
 
+// 8: today's movements in one pill under the free money ("−$10.000 hoy"): expenses
+// lower it, money that came in raises it. Sign and arrow say which way, not only color.
+function renderTodayChange() {
+  const today = todayKey();
+  const spent = state.transactions
+    .filter((transaction) => String(transaction.date || "").slice(0, 10) === today)
+    .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  const came = (state.budgetExtras || [])
+    .filter((extra) => String(extra.date || "").slice(0, 10) === today)
+    .reduce((sum, extra) => sum + Number(extra.amount || 0), 0);
+  const net = came - spent;
+  if (!net) {
+    return "";
+  }
+  return `<span class="money-today ${net < 0 ? "is-down" : "is-up"}"><span aria-hidden="true">${net < 0 ? "↓" : "↑"}</span> ${net < 0 ? "−" : "+"}${formatMoney(Math.abs(net))} hoy</span>`;
+}
+
+// 6: the pill shown on top of Inicio while the free money card is scrolled out of view.
+function renderMoneyMini(summary) {
+  return `<button class="money-mini" type="button" data-money-mini aria-label="Volver arriba. Dinero libre: ${escapeAttr(formatMoney(summary.freeRemaining))}" tabindex="-1" aria-hidden="true">
+    <span>Libre</span><strong>${formatMoney(summary.freeRemaining)}</strong>
+  </button>`;
+}
+
+function bindMoneyMini() {
+  heroObserver?.disconnect();
+  heroObserver = null;
+  const hero = app.querySelector(".money-bar");
+  const mini = app.querySelector("[data-money-mini]");
+  if (!hero || !mini || typeof IntersectionObserver !== "function") {
+    app.classList.remove("hero-out");
+    return;
+  }
+  heroObserver = new IntersectionObserver(([entry]) => {
+    const out = !entry.isIntersecting && entry.boundingClientRect.top < 0;
+    app.classList.toggle("hero-out", out);
+    mini.tabIndex = out ? 0 : -1;
+    mini.setAttribute("aria-hidden", out ? "false" : "true");
+  });
+  heroObserver.observe(hero);
+  mini.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+}
+
 function renderHeader(plan) {
   const summary = budgetSummary();
   const liquidity = liquiditySummary(summary);
@@ -2108,6 +2159,7 @@ function renderHeader(plan) {
     <header class="money-bar ${summary.overReserved ? "danger" : ""}" aria-label="Tu dinero libre">
       <div class="money-context"><span>Tu dinero libre</span><span>${period}</span></div>
       <strong data-amount="${Math.round(summary.freeRemaining)}">${formatMoney(summary.freeRemaining)}</strong>
+      ${renderTodayChange()}
       <span class="money-caption">${summary.overReserved ? "Presupuesto sobreasignado" : "Disponible para nuevos gastos"}</span>
       ${
         summary.categoryOverspent > 0
@@ -2117,6 +2169,7 @@ function renderHeader(plan) {
       ${summary.usesLiquidityBasedFree ? renderFreeByLocation(summary, liquidity) : ""}
       ${summary.usesLiquidityBasedFree ? renderMoneyMathFromBalance(summary, liquidity) : renderMoneyMathFromBudget(summary, liquidity)}
     </header>
+    ${renderMoneyMini(summary)}
   `;
 }
 
@@ -5547,6 +5600,7 @@ function bindEvents() {
   });
   animateBudgetRingCharts();
   animateFreeMoney();
+  bindMoneyMini();
 
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {

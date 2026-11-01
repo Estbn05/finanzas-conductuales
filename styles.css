@@ -9198,3 +9198,231 @@ html .history-row .income-amount strong {
   width: 16px;
   height: 16px;
 }
+
+/* ---- Motion and depth, part 2 (2026-11-01) ------------------------------------- */
+
+/* 8: today's change under the free money. */
+.money-today {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-self: start;
+  width: fit-content;
+  margin: 2px 0 4px;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.money-today.is-down {
+  color: var(--ds-ink);
+  background: rgb(var(--rgb-white) / 0.08);
+  border: 1px solid rgb(var(--rgb-white) / 0.12);
+}
+
+.money-today.is-up {
+  color: var(--ds-primary-strong);
+  background: rgb(var(--rgb-mint) / 0.14);
+  border: 1px solid rgb(var(--rgb-mint) / 0.24);
+}
+
+/* 6: the "Libre" pill that stays on top while the card is scrolled away. */
+.money-mini {
+  position: fixed;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  z-index: 34;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  border: 1px solid rgb(var(--rgb-mint) / 0.24);
+  border-radius: 999px;
+  padding: 8px 16px;
+  color: var(--ds-ink);
+  font: inherit;
+  background: rgba(14, 30, 24, 0.92);
+  box-shadow: 0 12px 28px rgb(var(--rgb-black) / 0.32);
+  backdrop-filter: blur(14px);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -140%);
+  transition:
+    transform 260ms cubic-bezier(0.2, 0.8, 0.3, 1),
+    opacity 200ms ease;
+}
+
+.money-mini span {
+  color: var(--ds-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.money-mini strong {
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+#app.hero-out .money-mini {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
+}
+
+html[data-theme="light"] .money-mini {
+  background: rgb(var(--rgb-cream-paper) / 0.95);
+  box-shadow: 0 12px 28px rgba(64, 50, 31, 0.16);
+}
+
+/* 7: a faint outline of Inicio behind the loading steps. */
+.session-check {
+  position: relative;
+  overflow: hidden;
+}
+
+.session-check > .startup-fallback-card {
+  position: relative;
+  z-index: 1;
+}
+
+.skeleton-preview {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  width: min(100%, 720px);
+  margin: 0 auto;
+  padding: calc(28px + env(safe-area-inset-top, 0px)) 18px 0;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.skeleton {
+  border-radius: 22px;
+  background:
+    linear-gradient(100deg, transparent 30%, rgb(var(--rgb-white) / 0.08) 50%, transparent 70%) 0 0 / 220% 100%,
+    rgb(var(--rgb-white) / 0.05);
+}
+
+html[data-theme="light"] .skeleton {
+  background:
+    linear-gradient(100deg, transparent 30%, rgb(var(--rgb-white) / 0.7) 50%, transparent 70%) 0 0 / 220% 100%,
+    rgb(var(--rgb-brown) / 0.07);
+}
+
+.sk-hero {
+  height: 230px;
+}
+
+.sk-card {
+  height: 92px;
+}
+
+.sk-short {
+  width: 70%;
+}
+
+/* 9: the bottom bar floats as a capsule, the current screen in a pill. */
+@media (max-width: 759px) {
+  .bottom-nav,
+  html[data-theme="dark"] .bottom-nav {
+    right: 12px;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    left: 12px;
+    min-height: 68px;
+    padding: 5px 4px;
+    border: 1px solid rgb(var(--rgb-white) / 0.1);
+    border-radius: 28px;
+    box-shadow:
+      0 18px 40px rgb(var(--rgb-black) / 0.38),
+      inset 0 1px 0 rgb(var(--rgb-white) / 0.06);
+  }
+
+  html[data-theme="light"] .bottom-nav {
+    border-color: rgb(var(--rgb-brown) / 0.12);
+    box-shadow: 0 18px 40px rgba(64, 50, 31, 0.18);
+  }
+
+  .bottom-nav-item {
+    min-height: 56px;
+  }
+
+  .bottom-nav-item.is-active .bottom-nav-icon {
+    width: 48px;
+    border-radius: 16px;
+  }
+
+  .snackbar {
+    bottom: calc(90px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* 10: a little more depth behind Inicio's card. */
+:where(html[data-theme="dark"]) body {
+  background:
+    radial-gradient(ellipse 90% 38% at 50% -6%, rgb(var(--rgb-mint) / 0.13), transparent 70%),
+    radial-gradient(circle at 12% -8%, rgb(var(--rgb-mint-soft) / 0.16), transparent 32%),
+    radial-gradient(circle at 88% 0%, rgb(var(--rgb-amber-soft) / 0.1), transparent 28%),
+    linear-gradient(180deg, #101412 0%, #141b18 100%);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* 4: entering a screen, its rows and cards arrive one after another. "backwards" only:
+     a finished animation must not hold transform, or pressing a row would not give. */
+  #app:not(.is-same-view) .history-row,
+  #app:not(.is-same-view) .plan-category-card,
+  #app:not(.is-same-view) .category-row,
+  #app:not(.is-same-view) .reconcile-row,
+  #app:not(.is-same-view) .progress-row,
+  #app:not(.is-same-view) .financial-event-card {
+    animation: item-in 380ms cubic-bezier(0.2, 0.8, 0.3, 1) backwards;
+  }
+
+  #app:not(.is-same-view) :is(.history-row, .plan-category-card, .category-row, .reconcile-row, .progress-row, .financial-event-card):nth-child(2) { animation-delay: 40ms; }
+  #app:not(.is-same-view) :is(.history-row, .plan-category-card, .category-row, .reconcile-row, .progress-row, .financial-event-card):nth-child(3) { animation-delay: 80ms; }
+  #app:not(.is-same-view) :is(.history-row, .plan-category-card, .category-row, .reconcile-row, .progress-row, .financial-event-card):nth-child(4) { animation-delay: 120ms; }
+  #app:not(.is-same-view) :is(.history-row, .plan-category-card, .category-row, .reconcile-row, .progress-row, .financial-event-card):nth-child(5) { animation-delay: 160ms; }
+  #app:not(.is-same-view) :is(.history-row, .plan-category-card, .category-row, .reconcile-row, .progress-row, .financial-event-card):nth-child(6) { animation-delay: 200ms; }
+  #app:not(.is-same-view) :is(.history-row, .plan-category-card, .category-row, .reconcile-row, .progress-row, .financial-event-card):nth-child(7) { animation-delay: 240ms; }
+  #app:not(.is-same-view) :is(.history-row, .plan-category-card, .category-row, .reconcile-row, .progress-row, .financial-event-card):nth-child(n + 8) { animation-delay: 280ms; }
+
+  /* 7: the outline shimmers. */
+  .skeleton {
+    animation: skeleton-shimmer 1400ms linear infinite;
+  }
+
+  /* 9: the pill of the screen just opened grows in. */
+  #app:not(.is-same-view) .bottom-nav-item.is-active .bottom-nav-icon {
+    animation: nav-pill-in 300ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  }
+
+  /* 8 */
+  #app:not(.keeps-free) .money-today {
+    animation: item-in 320ms cubic-bezier(0.2, 0.8, 0.3, 1) 120ms backwards;
+  }
+}
+
+@keyframes item-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 120% 0, 0 0;
+  }
+  to {
+    background-position: -120% 0, 0 0;
+  }
+}
+
+@keyframes nav-pill-in {
+  from {
+    width: 30px;
+    opacity: 0.4;
+  }
+}
