@@ -18,6 +18,9 @@
 //   refund    title "Te hicimos una devolución por $71.900,00"
 //             text  "Reversamos esta compra y tu dinero está nuevamente en tu cuenta."
 //             (it does not name the store: the purchase is found by its amount)
+//   card paid title "¡Bravo! Pagaste tu tarjeta de crédito Nu"
+//             text  "Recibimos tu pago por $50.900,00. En un rato podrás verlo en tu app."
+//             (not an expense: the purchases were recorded when the card was used)
 // Other kinds (credit card) are still read with the usual Colombian
 // banking wording until real samples confirm them. On a debug build, what the listener
 // kept can be read with: adb shell run-as com.estbn05.finanzasconductuales cat
@@ -28,6 +31,8 @@ export const BANK_NAMES = { "com.nu.production": "Nu" };
 const OUTGOING = /\b(compra(ste)?|pag(o|aste|ado)|retir(o|aste)|transferiste|enviaste|debito|cargo)\b/;
 // Money that arrived. Refunds are their own kind (REFUND): they undo a purchase.
 const INCOMING = /\b(recibiste|te (llego|envio|enviaron|transfirieron|pagaron|consignaron))\b/;
+// Paying the credit card. Read before OUTGOING, which "pago"/"pagaste" would match.
+const CARD_PAYMENT = /\b(pagaste tu tarjeta|recibimos tu pago|pago (a|de) tu tarjeta|abonaste a tu tarjeta)\b/;
 const REFUND = /\b(reembolso|devolucion|devolvimos|reversion|reversamos)\b/;
 const NOT_A_MOVEMENT = /\b(rechazad[ao]|declinad[ao]|fallid[ao]|no (pudimos|fue posible|se pudo)|codigo|clave|oferta|promo)/;
 
@@ -120,6 +125,9 @@ export function suggestionFromNotification(notification) {
     date: dateKey(notification.postedAt),
     postedAt: Number(notification.postedAt) || 0
   };
+  if (CARD_PAYMENT.test(words)) {
+    return { ...base, kind: "card-payment", source: "account" };
+  }
   if (REFUND.test(words)) {
     return { ...base, kind: "refund", source: parseSource(text) };
   }
@@ -179,7 +187,10 @@ function sameName(a, b) {
 // Recorded by hand already: same amount and direction on the same day, or on the day
 // before/after when the name also matches (noted at 11:50 p.m., notified at 12:05 a.m.).
 // The name is required across days so a $3.000 bus ride on two days in a row stays two.
-export function alreadyRecorded(suggestion, { transactions = [], extras = [] } = {}) {
+export function alreadyRecorded(suggestion, { transactions = [], extras = [], creditPayments = [] } = {}) {
+  if (suggestion.kind === "card-payment") {
+    return creditPayments.some((item) => Number(item.amount) === suggestion.amount && daysApart(String(item.date || "").slice(0, 10), suggestion.date) <= 1);
+  }
   const name = suggestion.kind === "income" ? suggestion.origin : suggestion.merchant;
   const matches = (item) => {
     if (Number(item.amount) !== suggestion.amount) return false;

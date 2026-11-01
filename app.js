@@ -21,7 +21,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.104";
+} from "./finance-core.js?v=1.1.110";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -34,12 +34,12 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.104";
-import { isStale, looksLikeEarlyPay, looksLikePay, readSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.104";
-import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.104";
-import { bankBoxKey, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.104";
-import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.104";
-import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.104";
+} from "./movements.js?v=1.1.110";
+import { isStale, looksLikeEarlyPay, looksLikePay, readSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.110";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.110";
+import { bankBoxKey, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.110";
+import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.110";
+import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.110";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -88,7 +88,7 @@ import {
   remoteChangedSinceLastSync,
   CREDIT_PAYMENTS_LIMIT,
   uid
-} from "./state-model.js?v=1.1.104";
+} from "./state-model.js?v=1.1.110";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -104,7 +104,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.104";
+} from "./sync-client.js?v=1.1.110";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -304,6 +304,8 @@ let planSheet = "";
 let pendingJobRemovalId = "";
 // The category open in "Editar categoría" (planSheet "edit-job").
 let editingJobId = "";
+// "Registrar pago" of the card opened from a bank notification: its amount and date.
+let creditDraft = null;
 // "Cuadrar con tu banco": what is being typed in each pocket, by row key, and the pocket
 // being typed in, so a re-render (a sync, a bank notification) neither saves half a
 // number nor takes the field away mid-typing.
@@ -1573,7 +1575,7 @@ function renderBottomNavigation() {
       </button>
       <button class="bottom-nav-item ${["savings", "calendar", "profile"].includes(state.activeView) ? "is-active" : ""}" type="button" data-action="toggle-menu">
         <span class="bottom-nav-icon" aria-hidden="true">${renderIcon("menu")}</span>
-        <span>Menu</span>
+        <span>Menú</span>
       </button>
     </nav>
   `;
@@ -1606,6 +1608,11 @@ function renderIcon(name) {
     card: '<rect x="2.5" y="8" width="15" height="11" rx="2"/><path d="M2.5 11.5h15"/><path d="M6.5 8V6.5A1.5 1.5 0 0 1 8 5h12a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 16h-2.5"/>',
     close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
     check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    shield: '<path d="M12 3 5 6v6c0 4.2 2.9 7.6 7 9 4.1-1.4 7-4.8 7-9V6l-7-3Z"/><path d="m9 12 2 2 4-4"/>',
+    phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18h2"/>',
+    play: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10.5 9.5 4 2.5-4 2.5v-5Z"/>',
+    scissors: '<circle cx="6" cy="6" r="2.8"/><circle cx="6" cy="18" r="2.8"/><path d="M8.2 7.9 20 19M8.2 16.1 20 5"/>',
+    heart: '<path d="M12 20s-7.5-4.5-7.5-10.2A4.2 4.2 0 0 1 12 7.4a4.2 4.2 0 0 1 7.5 2.4C19.5 15.5 12 20 12 20Z"/>',
     lock: '<rect x="5" y="10.5" width="14" height="9.5" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/><circle cx="12" cy="15" r="1.4" fill="currentColor" stroke="none"/>',
     eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>',
     "eye-off": '<path d="M3 3l18 18"/><path d="M10.6 5.7A9.9 9.9 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a15.6 15.6 0 0 1-3.4 4.2M6.6 6.6C4 8.3 2.5 12 2.5 12S6 18.5 12 18.5a9.6 9.6 0 0 0 3.4-.6"/><path d="M9.9 10a3 3 0 0 0 4.2 4.2"/>'
@@ -2784,9 +2791,9 @@ function renderReconcileRow(row) {
       ${hint ? `<small class="reconcile-hint">${hint}</small>` : ""}
       <label class="reconcile-input">
         <span>En tu banco</span>
-        <input type="text" data-money-input="true" inputmode="numeric" placeholder="$0" value="${escapeAttr(row.key in reconcileDrafts ? reconcileDrafts[row.key] : row.check ? row.check.amount : "")}" data-reconcile-key="${escapeAttr(row.key)}" data-reconcile-expected="${escapeAttr(row.expected)}" data-reconcile-label="${escapeAttr(row.label)}" aria-label="Cuánto dice tu banco en ${escapeAttr(row.label)}">
+        <input type="text" data-money-input="true" inputmode="numeric" placeholder="Escribe el saldo" value="${escapeAttr(row.key in reconcileDrafts ? reconcileDrafts[row.key] : row.check ? row.check.amount : "")}" data-reconcile-key="${escapeAttr(row.key)}" data-reconcile-expected="${escapeAttr(row.expected)}" data-reconcile-label="${escapeAttr(row.label)}" aria-label="Cuánto dice tu banco en ${escapeAttr(row.label)}">
       </label>
-      <p class="reconcile-status"><span aria-hidden="true">${kind === "match" || kind === "interest" ? "✓" : kind === "unchecked" ? "·" : "!"}</span> ${reconcileStatusText(row)}</p>
+      <p class="reconcile-status">${kind === "unchecked" ? "" : `<span aria-hidden="true">${kind === "match" || kind === "interest" ? "✓" : "!"}</span> `}${reconcileStatusText(row)}</p>
       <div class="reconcile-foot">
         ${row.check?.at ? `<small>${checkedAgoLabel(row.check.at)}</small>` : "<small></small>"}
         ${
@@ -2813,8 +2820,8 @@ function bindReconcileInputs() {
       const raw = String(input.value || "").trim();
       const status = reconcileStatus(Number(input.dataset.reconcileExpected || 0), raw === "" ? undefined : numberFrom(raw));
       row.className = `reconcile-row is-${status.kind}`;
-      const mark = status.kind === "match" || status.kind === "interest" ? "✓" : status.kind === "unchecked" ? "·" : "!";
-      row.querySelector(".reconcile-status").innerHTML = `<span aria-hidden="true">${mark}</span> ${reconcileStatusText({ key, label: input.dataset.reconcileLabel, status })}`;
+      const mark = status.kind === "match" || status.kind === "interest" ? "✓" : status.kind === "unchecked" ? "" : "!";
+      row.querySelector(".reconcile-status").innerHTML = `${mark ? `<span aria-hidden="true">${mark}</span> ` : ""}${reconcileStatusText({ key, label: input.dataset.reconcileLabel, status })}`;
     });
     input.addEventListener("change", () => {
       if (!input.isConnected) {
@@ -3310,6 +3317,7 @@ function renderCreditRow(liquidity) {
 // change. Recording it as an expense would count it twice.
 function renderCreditPaymentSheet() {
   const liquidity = liquiditySummary();
+  const draft = creditDraft || {};
   return `
     <div class="sheet-backdrop" role="presentation" data-action="close-plan-sheet">
       <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="credit-sheet-title">
@@ -3322,8 +3330,9 @@ function renderCreditPaymentSheet() {
         <form class="sheet-form" id="credit-payment-form">
           <label>
             ¿Cuánto pagaste?
-            <input name="amount" type="number" min="1000" step="1000" inputmode="numeric" placeholder="$0" required>
+            <input name="amount" type="number" min="1000" step="1000" inputmode="numeric" placeholder="$0" value="${draft.amount ? escapeAttr(draft.amount) : ""}" required>
           </label>
+          ${draft.bankNotificationId ? `<input name="bankNotificationId" type="hidden" value="${escapeAttr(draft.bankNotificationId)}"><input name="date" type="hidden" value="${escapeAttr(draft.date || "")}">` : ""}
           <div class="conversion-box">
             <span>Debes ahora</span>
             <strong>${formatMoney(liquidity.credit)}</strong>
@@ -3511,7 +3520,23 @@ function categoryIconFor(name) {
   if (icon) {
     return icon;
   }
-  return /carro|moto/.test(String(name || "").toLowerCase()) ? "fuel" : "tag";
+  const text = String(name || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const byName = [
+    [/ahorr|inversion|cdt/, "target"],
+    [/soat|seguro|imprevist|emergencia/, "shield"],
+    [/gasolin|tanque|combustible/, "fuel"],
+    [/moto|carro|parqueadero|peaje|taller|revision|transporte|bus/, "car"],
+    [/plan|celular|internet|telefono|datos/, "phone"],
+    [/spotify|netflix|youtube|disney|prime|hbo|suscrip|claude|chatgpt|fijos/, "play"],
+    [/motilad|peluquer|barber|aseo|belleza|unas/, "scissors"],
+    [/familia|mama|papa|hij|pareja|novi|regalo/, "heart"],
+    [/gafas|lentes|optica/, "eye"],
+    [/mercado|comida|almuerzo|restaurante|domicilio/, "food"]
+  ];
+  return byName.find(([pattern]) => pattern.test(text))?.[1] || "tag";
 }
 
 // A category's fund this period, and what of it can still go back to libre: the fund,
@@ -3547,20 +3572,15 @@ function renderBudgetJob(job) {
             <span>${subtitle}</span>
           </div>
         </div>
-        <button class="category-menu-btn" type="button" data-action="open-edit-job" data-id="${escapeAttr(job.id)}" aria-label="Editar o eliminar ${escapeAttr(job.name)}">&middot;&middot;&middot;</button>
+        <button class="category-menu-btn" type="button" data-action="open-edit-job" data-id="${escapeAttr(job.id)}" aria-label="Editar, liberar o eliminar ${escapeAttr(job.name)}">&middot;&middot;&middot;</button>
       </div>
       <div class="category-card-bar ${band}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(clamp(ratio, 0, 100))}" aria-valuetext="${Math.round(ratio)} por ciento usado">
         <span style="width:${clamp(ratio, 0, 120)}%"></span>
       </div>
       <div class="category-card-foot">
         <span><strong>${formatMoney(spent)}</strong> usado</span>
-        <span class="category-status">${status} · ${formatCompactMoney(remaining)} restante</span>
+        <span class="category-status">${status} · ${formatMoney(remaining)} restante</span>
       </div>
-      ${
-        releasable > 0
-          ? `<button class="btn ghost category-release-btn" type="button" data-action="release-fund" data-id="${escapeAttr(job.id)}">Liberar ${formatMoney(releasable)} apartado</button>`
-          : ""
-      }
     </article>
   `;
 }
@@ -3623,6 +3643,12 @@ function renderEditJobSheet() {
           }
           ${renderBankBoxField(job)}
           <button class="btn primary" type="submit">Guardar cambios</button>
+          ${
+            fundStanding(job).releasable > 0
+              ? `<button class="btn ghost category-release-btn" type="button" data-action="release-fund" data-id="${escapeAttr(job.id)}">Liberar ${formatMoney(fundStanding(job).releasable)} apartado</button>
+                <p class="setaside-note">Liberar lo devuelve a libre; la categoría sigue si es recurrente.</p>`
+              : ""
+          }
           <button class="btn ghost destructive-link" type="button" data-action="request-remove-job" data-id="${escapeAttr(job.id)}">Eliminar categoría</button>
         </form>
       </section>
@@ -3862,9 +3888,12 @@ function renderDeleteAccountConfirmation() {
 
 function renderSavings(plan) {
   const summary = budgetSummary();
-  const targetCovered = plan.emergencyGap <= 0;
+  const cushion = Number(state.profile.emergencySavings || 0) + plan.savingsReserved;
+  const cushionGap = Math.max(0, plan.emergencyTarget - cushion);
+  const cushionProgress = plan.emergencyTarget > 0 ? Math.min(100, (cushion / plan.emergencyTarget) * 100) : 0;
+  const targetCovered = cushionGap <= 0;
   const periodsToTarget = plan.projectedPeriodSavings > 0
-    ? Math.ceil(plan.emergencyGap / plan.projectedPeriodSavings)
+    ? Math.ceil(cushionGap / plan.projectedPeriodSavings)
     : 0;
   const futureRaise = summary.baseIncome * (state.settings.monthlyRaisePct / 100);
   const escalatedSavings = futureRaise * (state.settings.escalationPct / 100);
@@ -3877,16 +3906,23 @@ function renderSavings(plan) {
 
       <article class="savings-hero">
         <div class="trust-tags"><span>Orientativo</span><span>No mueve dinero</span></div>
-        <p>Podrías apartar</p>
+${
+          plan.suggestedPeriodSavings <= 0 && plan.savingsReserved > 0
+            ? `<p>Ya tienes apartado para ahorrar</p>
+        <strong>${formatMoney(plan.savingsReserved)}</strong>
+        <span>Sigue guardado aunque cambie el periodo</span>
+        <div class="savings-fit">Este periodo no queda espacio para apartar más sin tocar tus gastos.</div>`
+            : `<p>Podrías apartar</p>
         <strong>${formatMoney(plan.suggestedPeriodSavings)}</strong>
-        <span>durante este periodo ${summary.cadenceLabel}</span>
+        <span>en este periodo (${summary.cadenceLabel})</span>
         <div class="savings-fit ${plan.savingsCapacityGap > 0 ? "warning" : ""}">
           ${
             plan.savingsCapacityGap > 0
               ? `La meta ideal no cabe completa. Faltaría liberar ${formatMoney(plan.savingsCapacityGap)}.`
               : `La recomendación cabe y deja ${formatMoney(plan.freeAfterSuggestion)} libres.`
           }
-        </div>
+        </div>`
+        }
       </article>
 
       <div class="money-location-list">
@@ -3926,8 +3962,8 @@ function renderSavings(plan) {
       </article>
 
       <article class="reference-fund">
-        <div><p class="eyebrow">Fondo de emergencia</p><h2>${targetCovered ? "Meta cubierta" : `${periodsToTarget || "Sin"} periodos estimados`}</h2></div>
-        ${renderProgress(plan.emergencyProgress, "Avance simulado con el ahorro actual")}
+        <div><p class="eyebrow">Fondo de emergencia</p><h2>${targetCovered ? "Meta cubierta" : `${periodsToTarget === 1 ? "1 periodo estimado" : `${periodsToTarget || "Sin"} periodos estimados`}`}</h2></div>
+        ${renderProgress(cushionProgress, `Con lo que ya tienes ahorrado (${formatMoney(cushion)} de ${formatMoney(plan.emergencyTarget)})`)}
         <p>Es una proyección orientativa, no una promesa.</p>
       </article>
     </section>
@@ -3961,13 +3997,20 @@ function renderCalendar() {
         </article>
       </div>
 
-      <article class="calendar-panel">
-        <div class="calendar-panel-heading">
+      <div class="section-heading">
+        <h2>Tus gastos planeados</h2>
+        <span>${formatMoney(events.reduce((sum, event) => sum + Number(event.amount || 0), 0))} estimados</span>
+      </div>
+      ${events.length ? renderFinancialEvents(events) : ""}
+
+      <details class="calendar-panel calendar-new-plan" ${events.length ? "" : "open"}>
+        <summary class="calendar-panel-heading">
+          <span class="calendar-new-plan-icon" aria-hidden="true">+</span>
           <div>
-            <p class="eyebrow">Nuevo plan</p>
-            <h2>Guardar evento financiero</h2>
+            <h2>Nuevo gasto planeado</h2>
+            <small>${events.length ? "Una fecha que trae un gasto: un regalo, un viaje, una cuota" : "Guarda fechas que suelen traer gastos: regalos, viajes, aniversarios o planes especiales."}</small>
           </div>
-        </div>
+        </summary>
         <form class="financial-event-form" id="financial-event-form">
           <label>
             Evento
@@ -4001,13 +4044,7 @@ function renderCalendar() {
           </label>
           <button class="btn primary" type="submit">Agregar al calendario</button>
         </form>
-      </article>
-
-      <div class="section-heading">
-        <h2>Eventos guardados</h2>
-        <span>${formatMoney(events.reduce((sum, event) => sum + Number(event.amount || 0), 0))} estimados</span>
-      </div>
-      ${renderFinancialEvents(events)}
+      </details>
     </section>
   `;
 }
@@ -4499,9 +4536,17 @@ function renderExpenseCalendarDay(day, maxDaily) {
   return `
     <button type="button" class="expense-calendar-day ${level} ${day.isToday ? "is-today" : ""} ${selected ? "is-selected" : ""}" aria-label="${escapeAttr(label)}" aria-pressed="${selected}" data-action="filter-movements-by-date" data-date="${escapeAttr(day.date)}">
       <span>${day.dayNumber}</span>
-      ${day.total > 0 ? `<strong>${formatCompactMoney(day.total)}</strong>` : `<small>-</small>`}
+      ${day.total > 0 ? `<strong>${calendarAmountLabel(day.total)}</strong>` : `<small>-</small>`}
     </button>
   `;
+}
+
+// "701k", "1,2M", "900": what fits in a calendar day.
+function calendarAmountLabel(value) {
+  const amount = Math.round(Number(value || 0));
+  if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(1).replace(".", ",").replace(",0", "")}M`;
+  if (amount >= 1000) return `${Math.round(amount / 1000)}k`;
+  return String(amount);
 }
 
 function expenseCalendarForSummary(summary = budgetSummary()) {
@@ -4570,7 +4615,7 @@ function renderTransactionHistory(summary = budgetSummary(), sort = "recent", fi
                     <strong>${escapeHtml(extra.source)}</strong>
                     <small>Dinero extra &middot; ${locationLabel(extra.location)}${allocationText}</small>
                   </span>
-                  <span class="movement-amount income-amount"><strong>+${formatMoney(extra.amount)}</strong><small>Editar</small></span>
+                  <span class="movement-amount income-amount"><strong>+${formatMoney(extra.amount)}</strong><span class="visually-hidden">Editar</span></span>
                 </button>
               `;
             }
@@ -4583,7 +4628,7 @@ function renderTransactionHistory(summary = budgetSummary(), sort = "recent", fi
                   <strong>${escapeHtml(transaction.merchant)}</strong>
                   <small>${transaction.description ? `${escapeHtml(transaction.description)} · ` : ""}${unlabeled ? "Sin clasificar" : escapeHtml(categoryName(transaction.category))} · ${locationLabel(transaction.source)}</small>
                 </span>
-                <span class="movement-amount"><strong>-${formatMoney(transaction.amount)}</strong><small>Editar</small></span>
+                <span class="movement-amount"><strong>-${formatMoney(transaction.amount)}</strong><span class="visually-hidden">Editar</span></span>
               </button>
             `;
           }).join("")}
@@ -4792,12 +4837,6 @@ function renderProfile(plan) {
         }
       </article>
 
-      <article class="data-section">
-        <div class="data-section-heading"><span class="data-icon">${renderIcon("income")}</span><div><strong>Recomendación</strong><small>Para este periodo</small></div><button type="button" data-view="savings">Ver ahorro</button></div>
-        <div class="data-metrics three"><div><span>${budgetSummary().extraIncome > 0 ? "Presupuesto + extra" : "Presupuesto"}</span><strong>${formatMoney(budgetSummary().income)}</strong></div><div><span>Podrías apartar</span><strong>${formatMoney(plan.suggestedPeriodSavings)}</strong></div><div><span>Libre después</span><strong>${formatMoney(plan.freeAfterSuggestion)}</strong></div></div>
-        <p class="data-note">Es una simulación: no modifica tu presupuesto ni tus saldos.</p>
-      </article>
-
       <article class="data-section settings-section">
         <div class="data-section-heading"><span class="data-icon">${renderIcon("menu")}</span><div><strong>Ajustes</strong><small>Apariencia, guía y recordatorio diario</small></div></div>
         ${renderThemeSwitcher()}
@@ -4918,6 +4957,10 @@ function renderProgressView() {
   const previous = closures[1];
   const trendDelta = previous ? latest.freeFinal - previous.freeFinal : null;
   const topExceeded = progressTopExceededCategories(closures);
+  const firstUse = [...(state.transactions || []), ...(state.budgetExtras || [])].reduce((first, item) => {
+    const date = String(item.date || "").slice(0, 10);
+    return date && (!first || date < first) ? date : first;
+  }, "");
 
   return `
     <section class="screen-view progress-view" aria-label="Progreso">
@@ -4940,20 +4983,23 @@ function renderProgressView() {
       <div class="progress-history">
         ${closures
           .map((closure) => {
+            // The period the app started in, part way through. Not older ones: if old movements
+            // were ever cleaned up, they must not all turn "incompleto".
+            const partial = Boolean(firstUse) && firstUse > closure.windowStart && firstUse < closure.windowEnd;
             const ratio = closure.income > 0 ? clamp((closure.spent / closure.income) * 100, 0, 130) : 0;
             const band = closure.status === "risk" ? "danger" : closure.status === "tight" ? "warning" : "good";
             const period = `${formatShortDate(closure.windowStart)} - ${formatShortDate(previousDay(closure.windowEnd))}`;
             return `
               <article class="progress-row ${closure.status}">
                 <div class="progress-row-top">
-                  <div><strong>${period}</strong><span class="progress-row-status">${periodStatusLabel(closure.status)}</span></div>
+                  <div><strong>${period}</strong><span class="progress-row-status">${partial ? "Periodo incompleto" : periodStatusLabel(closure.status)}</span></div>
                   <strong class="${closure.freeFinal < 0 ? "negative" : ""}">${formatMoney(closure.freeFinal)}</strong>
                 </div>
                 <div class="bar ${band}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(clamp(ratio, 0, 100))}" aria-valuetext="${Math.round(ratio)} por ciento del ingreso gastado">
                   <span style="width:${ratio}%"></span>
                 </div>
                 <div class="progress-row-meta">
-                  <span>${formatMoney(closure.spent)} gastado de ${formatMoney(closure.income)}</span>
+                  <span>${partial ? `Empezaste a usar la app el ${formatShortDate(firstUse)}: solo cuenta desde ahí.` : `${formatMoney(closure.spent)} gastado de ${formatMoney(closure.income)}`}</span>
                   ${(closure.exceededCategories || []).length ? `<span>${closure.exceededCategories.length} ${closure.exceededCategories.length === 1 ? "categoría excedida" : "categorías excedidas"}</span>` : ""}
                 </div>
               </article>
@@ -5354,9 +5400,9 @@ function categoryStatusLabel(ratio) {
 }
 
 function renderCategoryBars(plan, limit) {
-  const categories = categoryStatus()
-    .sort((a, b) => b.ratio - a.ratio)
-    .slice(0, limit);
+  const all = categoryStatus().sort((a, b) => b.ratio - a.ratio);
+  const categories = all.slice(0, limit);
+  const hidden = state.budgetJobs.length - categories.filter((category) => category.id !== FREE_CATEGORY_ID).length;
 
   return `
     <div class="category-bars">
@@ -5368,15 +5414,22 @@ function renderCategoryBars(plan, limit) {
                 <strong>${escapeHtml(category.name)}</strong>
                 <span class="category-numbers">${formatMoney(category.spent)} / ${formatMoney(category.budget)}</span>
               </div>
-              <div class="bar ${category.band}" aria-label="${escapeAttr(category.name)}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(clamp(category.ratio, 0, 100))}" aria-valuetext="${Math.round(category.ratio)} por ciento usado">
+              <div class="bar ${category.id === FREE_CATEGORY_ID ? "free" : category.band}" aria-label="${escapeAttr(category.name)}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(clamp(category.ratio, 0, 100))}" aria-valuetext="${Math.round(category.ratio)} por ciento usado">
                 <span style="width:${clamp(category.ratio, 0, 120)}%"></span>
               </div>
-              <span class="category-status">${categoryStatusLabel(category.ratio)}${category.ratio > 0 ? ` · ${Math.round(clamp(category.ratio, 0, 999))}%` : ""}</span>
+              <span class="category-status">${
+                category.id === FREE_CATEGORY_ID
+                  ? category.ratio > 0
+                    ? `Usaste el ${Math.round(clamp(category.ratio, 0, 999))}% de lo libre`
+                    : "Sin gastos todavía"
+                  : `${categoryStatusLabel(category.ratio)}${category.ratio > 0 ? ` · ${Math.round(clamp(category.ratio, 0, 999))}%` : ""}`
+              }</span>
             </div>
           `
         )
         .join("")}
     </div>
+    ${hidden > 0 ? `<button class="home-plan-link category-bars-more" type="button" data-view="budget">Ver las ${state.budgetJobs.length} categorías en Plan</button>` : ""}
   `;
 }
 
@@ -6381,6 +6434,7 @@ function handleAction(event) {
     "register-bank-suggestion",
     "register-bank-income",
     "register-bank-refund",
+    "register-bank-card-payment",
     "dismiss-bank-suggestion",
     "open-pay-received",
     "confirm-bank-pay"
@@ -6467,6 +6521,7 @@ function handleAction(event) {
       periodReportOpen = false;
     },
     "open-credit-payment": () => {
+      creditDraft = null;
       planSheet = "credit";
       menuOpen = false;
       predictionDetailsOpen = false;
@@ -6474,8 +6529,13 @@ function handleAction(event) {
     },
     "close-plan-sheet": () => {
       planSheet = "";
+      creditDraft = null;
     },
-    "release-fund": () => releaseFund(id),
+    "release-fund": () => {
+      releaseFund(id);
+      planSheet = "";
+      editingJobId = "";
+    },
     "open-edit-job": () => {
       editingJobId = id;
       planSheet = "edit-job";
@@ -6653,6 +6713,14 @@ function handleAction(event) {
     "register-bank-suggestion": () => registerBankSuggestion(id),
     "register-bank-income": () => registerBankIncome(id),
     "register-bank-refund": () => registerBankIncome(id),
+    "register-bank-card-payment": () => {
+      const suggestion = bankSuggestions.find((item) => item.id === id);
+      if (suggestion) {
+        creditDraft = { amount: suggestion.amount, date: suggestion.date, bankNotificationId: suggestion.id };
+        planSheet = "credit";
+        menuOpen = false;
+      }
+    },
     "remove-refunded-expense": () => removeRefundedExpense(id),
     "confirm-bank-pay": () => registerBankPay(id),
     "open-pay-received": () => {
@@ -7404,12 +7472,18 @@ function handleCreditPaymentSubmit(event) {
   const applied = Math.min(amount, owed);
   adjustLiquidity(source, -applied, "credit-payment");
   adjustLiquidity("credit", applied, "credit-payment");
+  const bankDate = String(data.get("date") || "");
   state.creditPayments = [
     ...(state.creditPayments || []),
-    { id: uid("credit-payment"), date: todayKey(), amount: applied, source, updated_at: new Date().toISOString() }
+    { id: uid("credit-payment"), date: /^\d{4}-\d{2}-\d{2}$/.test(bankDate) && bankDate <= todayKey() ? bankDate : todayKey(), amount: applied, source, updated_at: new Date().toISOString() }
   ].slice(-CREDIT_PAYMENTS_LIMIT);
+  const bankNotificationId = cleanText(data.get("bankNotificationId"), "");
+  if (bankNotificationId) {
+    forgetBankNotification(bankNotificationId);
+  }
 
   planSheet = "";
+  creditDraft = null;
   const overdraft = overdraftNotice(source);
   state.lastAlert =
     applied < amount
@@ -8152,7 +8226,7 @@ async function refreshBankSuggestions({ recheck = true } = {}) {
     if (stale.length) {
       plugin.dismiss({ ids: stale })?.catch?.(() => {});
     }
-    const read = readSuggestions(pending, { transactions: state.transactions, extras: state.budgetExtras });
+    const read = readSuggestions(pending, { transactions: state.transactions, extras: state.budgetExtras, creditPayments: state.creditPayments });
     bankSuggestions = read.suggestions;
     // A purchase given back before it was confirmed: neither is offered, and the phone
     // forgets both.
@@ -8303,7 +8377,8 @@ function renderBankSuggestions() {
   const expenses = bankSuggestions.filter((suggestion) => suggestion.kind === "expense");
   const income = bankSuggestions.filter((suggestion) => suggestion.kind === "income" && suggestion !== pay);
   const refunds = bankSuggestions.filter((suggestion) => suggestion.kind === "refund");
-  return `${renderBankRefundCard(refunds)}${renderBankPayCard(pay)}${renderBankSuggestionCard(expenses, "expense")}${renderBankSuggestionCard(income, "income")}`;
+  const cardPayments = bankSuggestions.filter((suggestion) => suggestion.kind === "card-payment");
+  return `${renderBankRefundCard(refunds)}${renderBankCardPaymentCard(cardPayments)}${renderBankPayCard(pay)}${renderBankSuggestionCard(expenses, "expense")}${renderBankSuggestionCard(income, "income")}`;
 }
 
 // The bank gave a purchase back. When the purchase is recorded, the question is whether to
@@ -8349,6 +8424,44 @@ function renderBankRefundCard(refunds) {
           </div>
         `;
           })
+          .join("")}
+      </div>
+    </article>
+  `;
+}
+
+// The bank says the card was paid: not an expense (the purchases were recorded when the
+// card was used), but what is owed goes down and the money leaves the account.
+function renderBankCardPaymentCard(payments) {
+  if (!payments.length) {
+    return "";
+  }
+  return `
+    <article class="cooldown-panel bank-suggestions" aria-label="Pagos de tarjeta">
+      <div class="home-section-heading compact-heading">
+        <div>
+          <p class="eyebrow">De tus notificaciones de ${escapeHtml(payments[0].bank)}</p>
+          <h2>${payments.length === 1 ? "Pagaste tu tarjeta" : "Pagaste tu tarjeta varias veces"}</h2>
+          <p class="data-note">No es un gasto: baja lo que debes y sale de tu cuenta.</p>
+        </div>
+      </div>
+      <div class="cooldown-list">
+        ${payments
+          .slice(0, 3)
+          .map(
+            (payment) => `
+          <div class="cooldown-item">
+            <div>
+              <strong>Pago de tarjeta</strong>
+              <span>${formatMoney(payment.amount)} · ${escapeHtml(bankDateLabel(payment.date))}</span>
+            </div>
+            <div class="cooldown-actions">
+              <button class="btn ghost" type="button" data-action="dismiss-bank-suggestion" data-id="${escapeAttr(payment.id)}">Ignorar</button>
+              <button class="btn secondary" type="button" data-action="register-bank-card-payment" data-id="${escapeAttr(payment.id)}">Registrar pago</button>
+            </div>
+          </div>
+        `
+          )
           .join("")}
       </div>
     </article>
@@ -10143,7 +10256,7 @@ function formatRelativeEventDate(dateValue) {
 function movementDayLabel(dateValue) {
   if (dateValue === todayKey()) return "Hoy";
   if (dateValue === previousDay(todayKey())) return "Ayer";
-  return MOVEMENT_DAY_FORMATTER.format(new Date(`${dateValue}T12:00:00`));
+  return capitalize(MOVEMENT_DAY_FORMATTER.format(new Date(`${dateValue}T12:00:00`)));
 }
 
 function formatMoney(value) {

@@ -667,6 +667,8 @@ test("apartar dinero stays reserved into the next period, and Liberar hands it b
     assert.doesNotMatch(nextPeriod.text(), /ya usaste/);
     assert.match(nextPeriod.text(), /\+ \$\s?30\.000 apartado/);
 
+    assert.equal(nextPeriod.$('[data-action="release-fund"]'), null, "Liberar lives in the category's ··· sheet, not on every card");
+    await nextPeriod.click('[data-action="open-edit-job"][data-id="remedios"]');
     await nextPeriod.click('[data-action="release-fund"][data-id="remedios"]');
     const released = nextPeriod.saved();
     assert.deepEqual(released.budgetJobs.map((job) => job.id), ["mercado"], "nothing spent: Liberar removes the set-aside");
@@ -774,12 +776,11 @@ test("savings figures are per period on Ahorro and Datos, and agree", async () =
     assert.match(ui.text(), /cada periodo/);
     assert.doesNotMatch(ui.text(), /cada mes|libres\/mes|Guardar simulación/);
 
+    assert.ok(suggested.replace(/\D/g, "").length > 0);
+
+    // Datos no longer repeats the recommendation: one place, one figure.
     await ui.click('[data-view="profile"]');
-    assert.match(ui.text(), /Para este periodo/);
-    const digits = suggested.replace(/\D/g, "");
-    assert.ok(digits.length > 0);
-    const datosSuggested = ui.text().match(/Podrías apartar\s*\$\s?([\d.]+)/)?.[1].replace(/\D/g, "");
-    assert.equal(datosSuggested, digits, "Datos and Ahorro suggest different amounts");
+    assert.doesNotMatch(ui.text(), /Podrías apartar/);
     assert.doesNotMatch(ui.text(), /Orientación mensual|Ingreso mensual/);
   } finally {
     ui.close();

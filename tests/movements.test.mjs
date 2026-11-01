@@ -183,7 +183,7 @@ test("weekday pattern: one weekday with a quarter of the spending, only with eno
 
 test("category trend: the category that grew the most against the period before, ignoring small bases", () => {
   const transactions = [
-    expense({ date: "2026-09-10", amount: 100_000, category: "mercado" }),
+    expense({ date: "2026-08-31", amount: 100_000, category: "mercado" }),
     expense({ date: "2026-10-10", amount: 150_000, category: "mercado" }),
     expense({ date: "2026-09-10", amount: 4_000, category: "cafe" }),
     expense({ date: "2026-10-10", amount: 40_000, category: "cafe" }),
@@ -195,6 +195,10 @@ test("category trend: the category that grew the most against the period before,
   assert.equal(trend.previous, 100_000);
   assert.equal(trend.pct, 50);
   assert.equal(categoryTrend(transactions.filter((item) => item.category !== "mercado"), october), null);
+
+  // The user's first period (from Sept 26) is partial: no "1468% más" against it.
+  const startedLate = transactions.map((item) => (item.date === "2026-08-31" ? { ...item, date: "2026-09-26" } : item));
+  assert.equal(categoryTrend(startedLate, october), null);
 });
 
 test("small expenses: five or more under the threshold that add up to a tenth of the period", () => {

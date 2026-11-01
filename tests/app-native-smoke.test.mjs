@@ -704,3 +704,28 @@ test("a purchase refunded before it was confirmed is not offered at all", async 
     ui.close();
   }
 });
+
+test("a card payment from Nu lowers what is owed instead of becoming an expense", async () => {
+  const postedAt = Date.now();
+  const paid = { id: `com.nu.production:${postedAt}:p`, packageName: "com.nu.production", title: "¡Bravo! Pagaste tu tarjeta de crédito Nu", text: "Recibimos tu pago por $50.900,00. En un rato podrás verlo en tu app.", postedAt };
+  const native = fakeCapacitor({ bank: { enabled: true, permission: true, pending: [paid] } });
+  const savedState = returningUserState({ liquidity: { account: 1_000_000, cash: 0, credit: 50_900, initialized: true } });
+  const ui = await bootApp({ savedState, beforeBoot: native.install });
+  try {
+    await waitFor(ui, '[data-action="register-bank-card-payment"]');
+    assert.equal(ui.$('[data-action="register-bank-suggestion"]'), null, "not offered as an expense");
+    await ui.click('[data-action="register-bank-card-payment"]');
+    const form = ui.$("#credit-payment-form");
+    assert.equal(form.elements.namedItem("amount").value.replace(/\D/g, ""), "50900");
+    form.requestSubmit();
+    await settle(ui.window);
+    const saved = ui.saved();
+    assert.equal(saved.transactions?.length ?? 0, 0);
+    assert.equal(saved.liquidity.credit, 0);
+    assert.equal(saved.liquidity.account, 949_100);
+    assert.equal(saved.creditPayments.length, 1);
+    assert.deepEqual(native.calls.bankDismissed, [paid.id]);
+  } finally {
+    ui.close();
+  }
+});

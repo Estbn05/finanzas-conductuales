@@ -203,6 +203,19 @@ test("a pay in the last days of the period looks like the next period's, paid ea
   assert.equal(looksLikeEarlyPay({ ...pay, date: "2026-10-28" }, { usualPay: 400_000, window: week }), false, "4 days is mid-week");
 });
 
+// Real Nu, Oct 31 2026: paying the credit card was offered as a $50.900 expense at "un
+// rato podrás verlo en tu app", on the card itself.
+test("paying the credit card is read as a card payment, not as an expense", () => {
+  const paid = notification("¡Bravo! Pagaste tu tarjeta de crédito Nu", "Recibimos tu pago por $50.900,00. En un rato podrás verlo en tu app.", at("2026-10-31T22:12:00"));
+  const payment = suggestionFromNotification(paid);
+  assert.equal(payment.kind, "card-payment");
+  assert.equal(payment.amount, 50_900);
+  assert.equal(payment.source, "account");
+  assert.equal(alreadyRecorded(payment, { creditPayments: [{ amount: 50_900, date: "2026-10-31" }] }), true);
+  assert.equal(alreadyRecorded(payment, { transactions: [{ amount: 50_900, date: "2026-10-31" }] }), false, "an expense of the same amount is not this payment");
+  assert.equal(suggestionFromNotification(notification("Compra aprobada por $50.900,00", "Compra en Little Caesars con tu tarjeta de crédito terminada en 1234.")).kind, "expense");
+});
+
 // Real Nu, Oct 31 2026: a Rappi purchase at 18:03, given back at 19:46.
 const RAPPI = () => notification("Compra aprobada por $71.900,00", "Compra en Rappi con tu tarjeta débito terminada en 3965.", at("2026-10-31T18:03:22"));
 const RAPPI_REFUND = () => notification("Te hicimos una devolución por $71.900,00", "Reversamos esta compra y tu dinero está nuevamente en tu cuenta.", at("2026-10-31T19:46:04"));

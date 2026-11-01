@@ -8879,3 +8879,191 @@ html[data-theme="dark"] .money-math > * + * {
 #app.keeps-snackbar .snackbar {
   animation: none;
 }
+
+/* ---- Visual review, 2026-10-31 ------------------------------------------------ */
+
+/* "¿Cuándo fue?": the "Otro día" date is hidden while Hoy/Ayer is picked, and so is the
+   caption that spells it out ("Jueves, 29 de oct" under "Hoy" read as the wrong date). */
+input[hidden] + .date-caption {
+  display: none;
+}
+
+/* Movimientos search: one field with the magnifier inside it. The wrapper used to draw
+   its own box around an input that the global field rules box again (double border). */
+.history-search {
+  position: relative;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.history-search-icon {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  z-index: 1;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.history-search #transaction-history-search {
+  width: 100%;
+  padding-left: 44px;
+}
+
+/* Movimientos rows: one line each (amount on the right, the whole row opens Editar) and
+   one style for expenses and income alike; income is told apart by its green "+" amount
+   and icon, not by a card. Below 420px the amount used to drop under the name. */
+.history-row,
+.history-row.is-income,
+.history-row.is-unclassified,
+:where(html[data-theme="dark"]) .history-row.is-income,
+:where(html[data-theme="dark"]) .history-row.is-unclassified,
+html[data-theme="dark"] .history-row.is-income,
+html[data-theme="dark"] .history-row.is-unclassified {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 60px;
+  margin: 0;
+  padding: 10px 2px;
+  border: 0;
+  border-bottom: 1px solid var(--ds-line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.history-row .movement-amount {
+  grid-column: auto;
+  justify-items: end;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.history-row .movement-type-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+}
+
+.history-row .movement-type-icon .ui-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.history-row .movement-copy strong {
+  overflow-wrap: anywhere;
+}
+
+/* Income amounts read green next to their "+"; the generic row amount colour won before. */
+html .history-row .income-amount strong {
+  color: var(--ds-primary-strong);
+}
+
+/* ---- Visual review, part 2 (2026-10-31) ---------------------------------------- */
+
+/* 3: day headings in Movimientos are sentence case (the label is capitalized in JS) and
+   the day's name stays on one line. */
+.movement-day-heading {
+  text-transform: none;
+}
+
+.movement-day-heading > strong {
+  white-space: nowrap;
+}
+
+/* 5: calendar amounts never spill into the next day. */
+.expense-calendar-day strong {
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* 9: Libre's bar is neutral: using what is free is not a warning. */
+.bar.free span {
+  background: linear-gradient(90deg, rgb(var(--rgb-mint) / 0.55), rgb(var(--rgb-mint) / 0.85));
+}
+
+.category-bars-more {
+  display: block;
+  margin: 10px auto 0;
+}
+
+/* 10: one loud button per group. Next to a primary, a secondary drops the gold and reads
+   as an outline, so "Ver y copiar" no longer competes with "Compartir documento". */
+.btn.primary ~ .btn.secondary,
+.btn.secondary:has(~ .btn.primary) {
+  border-color: var(--ds-line);
+  color: var(--ds-ink);
+  background: transparent;
+  box-shadow: none;
+}
+
+/* 13: "Nuevo gasto planeado" opens on demand. */
+.calendar-new-plan > summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.calendar-new-plan > summary::-webkit-details-marker {
+  display: none;
+}
+
+.calendar-new-plan > summary small {
+  display: block;
+  margin-top: 2px;
+  color: var(--ds-muted);
+  font-size: 0.78rem;
+}
+
+.calendar-new-plan-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  color: var(--ds-primary-strong);
+  background: var(--ds-primary-soft);
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.calendar-new-plan[open] > summary {
+  margin-bottom: 12px;
+}
+
+
+/* 16: a title's eyebrow stays on one line; the chip beside it moves below when both do
+   not fit. */
+.screen-title-row,
+.expense-calendar-head {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.screen-title-row .eyebrow,
+.expense-calendar-head .eyebrow {
+  white-space: nowrap;
+}
+
+/* 19: Registrar gasto. Categories scroll sideways in two rows instead of stacking five,
+   so "Pagado con" and "¿Cuándo fue?" are on screen without scrolling. */
+.quick-expense-panel .choice-pills[data-choice-group="category"] {
+  display: grid;
+  grid-auto-columns: max-content;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(2, auto);
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+
+.quick-expense-panel .choice-pills[data-choice-group="category"]::-webkit-scrollbar {
+  display: none;
+}

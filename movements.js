@@ -2,8 +2,8 @@
 // recorded expenses (transactions) and extra income (budgetExtras). Pure: everything
 // comes in as arguments, so these are unit-tested in tests/movements.test.mjs instead of
 // being searched for in app.js's source.
-import { FREE_CATEGORY_ID } from "./finance-core.js?v=1.1.104";
-import { cleanText, csvField, merchantKey } from "./state-model.js?v=1.1.104";
+import { FREE_CATEGORY_ID } from "./finance-core.js?v=1.1.110";
+import { cleanText, csvField, merchantKey } from "./state-model.js?v=1.1.110";
 
 export const SMALL_EXPENSE_THRESHOLD = 15000;
 
@@ -280,8 +280,18 @@ function totalsByCategory(transactions) {
 // The category that grew the most against the previous period, when it grew by at least
 // 30% and $10.000 over a previous spend of at least $5.000 (smaller bases are noise).
 export function categoryTrend(allTransactions = [], window) {
+  // Only against a previous period the app saw whole: the first one is usually partial
+  // (started mid-month) and read as "1468% más".
+  const before = previousWindow(window);
+  const firstRecorded = allTransactions.reduce((first, transaction) => {
+    const date = String(transaction.date || "").slice(0, 10);
+    return date && (!first || date < first) ? date : first;
+  }, "");
+  if (!firstRecorded || firstRecorded > before.start) {
+    return null;
+  }
   const current = totalsByCategory(inWindow(allTransactions, window));
-  const previous = totalsByCategory(inWindow(allTransactions, previousWindow(window)));
+  const previous = totalsByCategory(inWindow(allTransactions, before));
   let best = null;
   Object.keys(current).forEach((category) => {
     const before = previous[category] || 0;
