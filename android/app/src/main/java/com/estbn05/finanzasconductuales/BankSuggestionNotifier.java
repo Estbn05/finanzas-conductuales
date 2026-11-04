@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
+import android.util.Log;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import java.text.Normalizer;
@@ -28,7 +29,7 @@ final class BankSuggestionNotifier {
     private static final long FRESH_MS = 15 * 60 * 1000;
     private static final Pattern AMOUNT = Pattern.compile("\\$\\s?\\d|\\d{1,3}(\\.\\d{3})+,\\d{2}");
     private static final Pattern MOVEMENT = Pattern.compile("compra|pag|envi|recib|retir|transfer|devoluci|reembols|revers|lleg|abon|consign");
-    private static final Pattern NOT_A_MOVEMENT = Pattern.compile("codigo|clave|rechaz|declin|oferta|promo|cuota de manejo|no pudimos|fallid");
+    private static final Pattern NOT_A_MOVEMENT = Pattern.compile("codigo|clave|rechaz|declin|oferta|promo|cuota de manejo|no pudimos|fallid|faltan fondos|fondos insuficientes|saldo insuficiente|vuelve a intentar|intenta de nuevo|intentar de nuevo");
 
     private BankSuggestionNotifier() {}
 
@@ -44,11 +45,18 @@ final class BankSuggestionNotifier {
     }
 
     static void maybePost(Context context, String id, String title, String body, long postedAt) {
-        if (id == null || !isOn(context) || System.currentTimeMillis() - postedAt > FRESH_MS || !looksLikeMovement(title, body)) {
-            return;
-        }
+        String skip = id == null ? "repeated"
+            : !isOn(context) ? "turned off"
+            : System.currentTimeMillis() - postedAt > FRESH_MS ? "old"
+            : !looksLikeMovement(title, body) ? "not a movement"
+            : null;
         NotificationManagerCompat manager = NotificationManagerCompat.from(context);
-        if (!manager.areNotificationsEnabled()) {
+        if (skip == null && !manager.areNotificationsEnabled()) {
+            skip = "notifications blocked";
+        }
+        // Why a notice got no "¿Lo registras?", without its text (logcat tag BankNotif).
+        Log.i("BankNotif", "suggest " + (skip == null ? "posted" : "skipped: " + skip) + " at=" + postedAt);
+        if (skip != null) {
             return;
         }
         ensureChannel(context);
@@ -69,6 +77,7 @@ final class BankSuggestionNotifier {
             manager.notify(notificationId(id), builder.build());
         } catch (SecurityException notAllowed) {
             // POST_NOTIFICATIONS was taken back: the movement still waits on Inicio.
+            Log.i("BankNotif", "suggest refused by Android");
         }
     }
 

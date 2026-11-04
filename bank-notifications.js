@@ -21,6 +21,12 @@
 //   card paid title "¡Bravo! Pagaste tu tarjeta de crédito Nu"
 //             text  "Recibimos tu pago por $50.900,00. En un rato podrás verlo en tu app."
 //             (not an expense: the purchases were recorded when the card was used)
+//   to a Nu account  title "Enviaste $5.000,00"
+//             text  "Le enviaste a Jua*** Seb******** Gar***** Rod******** en su cuenta de NU."
+//             (the name comes masked: unmaskName() puts back a name the user already knows)
+//   no money  title "Faltan fondos para pagar en GOOGLE *Spotify Music"
+//             text  "Saca dinero de tus Cajitas o deposita en tu cuenta y vuelve a intentar el pago por $24.500,00."
+//             (declined: nothing left the account)
 // Other kinds (credit card) are still read with the usual Colombian
 // banking wording until real samples confirm them. On a debug build, what the listener
 // kept can be read with: adb shell run-as com.estbn05.finanzasconductuales cat
@@ -34,7 +40,7 @@ const INCOMING = /\b(recibiste|te (llego|envio|enviaron|transfirieron|pagaron|co
 // Paying the credit card. Read before OUTGOING, which "pago"/"pagaste" would match.
 const CARD_PAYMENT = /\b(pagaste tu tarjeta|recibimos tu pago|pago (a|de) tu tarjeta|abonaste a tu tarjeta)\b/;
 const REFUND = /\b(reembolso|devolucion|devolvimos|reversion|reversamos)\b/;
-const NOT_A_MOVEMENT = /\b(rechazad[ao]|declinad[ao]|fallid[ao]|no (pudimos|fue posible|se pudo)|codigo|clave|oferta|promo)/;
+const NOT_A_MOVEMENT = /\b(rechazad[ao]|declinad[ao]|fallid[ao]|no (pudimos|fue posible|se pudo)|faltan fondos|fondos insuficientes|saldo insuficiente|vuelve a intentar|intenta(r)? de nuevo|codigo|clave|oferta|promo)/;
 
 function plain(text) {
   return String(text || "")
@@ -82,6 +88,30 @@ function cleanName(name, max) {
 export function parseMerchant(text) {
   const match = String(text || "").match(/\ben\s+(.+?)(?=\s+(?:con|por|el|desde|a las|via)\b|[.,;!\n]|\s+\$|$)/i);
   return cleanName(match?.[1], 42);
+}
+
+// "Le enviaste a Jua*** Seb******** en su cuenta de NU." -> "Jua* Seb*" (masked by the bank).
+export function parseRecipient(text) {
+  const match = String(text || "").match(/\benviaste\s+a\s+(.+?)(?=\s+en\s+(?:su|tu)\b|[.,;!\n]|$)/i);
+  return cleanName(String(match?.[1] || "").replace(/\*+/g, "*"), 42);
+}
+
+// A masked name ("Jua* Seb* Gar* Rod*") becomes the one full name the user already has
+// whose words start the same way, in order ("Juan Sebastian Garcia Rodriguez"). Left
+// masked when no known name, or more than one, fits.
+export function unmaskName(masked, knownNames = []) {
+  const parts = plain(masked).split(/\s+/).filter(Boolean);
+  if (!parts.some((part) => part.endsWith("*"))) {
+    return masked;
+  }
+  const fits = (name) => {
+    const words = plain(name).split(/\s+/).filter(Boolean);
+    return words.length >= parts.length && parts.every((part, index) =>
+      part.endsWith("*") ? words[index].startsWith(part.slice(0, -1)) : words[index] === part
+    );
+  };
+  const found = [...new Set(knownNames.map((name) => String(name || "").trim()).filter(fits))];
+  return found.length === 1 ? found[0] : masked;
 }
 
 // "Te llegó dinero de YEFRY ESTEBAN AVILA ZULUAGA con tu llave." -> "Yefry Esteban Avila Zuluaga".
@@ -139,7 +169,7 @@ export function suggestionFromNotification(notification) {
     return {
       ...base,
       kind: "expense",
-      merchant: parseMerchant(notification.text) || parseMerchant(notification.title),
+      merchant: parseRecipient(notification.text) || parseMerchant(notification.text) || parseMerchant(notification.title),
       source: parseSource(text)
     };
   }
@@ -257,10 +287,19 @@ export function isStale(notification, now = Date.now()) {
 // (matchRefunds). settled: the ids of the purchase+refund pairs that cancelled out, for
 // the phone to forget.
 export function readSuggestions(notifications = [], recorded = {}, now = Date.now()) {
-  const fresh = notifications
+  const read = notifications
     .filter((notification) => !isStale(notification, now))
     .map(suggestionFromNotification)
-    .filter((suggestion) => suggestion && (suggestion.kind === "refund" || !alreadyRecorded(suggestion, recorded)));
+    .filter(Boolean);
+  // Names the user already knows: who paid them, where they spent, and who sent money now.
+  const knownNames = [
+    ...(recorded.extras || []).map((item) => item.source),
+    ...(recorded.transactions || []).map((item) => item.merchant),
+    ...read.map((item) => item.origin)
+  ];
+  const fresh = read
+    .map((suggestion) => (suggestion.merchant?.includes("*") ? { ...suggestion, merchant: unmaskName(suggestion.merchant, knownNames) } : suggestion))
+    .filter((suggestion) => suggestion.kind === "refund" || !alreadyRecorded(suggestion, recorded));
   const { suggestions, settled } = matchRefunds(fresh, recorded);
   return { suggestions: suggestions.sort((a, b) => b.postedAt - a.postedAt), settled };
 }

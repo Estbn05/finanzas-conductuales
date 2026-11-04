@@ -2,7 +2,7 @@
 // typical Colombian banking wording, to be replaced with real samples as they show up.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { alreadyRecorded, isStale, looksLikeEarlyPay, looksLikePay, matchRefunds, parseAmount, readSuggestions, unreadableNotifications, parseMerchant, parseOrigin, pendingSuggestions, suggestionFromNotification } from "../bank-notifications.js";
+import { alreadyRecorded, isStale, parseRecipient, unmaskName, looksLikeEarlyPay, looksLikePay, matchRefunds, parseAmount, readSuggestions, unreadableNotifications, parseMerchant, parseOrigin, pendingSuggestions, suggestionFromNotification } from "../bank-notifications.js";
 
 const NU = "com.nu.production";
 const at = (iso) => new Date(iso).getTime();
@@ -261,4 +261,49 @@ test("a refund matches only purchases before it and within 30 days, and each pur
     { transactions: [{ id: "rappi", amount: 71_900, date: "2026-10-31" }] }
   );
   assert.deepEqual(suggestions.map((item) => item.transactionId), ["rappi", ""]);
+});
+
+test("real Nu: 'Faltan fondos' is a payment that did not go through, never an expense", () => {
+  for (const [title, text] of [
+    ["Faltan fondos para pagar en GOOGLE *Claude by Anth", "Saca dinero de tus Cajitas o deposita en tu cuenta y vuelve a intentar el pago por $63.490,00."],
+    ["Faltan fondos para pagar en GOOGLE *Spotify Music", "Saca dinero de tus Cajitas o deposita en tu cuenta y vuelve a intentar el pago por $24.500,00."],
+    ["Pago no realizado", "Saldo insuficiente para tu compra por $12.000,00 en Rappi."]
+  ]) {
+    assert.equal(suggestionFromNotification(notification(title, text)), null, title);
+  }
+});
+
+test("real Nu: money sent to a Nu account names who got it, masked as the bank wrote it", () => {
+  const sent = suggestionFromNotification(
+    notification("Enviaste $5.000,00", "Le enviaste a Jua*** Seb******** Gar***** Rod******** en su cuenta de NU.")
+  );
+  assert.equal(sent.kind, "expense");
+  assert.equal(sent.amount, 5_000);
+  assert.equal(sent.source, "account");
+  assert.equal(sent.merchant, "Jua* Seb* Gar* Rod*");
+  assert.equal(parseRecipient("Le enviaste a HEY***** ALE******** en su cuenta de Bancolombia."), "Hey* Ale*");
+});
+
+test("a masked name becomes the one full name the user already knows that fits it", () => {
+  const known = ["Juan Sebastian Garcia Rodriguez", "Terpel", "Juana Perez"];
+  assert.equal(unmaskName("Jua* Seb* Gar* Rod*", known), "Juan Sebastian Garcia Rodriguez");
+  assert.equal(unmaskName("Jua* Per*", known), "Juana Perez");
+  assert.equal(unmaskName("Jua*", known), "Jua*", "two names fit: left masked");
+  assert.equal(unmaskName("Ana* Gom*", known), "Ana* Gom*", "no name fits");
+  assert.equal(unmaskName("Terpel", known), "Terpel", "not masked: untouched");
+});
+
+test("real Nu: a transfer to someone who also sent money that day shows their full name", () => {
+  const { suggestions } = readSuggestions(
+    [
+      notification("Recibiste 13.941,00 en tu cuenta", "Te llegó dinero de Juan Sebastian Garcia Rodriguez con tu llave.", at("2026-11-03T09:38:00")),
+      notification("Enviaste $5.000,00", "Le enviaste a Jua*** Seb******** Gar***** Rod******** en su cuenta de NU.", at("2026-11-03T13:18:00"))
+    ],
+    {},
+    at("2026-11-03T20:00:00")
+  );
+  assert.deepEqual(
+    suggestions.map((item) => [item.kind, item.merchant || item.origin]),
+    [["expense", "Juan Sebastian Garcia Rodriguez"], ["income", "Juan Sebastian Garcia Rodriguez"]]
+  );
 });
