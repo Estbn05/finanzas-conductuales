@@ -21,7 +21,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.114";
+} from "./finance-core.js?v=1.1.115";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -34,12 +34,12 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.114";
-import { isStale, looksLikeEarlyPay, looksLikePay, readSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.114";
-import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.114";
-import { bankBoxKey, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.114";
-import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.114";
-import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.114";
+} from "./movements.js?v=1.1.115";
+import { isStale, looksLikeEarlyPay, looksLikePay, readSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.115";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.115";
+import { bankBoxKey, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.115";
+import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.115";
+import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.115";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -88,7 +88,7 @@ import {
   remoteChangedSinceLastSync,
   CREDIT_PAYMENTS_LIMIT,
   uid
-} from "./state-model.js?v=1.1.114";
+} from "./state-model.js?v=1.1.115";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -104,7 +104,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.114";
+} from "./sync-client.js?v=1.1.115";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -385,7 +385,7 @@ let biometricPromptActive = false;
 // Expenses read from the bank app's notifications, waiting for the user to confirm them.
 // Device-only: they come from the Android listener and are never part of the synced state.
 let bankSuggestions = [];
-let bankStatus = { available: false, enabled: false, permission: false, connected: false, notify: true };
+let bankStatus = { available: false, enabled: false, permission: false, connected: false, notify: true, batteryFree: true };
 // Recent bank notifications that are not a movement the app can read (shown in Datos).
 let bankUnreadable = [];
 // Money a bank notification said arrived, prefilling the "Dinero extra" sheet.
@@ -6847,6 +6847,7 @@ function handleAction(event) {
     "disable-bank-notifications": () => disableBankNotifications(),
     "open-bank-settings": () => nativeBankNotifications()?.openSettings().catch(() => {}),
     "open-bank-background-settings": () => nativeBankNotifications()?.openBackgroundSettings().catch(() => {}),
+    "open-bank-battery-settings": () => nativeBankNotifications()?.openBatterySettings?.()?.catch?.(() => {}),
     "register-bank-suggestion": () => registerBankSuggestion(id),
     "register-bank-income": () => registerBankIncome(id),
     "register-bank-refund": () => registerBankIncome(id),
@@ -6934,7 +6935,8 @@ function handleAction(event) {
       action === "enable-bank-notifications" ||
       action === "disable-bank-notifications" ||
       action === "open-bank-settings" ||
-      action === "open-bank-background-settings";
+      action === "open-bank-background-settings" ||
+      action === "open-bank-battery-settings";
     if (!selfManagedAction && !interfaceOnlyActions.has(action)) {
       saveState();
     }
@@ -8364,6 +8366,7 @@ async function refreshBankSuggestions({ recheck = true } = {}) {
       enabled: Boolean(status?.enabled),
       permission: Boolean(status?.permission),
       connected: status?.connected !== false,
+      batteryFree: status?.batteryFree !== false,
       notify: status?.notify !== false
     };
     // status() asks Android to reconnect an unbound listener, which takes a moment: look
@@ -8740,13 +8743,18 @@ function renderBankNotificationsPanel() {
   // Access granted but Android will not start the listener: on Xiaomi phones that is the
   // app's "Inicio automático" (autostart) being off, and nothing arrives until it is on.
   const blocked = enabled && permission && !connected;
+  // Listening, but the phone may close the app to save battery, and a notice that comes
+  // while it is closed is lost (Xiaomi, November 2026: a Nu transfer never arrived).
+  const battery = enabled && permission && connected && !bankStatus.batteryFree;
   const note = !enabled
     ? "Cuando Nu te avise de una compra, te proponemos registrarla. Tú confirmas cada una."
     : !permission
       ? "Falta un paso: permite el acceso a notificaciones en los ajustes de Android."
       : blocked
         ? "Tu teléfono no deja que la app lea las notificaciones en segundo plano. Activa “Inicio automático” para Finanzas Conductuales y vuelve a abrir la app."
-        : bankStatus.notify
+        : battery
+          ? "Activado, pero tu teléfono puede cerrar la app para ahorrar batería y entonces se pierden avisos de Nu. En “Ahorro de batería” elige “Sin restricciones”."
+          : bankStatus.notify
           ? "Activado. Cuando Nu te avise de un movimiento, te llega “¿Lo registras?” y queda en Inicio para que lo confirmes."
           : "Activado. Cuando Nu te avise de un movimiento, aparece en Inicio para que lo confirmes.";
   return `
@@ -8758,6 +8766,7 @@ function renderBankNotificationsPanel() {
             ? `<button class="btn primary" type="button" data-action="open-bank-disclosure">Activar</button>`
             : `${permission ? "" : `<button class="btn primary" type="button" data-action="open-bank-settings">Dar permiso</button>`}
                ${blocked ? `<button class="btn primary" type="button" data-action="open-bank-background-settings">Abrir ajustes</button>` : ""}
+               ${battery ? `<button class="btn primary" type="button" data-action="open-bank-battery-settings">Quitar restricción</button>` : ""}
                <button class="btn ghost" type="button" data-action="disable-bank-notifications">Desactivar</button>`
         }
       </div>

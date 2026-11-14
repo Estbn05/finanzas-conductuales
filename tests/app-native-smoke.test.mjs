@@ -38,7 +38,7 @@ function fakeCapacitor({ launchUrl = "", biometricResult = "success", bank = { e
     },
     // Stands in for BankNotificationsPlugin.java (the Android listener's store).
     BankNotifications: {
-      status: () => Promise.resolve({ enabled: bank.enabled, permission: bank.permission, connected: bank.connected !== false, notify: bank.notify !== false }),
+      status: () => Promise.resolve({ enabled: bank.enabled, permission: bank.permission, connected: bank.connected !== false, notify: bank.notify !== false, batteryFree: bank.batteryFree !== false }),
       setNotify({ notify }) {
         bank.notify = notify;
         calls.bankNotify.push(notify);
@@ -46,6 +46,10 @@ function fakeCapacitor({ launchUrl = "", biometricResult = "success", bank = { e
       },
       openBackgroundSettings() {
         calls.bankBackgroundOpened += 1;
+        return Promise.resolve();
+      },
+      openBatterySettings() {
+        calls.bankBatteryOpened = (calls.bankBatteryOpened || 0) + 1;
         return Promise.resolve();
       },
       setEnabled({ enabled }) {
@@ -768,6 +772,37 @@ test("Datos turns the '¿Lo registras?' notifications off and on", async () => {
     assert.deepEqual(native.calls.bankNotify, [false]);
     assert.doesNotMatch(ui.text(), /te llega “¿Lo registras\?”/);
     assert.equal(ui.$('[data-action="set-bank-notify"][data-notify-choice="off"]').getAttribute("aria-pressed"), "true");
+  } finally {
+    ui.close();
+  }
+});
+
+// Real case (Xiaomi, November 2026): the phone closed the app to save battery, the
+// listener went with it, and a Nu transfer swiped away before the app came back was lost.
+test("when battery saving can close the app, Datos says avisos get lost and opens the setting", async () => {
+  const native = fakeCapacitor({ bank: { enabled: true, permission: true, batteryFree: false, pending: [] } });
+  const ui = await bootApp({ savedState: returningUserState(), beforeBoot: native.install });
+  try {
+    await waitFor(ui, '[data-view="profile"]');
+    await ui.click('[data-view="profile"]');
+    await waitFor(ui, '[data-action="open-bank-battery-settings"]');
+    assert.match(ui.text(), /Sin restricciones/);
+    await ui.click('[data-action="open-bank-battery-settings"]');
+    assert.equal(native.calls.bankBatteryOpened, 1);
+  } finally {
+    ui.close();
+  }
+});
+
+test("with battery unrestricted, Datos does not ask for it", async () => {
+  const native = fakeCapacitor({ bank: { enabled: true, permission: true, pending: [] } });
+  const ui = await bootApp({ savedState: returningUserState(), beforeBoot: native.install });
+  try {
+    await waitFor(ui, '[data-view="profile"]');
+    await ui.click('[data-view="profile"]');
+    await waitFor(ui, '[data-action="set-bank-notify"]');
+    assert.equal(ui.$('[data-action="open-bank-battery-settings"]'), null);
+    assert.doesNotMatch(ui.text(), /Sin restricciones/);
   } finally {
     ui.close();
   }

@@ -4,6 +4,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.PowerManager;
 import android.provider.Settings;
 import androidx.core.app.NotificationManagerCompat;
 import com.getcapacitor.JSArray;
@@ -36,7 +37,38 @@ public class BankNotificationsPlugin extends Plugin {
         result.put("permission", permission);
         result.put("connected", BankNotificationListener.connected);
         result.put("notify", BankSuggestionNotifier.isOn(context));
+        result.put("batteryFree", batteryFree(context));
         call.resolve(result);
+    }
+
+    // Whether the phone may close the app to save battery. When it does (Xiaomi does it
+    // within the hour), the listener goes with it and a bank notice that arrives and is
+    // swiped away before the app comes back is never seen.
+    private static boolean batteryFree(Context context) {
+        PowerManager power = context.getSystemService(PowerManager.class);
+        return power == null || power.isIgnoringBatteryOptimizations(context.getPackageName());
+    }
+
+    /**
+     * Where the user takes the app off battery saving: Xiaomi's battery page for this app
+     * (its "Ahorro de batería" choices, checked on HyperOS in November 2026), the app's own
+     * info page elsewhere, which leads to the battery setting on most phones.
+     */
+    @PluginMethod
+    public void openBatterySettings(PluginCall call) {
+        Context context = getContext();
+        Intent xiaomi = new Intent();
+        xiaomi.setComponent(new ComponentName("com.miui.securitycenter", "com.miui.powercenter.legacypowerrank.PowerDetailActivity"));
+        xiaomi.putExtra("package_name", context.getPackageName());
+        xiaomi.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            context.startActivity(xiaomi);
+        } catch (RuntimeException notXiaomi) {
+            Intent details = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.getPackageName(), null));
+            details.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(details);
+        }
+        call.resolve();
     }
 
     /** Turning it off also forgets every notification not yet confirmed. */
