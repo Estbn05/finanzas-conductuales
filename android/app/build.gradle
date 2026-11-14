@@ -55,6 +55,9 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation "androidx.biometric:biometric:1.1.0"
+    // Reads screenshots of the bank's pockets on the phone (ScreenTextPlugin). The bundled
+    // model works offline and needs no Google Play download on first use.
+    implementation "com.google.mlkit:text-recognition:16.0.1"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"

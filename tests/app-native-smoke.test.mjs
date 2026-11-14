@@ -9,7 +9,7 @@ import { budgetWindow } from "../finance-core.js";
 import { bootApp, returningUserState, settle, todayKey } from "./helpers/boot-app.mjs";
 
 // What the native side would receive, recorded instead of acted on.
-function fakeCapacitor({ launchUrl = "", biometricResult = "success", bank = { enabled: false, permission: false, pending: [] } } = {}) {
+function fakeCapacitor({ launchUrl = "", biometricResult = "success", bank = { enabled: false, permission: false, pending: [] }, screens = [] } = {}) {
   const calls = { exited: 0, widget: [], files: [], shares: [], biometricPrompts: 0, bankSettingsOpened: 0, bankBackgroundOpened: 0, bankDismissed: [], bankEnabled: [], bankNotify: [] };
   const listeners = {};
   const plugins = {
@@ -66,6 +66,12 @@ function fakeCapacitor({ launchUrl = "", biometricResult = "success", bank = { e
         calls.bankDismissed.push(...ids);
         bank.pending = bank.pending.filter((item) => !ids.includes(item.id));
         return Promise.resolve();
+      }
+    },
+    ScreenText: {
+      pickAndRead() {
+        calls.screensRead = (calls.screensRead || 0) + 1;
+        return Promise.resolve({ images: screens });
       }
     },
     Filesystem: {
@@ -846,6 +852,57 @@ test("money in confirmed from the shade still waits on Inicio, and an unknown me
     assert.equal(ui.saved().transactions.length, 1);
     assert.deepEqual(native.calls.bankDismissed, ["nu:out"]);
     assert.match(ui.text(), /Elige su categoría/);
+  } finally {
+    ui.close();
+  }
+});
+
+// "Leer capturas de tus cajitas": screenshots of Nu's Cajitas (ScreenTextPlugin reads
+// their text) fill "Cuadrar con tu banco" as if each balance had been typed.
+test("screenshots of Nu's cajitas fill Cuadrar con tu banco and name the ones without a category", async () => {
+  const screens = [
+    {
+      width: 900,
+      lines: [
+        { text: "Cajitas", left: 383, top: 140 },
+        { text: "familia", left: 327, top: 1340 },
+        { text: "$ 100.318,86", left: 327, top: 1410 },
+        { text: "↑ $ 318,86", left: 335, top: 1477 },
+        { text: "imprevistos", left: 327, top: 1650 },
+        { text: "$ 0,00", left: 327, top: 1720 }
+      ]
+    }
+  ];
+  const native = fakeCapacitor({ screens });
+  const savedState = returningUserState({ budgetJobs: [{ id: "fam", name: "Familia", amount: 100_000, cadence: "monthly" }] });
+  const ui = await bootApp({ savedState, beforeBoot: native.install });
+  try {
+    await waitFor(ui, '[data-view="budget"]');
+    await ui.click('[data-view="budget"]');
+    await waitFor(ui, '[data-view="reconcile"]');
+    await ui.click('[data-view="reconcile"]');
+    await waitFor(ui, '[data-action="read-bank-screens"]');
+    await ui.click('[data-action="read-bank-screens"]');
+    await settle(ui.window);
+    assert.equal(native.calls.screensRead, 1);
+    assert.equal(ui.saved().bankChecks["box:familia"].amount, 100_319);
+    assert.equal(ui.$('[data-reconcile-key="box:familia"]').value.replace(/\D/g, ""), "100319");
+    assert.match(ui.text(), /Leí 2 cajitas y llené 1/);
+    assert.match(ui.text(), /imprevistos/);
+  } finally {
+    ui.close();
+  }
+});
+
+test("without the native reader (web), Cuadrar con tu banco has no screenshot button", async () => {
+  const ui = await bootApp({ savedState: returningUserState() });
+  try {
+    await waitFor(ui, '[data-view="budget"]');
+    await ui.click('[data-view="budget"]');
+    await waitFor(ui, '[data-view="reconcile"]');
+    await ui.click('[data-view="reconcile"]');
+    await waitFor(ui, ".reconcile-list");
+    assert.equal(ui.$('[data-action="read-bank-screens"]'), null);
   } finally {
     ui.close();
   }

@@ -21,7 +21,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.116";
+} from "./finance-core.js?v=1.1.119";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -34,12 +34,12 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.116";
-import { isStale, looksLikeEarlyPay, looksLikePay, readSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.116";
-import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.116";
-import { bankBoxKey, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.116";
-import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.116";
-import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.116";
+} from "./movements.js?v=1.1.119";
+import { isStale, looksLikeEarlyPay, looksLikePay, readSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.119";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.119";
+import { bankBoxKey, matchPockets, readPocketsFromScreens, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.119";
+import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.119";
+import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.119";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -88,7 +88,7 @@ import {
   remoteChangedSinceLastSync,
   CREDIT_PAYMENTS_LIMIT,
   uid
-} from "./state-model.js?v=1.1.116";
+} from "./state-model.js?v=1.1.119";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -104,7 +104,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.116";
+} from "./sync-client.js?v=1.1.119";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -2832,6 +2832,46 @@ function renderPeriodCloseCard(summary = budgetSummary(), plan = calculatePlan()
   `;
 }
 
+function nativeScreenText() {
+  return window.Capacitor?.Plugins?.ScreenText || null;
+}
+
+// "Leer capturas": the bank's pockets read from screenshots (ScreenTextPlugin) fill the
+// rows with the same name, as if typed; what has no row is named so the user can link it
+// (the category's "Dónde la guardas").
+async function readBankScreens() {
+  let images = [];
+  try {
+    images = (await nativeScreenText().pickAndRead())?.images || [];
+  } catch {
+    showNoticeSnackbar("No pude leer esas imágenes.", { kind: "error" });
+    return;
+  }
+  if (!images.length) {
+    return;
+  }
+  const pockets = readPocketsFromScreens(images);
+  if (!pockets.length) {
+    showNoticeSnackbar("No encontré cajitas en esas capturas. Usa capturas de la pantalla Cajitas de Nu.", { kind: "error" });
+    return;
+  }
+  const { fills, unmatched } = matchPockets(pockets, currentReconcileRows());
+  const today = todayKey();
+  const checks = { ...(state.bankChecks || {}) };
+  Object.entries(fills).forEach(([key, amount]) => {
+    checks[key] = { amount, at: today };
+    delete reconcileDrafts[key];
+  });
+  state.bankChecks = checks;
+  saveState();
+  const filled = Object.keys(fills).length;
+  const left = unmatched.length
+    ? ` No supe de qué categoría es: ${unmatched.join(", ")}. Ponle esa cajita en la categoría (Editar → ¿En qué cajita de tu banco está?).`
+    : "";
+  showNoticeSnackbar(`Leí ${pockets.length} cajitas y llené ${filled}.${left}`, { duration: 9000, renderNow: false });
+  render();
+}
+
 // "Cuadrar con tu banco" (reconcile.js): each pocket of the bank account next to what the
 // app says it should hold, so checking Nu's cajitas takes no adding up by hand.
 function currentReconcileRows() {
@@ -2891,6 +2931,14 @@ function renderReconcileScreen() {
       <p class="reconcile-intro">Escribe lo que dice cada cajita o bolsillo de tu banco y la app te dice si coincide con lo que le queda a cada categoría.${
         totals.checked ? ` <strong>Cuadran ${totals.matching} de ${totals.checked}.</strong>` : ""
       }</p>
+      ${
+        nativeScreenText()
+          ? `<div class="reconcile-screens">
+        <button class="btn secondary" type="button" data-action="read-bank-screens">Leer capturas de tus cajitas</button>
+        <small>Toma capturas de la pantalla Cajitas de Nu, bajando hasta la última, y elígelas aquí. Se leen en tu teléfono.</small>
+      </div>`
+          : ""
+      }
       <div class="reconcile-list">
         ${rows.map((row) => renderReconcileRow(row)).join("")}
       </div>
@@ -6747,6 +6795,7 @@ function handleAction(event) {
     "copy-period-report": copyPeriodReport,
     "share-period-export": sharePeriodExport,
     "register-interest": () => registerBankInterest(id),
+    "read-bank-screens": () => readBankScreens(),
     "review-uncategorized": () => {
       transactionHistoryFilter = "uncategorized";
       movementsPeriodOffset = 0;
@@ -6936,7 +6985,8 @@ function handleAction(event) {
       action === "disable-bank-notifications" ||
       action === "open-bank-settings" ||
       action === "open-bank-background-settings" ||
-      action === "open-bank-battery-settings";
+      action === "open-bank-battery-settings" ||
+      action === "read-bank-screens";
     if (!selfManagedAction && !interfaceOnlyActions.has(action)) {
       saveState();
     }
