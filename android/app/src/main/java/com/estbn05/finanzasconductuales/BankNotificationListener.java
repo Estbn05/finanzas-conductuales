@@ -153,6 +153,40 @@ public class BankNotificationListener extends NotificationListenerService {
         prefs(context).edit().putString(KEY_PENDING, pending.toString()).apply();
     }
 
+    /** "Registrar" from the shade: the app records this notice next time it reads them. */
+    static synchronized void markQuick(Context context, String id) {
+        JSONArray pending = readPending(context);
+        for (int i = 0; i < pending.length(); i++) {
+            JSONObject item = pending.optJSONObject(i);
+            if (item != null && id.equals(item.optString("id"))) {
+                try {
+                    item.put("quick", true);
+                } catch (JSONException ignored) {
+                    return;
+                }
+                writePending(context, pending);
+                return;
+            }
+        }
+    }
+
+    /** Recorded or dismissed: never offered again. */
+    static synchronized void forget(Context context, Set<String> ids) {
+        JSONArray pending = readPending(context);
+        JSONArray kept = new JSONArray();
+        for (int i = 0; i < pending.length(); i++) {
+            JSONObject item = pending.optJSONObject(i);
+            if (item != null && !ids.contains(item.optString("id"))) {
+                kept.put(item);
+            }
+        }
+        writePending(context, kept);
+    }
+
+    static void forget(Context context, String id) {
+        forget(context, new HashSet<>(Arrays.asList(id)));
+    }
+
     // The id of the notice kept, or null when it was already there (a re-post).
     private static synchronized String store(Context context, String packageName, String title, String body, long postedAt) {
         JSONArray pending = readPending(context);

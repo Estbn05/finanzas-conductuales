@@ -807,3 +807,46 @@ test("with battery unrestricted, Datos does not ask for it", async () => {
     ui.close();
   }
 });
+
+// "Registrar" on a "¿Lo registras?" notification (BankSuggestionActionReceiver) marks the
+// notice quick; the app records it when it next reads its notices, with no form to fill.
+test("an expense confirmed from the notification is recorded on opening, with the merchant's usual category", async () => {
+  const purchase = { ...nuNotification("Compraste $32.000 con tu tarjeta débito en TERPEL CALLE 80.", 1), quick: true };
+  const native = fakeCapacitor({ bank: { enabled: true, permission: true, pending: [purchase] } });
+  const savedState = returningUserState({
+    budgetJobs: [{ id: "transporte", name: "Transporte", amount: 900_000, cadence: "monthly" }],
+    transactions: [{ id: "t1", date: dateDaysAgo(5), amount: 40_000, merchant: "Terpel Calle 80", category: "transporte", labeled: true, source: "account" }],
+    liquidity: { account: 1_500_000, cash: 0, initialized: true }
+  });
+  const ui = await bootApp({ savedState, beforeBoot: native.install });
+  try {
+    await waitFor(ui, ".snackbar");
+    const recorded = ui.saved().transactions.find((item) => item.amount === 32_000);
+    assert.ok(recorded, "recorded without opening the form");
+    assert.equal(recorded.category, "transporte");
+    assert.equal(recorded.date, dateDaysAgo(1));
+    assert.equal(ui.saved().liquidity.account, 1_468_000);
+    assert.deepEqual(native.calls.bankDismissed, [purchase.id]);
+    assert.equal(ui.$('[data-action="register-bank-suggestion"]'), null);
+    assert.match(ui.text(), /desde la notificación de Nu/);
+  } finally {
+    ui.close();
+  }
+});
+
+test("money in confirmed from the shade still waits on Inicio, and an unknown merchant goes to Libre", async () => {
+  const incoming = { ...nuNotification("Te llegó dinero de ANA PEREZ con tu llave.", 0), id: "nu:in", title: "Recibiste 20.000,00 en tu cuenta", quick: true };
+  const purchase = { ...nuNotification("Compraste $9.000 en TIENDA RARA XYZ."), id: "nu:out", quick: true };
+  const native = fakeCapacitor({ bank: { enabled: true, permission: true, pending: [incoming, purchase] } });
+  const ui = await bootApp({ savedState: returningUserState(), beforeBoot: native.install });
+  try {
+    await waitFor(ui, '[data-action="register-bank-income"]');
+    const recorded = ui.saved().transactions.find((item) => item.amount === 9_000);
+    assert.equal(recorded.category, "free");
+    assert.equal(ui.saved().transactions.length, 1);
+    assert.deepEqual(native.calls.bankDismissed, ["nu:out"]);
+    assert.match(ui.text(), /Elige su categoría/);
+  } finally {
+    ui.close();
+  }
+});

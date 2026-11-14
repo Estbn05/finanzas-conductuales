@@ -21,7 +21,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.115";
+} from "./finance-core.js?v=1.1.116";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -34,12 +34,12 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.115";
-import { isStale, looksLikeEarlyPay, looksLikePay, readSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.115";
-import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.115";
-import { bankBoxKey, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.115";
-import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.115";
-import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.115";
+} from "./movements.js?v=1.1.116";
+import { isStale, looksLikeEarlyPay, looksLikePay, readSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.116";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.116";
+import { bankBoxKey, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.116";
+import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.116";
+import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.116";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -88,7 +88,7 @@ import {
   remoteChangedSinceLastSync,
   CREDIT_PAYMENTS_LIMIT,
   uid
-} from "./state-model.js?v=1.1.115";
+} from "./state-model.js?v=1.1.116";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -104,7 +104,7 @@ import {
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.115";
+} from "./sync-client.js?v=1.1.116";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -8351,7 +8351,56 @@ function bindBankNotifications() {
       refreshBankSuggestions();
     }
   });
+  // "Registrar" pressed in the shade while the app is open.
+  nativeBankNotifications().addListener?.("pendingChanged", () => refreshBankSuggestions());
   refreshBankSuggestions();
+}
+
+// "Registrar" pressed on a "¿Lo registras?" notification (BankSuggestionActionReceiver
+// marks the notice quick): the expense is recorded as the bank told it, with the category
+// that merchant usually goes with, or Libre to classify later. Only expenses: money in and
+// card payments still ask on Inicio, where they need a choice the shade cannot offer.
+function recordQuickBankSuggestions(pending) {
+  const quick = new Set(pending.filter((notification) => notification.quick).map((notification) => String(notification.id)));
+  if (!quick.size) {
+    return;
+  }
+  const offered = new Set(bankSuggestions.map((suggestion) => suggestion.id));
+  const recorded = [];
+  bankSuggestions = bankSuggestions.filter((suggestion) => {
+    if (!quick.has(suggestion.id) || suggestion.kind !== "expense") {
+      return true;
+    }
+    const merchant = suggestion.merchant || `Compra con ${suggestion.bank}`;
+    const rule = findMerchantRule(merchant);
+    recorded.push(
+      addTransaction({
+        merchant,
+        amount: suggestion.amount,
+        category: rule?.category || FREE_CATEGORY_ID,
+        budgeted: false,
+        source: suggestion.source || rule?.source || "account",
+        date: suggestion.date
+      })
+    );
+    return false;
+  });
+  // Recorded now, or already in the app (entered by hand meanwhile): forgotten either way.
+  const done = [...quick].filter((id) => !bankSuggestions.some((suggestion) => suggestion.id === id) || !offered.has(id));
+  try {
+    nativeBankNotifications()?.dismiss({ ids: done })?.catch?.(() => {});
+  } catch {}
+  if (!recorded.length) {
+    return;
+  }
+  saveState();
+  const unfiled = recorded.filter((transaction) => !transaction.labeled).length;
+  const classify = unfiled ? " Elige su categoría en Movimientos." : "";
+  if (recorded.length === 1) {
+    showUndoSnackbar(recorded[0].id, `${recorded[0].merchant}, desde la notificación de Nu.${classify}`);
+  } else {
+    showNoticeSnackbar(`Registré ${recorded.length} gastos que confirmaste desde las notificaciones de Nu.${classify}`, { renderNow: false });
+  }
 }
 
 async function refreshBankSuggestions({ recheck = true } = {}) {
@@ -8383,6 +8432,7 @@ async function refreshBankSuggestions({ recheck = true } = {}) {
     }
     const read = readSuggestions(pending, { transactions: state.transactions, extras: state.budgetExtras, creditPayments: state.creditPayments });
     bankSuggestions = read.suggestions;
+    recordQuickBankSuggestions(pending);
     // A purchase given back before it was confirmed: neither is offered, and the phone
     // forgets both.
     if (read.settled.length) {

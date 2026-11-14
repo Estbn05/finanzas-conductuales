@@ -73,6 +73,10 @@
         </service>
 
         <receiver
+            android:name=".BankSuggestionActionReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".FreeMoneyWidgetProvider"
             android:exported="false">
             <intent-filter>

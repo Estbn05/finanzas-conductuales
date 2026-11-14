@@ -141,7 +141,8 @@ test("pending suggestions: newest first, without the ones already recorded", () 
       notification("Compra", "Compraste $7.000 en Bus", at("2026-10-12T11:00:00")),
       notification("Hola", "Tu extracto ya está disponible.", at("2026-10-12T12:00:00"))
     ],
-    { transactions: [{ amount: 7_000, date: "2026-10-12" }] }
+    { transactions: [{ amount: 7_000, date: "2026-10-12" }] },
+    at("2026-10-12T18:00:00")
   );
   assert.deepEqual(
     list.map((item) => item.merchant || item.origin),

@@ -29,6 +29,11 @@ final class BankSuggestionNotifier {
     private static final long FRESH_MS = 15 * 60 * 1000;
     private static final Pattern AMOUNT = Pattern.compile("\\$\\s?\\d|\\d{1,3}(\\.\\d{3})+,\\d{2}");
     private static final Pattern MOVEMENT = Pattern.compile("compra|pag|envi|recib|retir|transfer|devoluci|reembols|revers|lleg|abon|consign");
+    // Money that went out (the app's "expense"): only these get "Registrar" in the shade.
+    // Money in, refunds and card payments still open the app, where they need a choice.
+    // Same reading as bank-notifications.js.
+    private static final Pattern OUTGOING = Pattern.compile("\\b(compra(ste)?|pag(o|aste|ado)|retir(o|aste)|transferiste|enviaste|debito|cargo)\\b");
+    private static final Pattern NOT_OUTGOING = Pattern.compile("pagaste tu tarjeta|recibimos tu pago|pago (a|de) tu tarjeta|abonaste a tu tarjeta|reembolso|devolucion|devolvimos|reversion|reversamos|recibiste|te (llego|envio|enviaron|transfirieron|pagaron|consignaron)");
     private static final Pattern NOT_A_MOVEMENT = Pattern.compile("codigo|clave|rechaz|declin|oferta|promo|cuota de manejo|no pudimos|fallid|faltan fondos|fondos insuficientes|saldo insuficiente|vuelve a intentar|intenta de nuevo|intentar de nuevo");
 
     private BankSuggestionNotifier() {}
@@ -37,10 +42,19 @@ final class BankSuggestionNotifier {
         return BankNotificationListener.prefs(context).getBoolean(KEY_NOTIFY, true);
     }
 
-    static boolean looksLikeMovement(String title, String body) {
-        String words = Normalizer.normalize(title + " " + body, Normalizer.Form.NFD)
+    private static String plain(String title, String body) {
+        return Normalizer.normalize(title + " " + body, Normalizer.Form.NFD)
             .replaceAll("\\p{M}", "")
             .toLowerCase(Locale.ROOT);
+    }
+
+    static boolean looksLikeExpense(String title, String body) {
+        String words = plain(title, body);
+        return OUTGOING.matcher(words).find() && !NOT_OUTGOING.matcher(words).find();
+    }
+
+    static boolean looksLikeMovement(String title, String body) {
+        String words = plain(title, body);
         return AMOUNT.matcher(words).find() && MOVEMENT.matcher(words).find() && !NOT_A_MOVEMENT.matcher(words).find();
     }
 
@@ -73,12 +87,24 @@ final class BankSuggestionNotifier {
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(tap)
             .setAutoCancel(true);
+        if (looksLikeExpense(title, body)) {
+            builder
+                .addAction(0, "Registrar", action(context, id, BankSuggestionActionReceiver.ACTION_RECORD, 1))
+                .addAction(0, "No era gasto", action(context, id, BankSuggestionActionReceiver.ACTION_DISMISS, 2));
+        }
         try {
             manager.notify(notificationId(id), builder.build());
         } catch (SecurityException notAllowed) {
             // POST_NOTIFICATIONS was taken back: the movement still waits on Inicio.
             Log.i("BankNotif", "suggest refused by Android");
         }
+    }
+
+    private static PendingIntent action(Context context, String id, String what, int salt) {
+        Intent intent = new Intent(context, BankSuggestionActionReceiver.class)
+            .setAction(what)
+            .putExtra(BankSuggestionActionReceiver.EXTRA_ID, id);
+        return PendingIntent.getBroadcast(context, notificationId(id) + salt, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     /** The suggestion was recorded or dismissed in the app: its "¿Lo registras?" goes too. */

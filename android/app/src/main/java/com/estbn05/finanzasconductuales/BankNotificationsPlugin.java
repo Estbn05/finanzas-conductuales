@@ -16,11 +16,26 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import java.util.HashSet;
 import java.util.Set;
 import org.json.JSONArray;
-import org.json.JSONObject;
 
 /** The app's side of BankNotificationListener: turn it on/off and collect what it kept. */
 @CapacitorPlugin(name = "BankNotifications")
 public class BankNotificationsPlugin extends Plugin {
+    // The plugin of the running app, if any: a button pressed in the shade while the app
+    // is open tells it to read its notices again (event "pendingChanged").
+    private static volatile BankNotificationsPlugin live;
+
+    @Override
+    public void load() {
+        live = this;
+    }
+
+    static void pendingChanged() {
+        BankNotificationsPlugin plugin = live;
+        if (plugin != null) {
+            plugin.notifyListeners("pendingChanged", new JSObject());
+        }
+    }
+
     /** enabled: turned on in the app. permission: Android's notification access granted. */
     @PluginMethod
     public void status(PluginCall call) {
@@ -141,19 +156,11 @@ public class BankNotificationsPlugin extends Plugin {
             ids.add(requested.optString(i));
         }
         Context context = getContext();
-        JSONArray pending = BankNotificationListener.readPending(context);
-        JSONArray kept = new JSONArray();
-        for (int i = 0; i < pending.length(); i++) {
-            JSONObject item = pending.optJSONObject(i);
-            if (item != null && !ids.contains(item.optString("id"))) {
-                kept.put(item);
-            }
-        }
+        BankNotificationListener.forget(context, ids);
         // Recorded or dismissed in the app: its "¿Lo registras?" is no longer needed.
         for (String id : ids) {
             BankSuggestionNotifier.cancel(context, id);
         }
-        BankNotificationListener.writePending(context, kept);
         call.resolve();
     }
 }
