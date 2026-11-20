@@ -416,3 +416,19 @@ async function getCloudSessionForRequest(cloud) {
 
   return getStoredCloudSession(cloud, backup);
 }
+
+// Anonymous rows (usage events, comments) for insert-only tables: no session needed, and
+// nothing is read back. Throws when they did not get there, so the caller keeps them.
+export async function sendAnonymousRows(table, rows) {
+  if (!["app_events", "app_feedback"].includes(table) || !rows?.length) {
+    return;
+  }
+  const cloud = getCloudClient();
+  if (!cloud) {
+    throw new Error("Sin conexión con la nube");
+  }
+  const { error } = await withCloudTimeout(cloud.from(table).insert(rows), "Enviar");
+  if (error) {
+    throw error;
+  }
+}

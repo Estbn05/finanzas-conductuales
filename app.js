@@ -21,7 +21,7 @@ import {
   resolvePeriodIncome,
   settlePeriodIncomeAtOnboarding,
   spendByCategory as getSpendByCategory
-} from "./finance-core.js?v=1.1.119";
+} from "./finance-core.js?v=1.1.120";
 import {
   SMALL_EXPENSE_THRESHOLD,
   categoryTrend,
@@ -34,12 +34,12 @@ import {
   periodMovements,
   smallExpenses,
   weekdayPattern
-} from "./movements.js?v=1.1.119";
-import { isStale, looksLikeEarlyPay, looksLikePay, readSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.119";
-import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.119";
-import { bankBoxKey, matchPockets, readPocketsFromScreens, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.119";
-import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.119";
-import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.119";
+} from "./movements.js?v=1.1.120";
+import { isStale, looksLikeEarlyPay, looksLikePay, readSuggestions, unreadableNotifications } from "./bank-notifications.js?v=1.1.120";
+import { categoryIntent, suggestCategory } from "./categorize.js?v=1.1.120";
+import { bankBoxKey, matchPockets, readPocketsFromScreens, reconcileRows, reconcileStatus, reconcileSummary } from "./reconcile.js?v=1.1.120";
+import { periodExportMarkdown, periodReview } from "./period-review.js?v=1.1.120";
+import { duePlans, normalizeRepeat, plannedTotal, registerOccurrence, skipOccurrence, undoOccurrence } from "./planned.js?v=1.1.120";
 import {
   DEFAULT_MERCHANT,
   DEFAULT_REMINDER_TIME,
@@ -88,7 +88,7 @@ import {
   remoteChangedSinceLastSync,
   CREDIT_PAYMENTS_LIMIT,
   uid
-} from "./state-model.js?v=1.1.119";
+} from "./state-model.js?v=1.1.120";
 import {
   clearStoredCloudSession,
   deleteCloudAccount,
@@ -101,10 +101,12 @@ import {
   onCloudAuthChange,
   requestPasswordReset,
   saveCloudState,
+  sendAnonymousRows,
   signInToCloud,
   signOutFromCloud,
   signUpToCloud
-} from "./sync-client.js?v=1.1.119";
+} from "./sync-client.js?v=1.1.120";
+import { createMetrics } from "./metrics.js?v=1.1.120";
 
 const STORAGE_KEY = "finanzas-conductuales:v1";
 const SUPPORT_EMAIL = "yefry.avila.zuluaga@gmail.com";
@@ -392,8 +394,30 @@ let bankUnreadable = [];
 let extraDraft = null;
 // The pay a bank notification seems to be, prefilling "¿Cuánto te llegó?".
 let payDraft = null;
+// Anonymous usage statistics (metrics.js): event names and small flags, never money or
+// names. On unless turned off in Datos; sent in batches when there is a connection.
+const APP_BUILD_VERSION = new URL(import.meta.url).searchParams.get("v") || "";
+const metrics = createMetrics({
+  storage: (() => {
+    try {
+      return window.localStorage;
+    } catch {
+      return null;
+    }
+  })(),
+  send: (rows) => sendAnonymousRows("app_events", rows),
+  version: APP_BUILD_VERSION,
+  platform: window.Capacitor?.getPlatform?.() || "web"
+});
+let metricsFlushTimer = 0;
+let lastOpenTrackedAt = 0;
+// What is being written in "Enviar comentario", kept if sending fails.
+let feedbackDraft = { message: "", contact: "" };
+let feedbackError = "";
+let feedbackSending = false;
 
 render();
+bindMetrics();
 initializeNativeNotificationActions();
 refreshNativeNotificationPermission({ renderNow: true });
 bindHardwareBackButton();
@@ -1259,6 +1283,10 @@ function render() {
           ${NAV_ITEMS.map((item) => renderNavItem(item)).join("")}
         </nav>
         <div class="menu-tools">
+          <button class="nav-item" type="button" data-action="open-feedback">
+            <span class="nav-number" aria-hidden="true">${renderIcon("list")}</span>
+            <span>Enviar comentario</span>
+          </button>
           ${renderSyncStatusLine()}
         </div>
       </div>
@@ -1557,6 +1585,13 @@ function renderThemeSwitcher() {
       <div class="theme-options">
         <button class="theme-choice ${haptics ? "is-active" : ""}" type="button" data-action="set-haptics" data-haptics-choice="on" aria-pressed="${haptics}">Sí</button>
         <button class="theme-choice ${haptics ? "" : "is-active"}" type="button" data-action="set-haptics" data-haptics-choice="off" aria-pressed="${!haptics}">No</button>
+      </div>
+    </div>
+    <div class="theme-switcher" role="group" aria-label="Enviar estadísticas anónimas de uso">
+      <span>Estadísticas anónimas de uso</span>
+      <div class="theme-options">
+        <button class="theme-choice ${metrics.isOn() ? "is-active" : ""}" type="button" data-action="set-metrics" data-metrics-choice="on" aria-pressed="${metrics.isOn()}">Sí</button>
+        <button class="theme-choice ${metrics.isOn() ? "" : "is-active"}" type="button" data-action="set-metrics" data-metrics-choice="off" aria-pressed="${!metrics.isOn()}">No</button>
       </div>
     </div>
     <div class="theme-switcher" role="group" aria-label="Cambiar tema">
@@ -2856,6 +2891,7 @@ async function readBankScreens() {
     return;
   }
   const { fills, unmatched } = matchPockets(pockets, currentReconcileRows());
+  trackEvent("screens_read", { images: images.length, pockets: pockets.length, filled: Object.keys(fills).length, unmatched: unmatched.length });
   const today = todayKey();
   const checks = { ...(state.bankChecks || {}) };
   Object.entries(fills).forEach(([key, amount]) => {
@@ -2869,6 +2905,109 @@ async function readBankScreens() {
     ? ` No supe de qué categoría es: ${unmatched.join(", ")}. Ponle esa cajita en la categoría (Editar → ¿En qué cajita de tu banco está?).`
     : "";
   showNoticeSnackbar(`Leí ${pockets.length} cajitas y llené ${filled}.${left}`, { duration: 9000, renderNow: false });
+  render();
+}
+
+function trackEvent(name, props = {}) {
+  try {
+    if (metrics.track(name, props)) {
+      window.clearTimeout(metricsFlushTimer);
+      metricsFlushTimer = window.setTimeout(flushMetrics, 10_000);
+    }
+  } catch {}
+}
+
+function flushMetrics() {
+  if (navigator.onLine === false) {
+    return;
+  }
+  metrics.flush().catch(() => {});
+}
+
+function trackAppOpen(resumed) {
+  if (Date.now() - lastOpenTrackedAt < 30 * 60_000) {
+    return;
+  }
+  lastOpenTrackedAt = Date.now();
+  trackEvent("app_open", { resumed, onboarded: !profileNeedsOnboarding(), categories: state.budgetJobs.length });
+}
+
+// One "app_open" per launch or per return after half an hour, errors the user never sees,
+// and whatever is waiting is sent when the app goes to the background.
+function bindMetrics() {
+  trackAppOpen(false);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      flushMetrics();
+    } else {
+      trackAppOpen(true);
+    }
+  });
+  window.addEventListener("error", (event) => trackEvent("error", { kind: "error", msg: String(event.message || "").slice(0, 40) }));
+  window.addEventListener("unhandledrejection", (event) =>
+    trackEvent("error", { kind: "promise", msg: String(event.reason?.message || event.reason || "").slice(0, 40) })
+  );
+  window.setTimeout(flushMetrics, 5_000);
+}
+
+function renderFeedbackSheet() {
+  return `
+    <div class="sheet-backdrop" role="presentation" data-action="close-plan-sheet">
+      <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="feedback-title">
+        <div class="sheet-handle"></div>
+        <div class="sheet-heading">
+          <div><p class="eyebrow">Menú</p><h2 id="feedback-title">Enviar comentario</h2></div>
+          <button class="icon-btn muted" type="button" data-action="close-plan-sheet" aria-label="Cerrar">${renderIcon("close")}</button>
+        </div>
+        <form id="feedback-form" class="sheet-form">
+          <label class="sheet-field">
+            <span class="sheet-label">¿Qué te gustó, qué te costó o qué le falta?</span>
+            <textarea name="message" rows="5" maxlength="2000" required placeholder="Ej. No entendí qué es Reservado">${escapeHtml(feedbackDraft.message)}</textarea>
+          </label>
+          <label class="sheet-field">
+            <span class="sheet-label">Correo o WhatsApp (opcional)</span>
+            <input name="contact" type="text" maxlength="120" autocomplete="off" placeholder="Solo si quieres que te respondamos" value="${escapeAttr(feedbackDraft.contact)}">
+          </label>
+          <p class="setaside-note">Se envía sin tus datos de dinero. No pongas números de cuenta ni claves.</p>
+          ${feedbackError ? `<p class="form-error" role="alert">${escapeHtml(feedbackError)}</p>` : ""}
+          <button class="btn primary" type="submit" ${feedbackSending ? "disabled" : ""}>${feedbackSending ? "Enviando…" : "Enviar"}</button>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+async function handleFeedbackSubmit(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  feedbackDraft = { message: String(data.get("message") || "").trim().slice(0, 2000), contact: String(data.get("contact") || "").trim().slice(0, 120) };
+  if (!feedbackDraft.message) {
+    feedbackError = "Escribe tu comentario.";
+    render();
+    return;
+  }
+  feedbackError = "";
+  feedbackSending = true;
+  render();
+  try {
+    await sendAnonymousRows("app_feedback", [
+      {
+        // Tied to the usage statistics only while they are on.
+        install_id: metrics.isOn() ? metrics.installId() : globalThis.crypto?.randomUUID?.() || metrics.installId(),
+        message: feedbackDraft.message,
+        contact: feedbackDraft.contact,
+        app_version: APP_BUILD_VERSION,
+        platform: window.Capacitor?.getPlatform?.() || "web"
+      }
+    ]);
+    feedbackDraft = { message: "", contact: "" };
+    planSheet = "";
+    trackEvent("feedback_sent");
+    showNoticeSnackbar("Gracias. Lo leemos todo.", { renderNow: false });
+  } catch {
+    feedbackError = "No se pudo enviar. Revisa tu conexión e intenta otra vez: tu texto sigue aquí.";
+  }
+  feedbackSending = false;
   render();
 }
 
@@ -3586,6 +3725,10 @@ function renderSetAsideSheet() {
 }
 
 function renderPlanSheet() {
+  if (planSheet === "feedback") {
+    return renderFeedbackSheet();
+  }
+
   if (planSheet === "pay-received") {
     return renderPayReceivedSheet();
   }
@@ -5745,6 +5888,8 @@ function bindEvents() {
     transactionForm.addEventListener("submit", handleTransactionSubmit);
   }
 
+  document.querySelector("#feedback-form")?.addEventListener("submit", handleFeedbackSubmit);
+
   const transactionEditForm = document.querySelector("#transaction-edit-form");
   if (transactionEditForm) {
     transactionEditForm.addEventListener("submit", handleTransactionEditSubmit);
@@ -6052,6 +6197,7 @@ function bindOnboardingFlowV2(form) {
 
   const showStep = (step) => {
     modal.dataset.onboardingStep = String(step);
+    trackEvent("onboarding_step", { step });
     form.querySelectorAll("[data-step]").forEach((section) => section.classList.toggle("is-active", Number(section.dataset.step) === step));
     modal.querySelectorAll(".onboarding-progress span").forEach((dot, index) => dot.classList.toggle("is-active", index === step - 1));
     progress?.setAttribute("aria-label", `Paso ${step} de 3`);
@@ -6163,6 +6309,7 @@ function handleOnboardingSubmit(event) {
     error.textContent = stepOneError || stepTwoError;
     return;
   }
+  trackEvent("onboarding_done", { categories: form.querySelectorAll("[data-onboarding-category-chip].is-active").length });
 
   const data = new FormData(form);
   const incomeCadence = INCOME_CADENCE_VALUES.includes(data.get("incomeCadence"))
@@ -6563,6 +6710,8 @@ function handleAction(event) {
   const section = event.currentTarget.dataset.section;
   const category = event.currentTarget.dataset.category;
   const interfaceOnlyActions = new Set([
+    "set-metrics",
+    "open-feedback",
     "toggle-menu",
     "close-menu",
     "open-expense",
@@ -6714,6 +6863,14 @@ function handleAction(event) {
     "close-plan-sheet": () => {
       planSheet = "";
       creditDraft = null;
+      feedbackError = "";
+    },
+    "open-feedback": () => {
+      planSheet = "feedback";
+      menuOpen = false;
+    },
+    "set-metrics": () => {
+      metrics.setOn(event.currentTarget.dataset.metricsChoice === "on");
     },
     "release-fund": () => {
       releaseFund(id);
@@ -7384,6 +7541,7 @@ function handleTransactionSubmit(event) {
     showNoticeSnackbar(state.lastAlert, { renderNow: false });
   } else {
     const transaction = addTransaction({ merchant, description, amount, category, budgeted, oneOff, source, calendarEventId, date });
+    trackEvent("expense_added", { via: bankNotificationId ? "bank" : calendarEventId ? "planned" : "manual", otherDay: date !== todayKey(), labeled: transaction.labeled });
     if (bankNotificationId) {
       forgetBankNotification(bankNotificationId);
     }
@@ -8443,6 +8601,7 @@ function recordQuickBankSuggestions(pending) {
   if (!recorded.length) {
     return;
   }
+  trackEvent("expense_added", { via: "bank_shade", count: recorded.length });
   saveState();
   const unfiled = recorded.filter((transaction) => !transaction.labeled).length;
   const classify = unfiled ? " Elige su categoría en Movimientos." : "";
@@ -8617,6 +8776,7 @@ function registerBankPay(id) {
 
 async function enableBankNotifications() {
   const plugin = nativeBankNotifications();
+  trackEvent("bank_enabled");
   planSheet = "";
   if (!plugin) {
     render();
@@ -10311,6 +10471,7 @@ function activateView(view) {
   if (view !== state.activeView) {
     scrollToTop();
     movementsPeriodOffset = 0;
+    trackEvent("view", { name: view });
   }
   state.activeView = view;
   menuOpen = false;
